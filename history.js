@@ -40,7 +40,8 @@ async function addHistory(transaction) {
     // Nếu đang ở tab lịch sử và ngày hiển thị là hôm nay, cập nhật lại
     const todayStr = new Date().toISOString().slice(0,10);
     const currentDateStr = currentDisplayDate.toISOString().slice(0,10);
-    if (currentDateStr === todayStr && document.getElementById('historyView')?.classList.contains('active')) {
+    const historyView = document.getElementById('historyView');
+    if (currentDateStr === todayStr && historyView && historyView.classList.contains('active')) {
     debouncedRenderHistory();
 }
 }
@@ -60,10 +61,11 @@ function renderHistoryByDate(dateObj) {
     }
 
     // Lọc giao dịch theo ngày
-    let filtered = historyData.filter(h => h.date?.slice(0,10) === dateStr);
+    let filtered = historyData.filter(h => h.date && h.date.slice(0,10) === dateStr);
     
     // Lọc theo select
-    const filterValue = document.getElementById('historyFilter')?.value || 'all';
+    const historyFilter = document.getElementById('historyFilter');
+    const filterValue = historyFilter && historyFilter.value ? historyFilter.value : 'all';
     if (filterValue !== 'all') {
         if (filterValue === 'cash') {
             filtered = filtered.filter(h => h.paymentMethod === 'cash');
@@ -102,9 +104,9 @@ function renderHistoryByDate(dateObj) {
                     <span>${h.paymentMethod === 'cash' ? '💰 Tiền mặt' : '💳 Chuyển khoản'}</span>
                 </div>
                 ${totalItems > 0 ? `<div class="history-detail">📦 Số lượng: ${totalItems} món</div>` : ''}
-                ${h.tableName ? `<div class="history-detail">📌 ${h.customer?.name ? `👤 ${h.customer.name}` : `🪑 ${h.tableName}`}</div>` : ''}
+                ${h.tableName ? `<div class="history-detail">📌 ${h.customer && h.customer.name ? `👤 ${h.customer.name}` : `🪑 ${h.tableName}`}</div>` : ''}
                 ${h.customer && !h.tableName ? `<div class="history-detail">👤 ${h.customer.name}</div>` : ''}
-                ${h.items?.length ? `<div class="history-detail">📋 ${h.items.map(i => `${i.name} x${i.qty}`).join(', ')}</div>` : ''}
+                ${h.items && h.items.length ? `<div class="history-detail">📋 ${h.items.map(i => `${i.name} x${i.qty}`).join(', ')}</div>` : ''}
             </div>
         `;
     }).join('');

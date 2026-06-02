@@ -1,15 +1,15 @@
 // ========== BÁO CÁO DOANH THU & THỐNG KÊ NÂNG CAO (CÓ LỊCH NGÀY) ==========
 
 let currentReportDate = new Date();
-let cachedTransactions = null, cachedTables = null, cachedCustomers = null;
+let cachedTransactions = null, cachedReportTables = null, cachedCustomers = null;
 let lastCacheTime = 0;
 const CACHE_TTL = 5000;
 let reportDateDebounceTimer;
 
 async function getReportData() {
     const now = Date.now();
-    if (cachedTransactions && cachedTables && cachedCustomers && (now - lastCacheTime) < CACHE_TTL) {
-        return { transactions: cachedTransactions, tables: cachedTables, customers: cachedCustomers };
+    if (cachedTransactions && cachedReportTables && cachedCustomers && (now - lastCacheTime) < CACHE_TTL) {
+        return { transactions: cachedTransactions, tables: cachedReportTables, customers: cachedCustomers };
     }
     const [transactions, tables, customers] = await Promise.all([
         DB.getAll('transactions'),
@@ -17,7 +17,7 @@ async function getReportData() {
         DB.getAll('customers')
     ]);
     cachedTransactions = transactions;
-    cachedTables = tables;
+    cachedReportTables = tables;
     cachedCustomers = customers;
     lastCacheTime = now;
     return { transactions, tables, customers };
@@ -25,7 +25,7 @@ async function getReportData() {
 
 function resetReportCache() {
     cachedTransactions = null;
-    cachedTables = null;
+    cachedReportTables = null;
     cachedCustomers = null;
     lastCacheTime = 0;
 }
@@ -67,7 +67,7 @@ async function renderReport() {
     const dateDisplay = isToday ? `Hôm nay - ${dateTitle}` : dateTitle;
 
     // 1. Đã thanh toán (transactions trong ngày) - bao gồm cả thanh toán nợ
-    const selectedTxs = transactions.filter(tx => tx.date?.slice(0, 10) === selectedDateStr);
+    const selectedTxs = transactions.filter(tx => tx.date && tx.date.slice(0, 10) === selectedDateStr);
     let paidOrders = 0, paidRevenue = 0;
     let cashAmount = 0, cashCount = 0;
     let transferAmount = 0, transferCount = 0;
@@ -101,7 +101,7 @@ async function renderReport() {
     }
 
     // 2. Chưa thanh toán (bàn đang phục vụ)
-    const pendingTables = tables.filter(t => t.status === 'occupied' && t.items?.length > 0 && (t.total || 0) > 0);
+    const pendingTables = tables.filter(t => t.status === 'occupied' && t.items && t.items.length > 0 && (t.total || 0) > 0);
     const pendingCount = pendingTables.length;
     const pendingAmount = pendingTables.reduce((sum, t) => sum + (t.total || 0), 0);
 
@@ -109,7 +109,7 @@ async function renderReport() {
     let debtTodayCount = 0, debtTodayAmount = 0;
     for (const cust of customers) {
         const debtHistory = cust.debtHistory || [];
-        const todayDebts = debtHistory.filter(d => d.date?.slice(0, 10) === selectedDateStr);
+        const todayDebts = debtHistory.filter(d => d.date && d.date.slice(0, 10) === selectedDateStr);
         if (todayDebts.length > 0) {
             debtTodayCount++;
             const totalToday = todayDebts.reduce((s, d) => s + (d.amount || 0), 0);
@@ -231,7 +231,7 @@ function formatDateDisplay(dateStr) {
 async function exportReportByDate() {
     const dateStr = currentReportDate.toISOString().slice(0, 10);
     const transactions = await DB.getAll('transactions');
-    const txs = transactions.filter(tx => tx.date?.slice(0, 10) === dateStr);
+    const txs = transactions.filter(tx => tx.date && tx.date.slice(0, 10) === dateStr);
     let takeawayTotal = 0, dineinTotal = 0, cashTotal = 0, transferTotal = 0;
     let cashCount = 0, transferCount = 0;
     for (const tx of txs) {

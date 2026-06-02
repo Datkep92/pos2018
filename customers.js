@@ -14,7 +14,7 @@ async function quickAddCustomer() {
         return;
     }
     // Kiểm tra trùng tên (không phân biệt hoa thường)
-    const existing = window.customers?.find(c => c.name.toLowerCase() === name.toLowerCase());
+    const existing = window.customers ? window.customers.find(c => c.name.toLowerCase() === name.toLowerCase()) : null;
     if (existing) {
         showToast(`Khách "${name}" đã tồn tại.`, 'error');
         return;
@@ -168,7 +168,8 @@ function renderCustomerList() {
     const customers = window.customers || [];
     const container = document.getElementById('customerListContainer');
     if (!container) return;
-    const keyword = document.getElementById('customerSearchInput')?.value.toLowerCase() || '';
+    const customerSearchInput = document.getElementById('customerSearchInput');
+    const keyword = customerSearchInput && customerSearchInput.value ? customerSearchInput.value.toLowerCase() : '';
     let filtered = customers;
     if (keyword) filtered = customers.filter(c => c.name.toLowerCase().includes(keyword) || c.phone.includes(keyword));
     const totalNet = filtered.reduce((s, c) => s + (c.totalDebt || 0), 0);
@@ -293,7 +294,8 @@ async function updateCustomerDebt(customerId, amount, type, note) {
     renderDebtList();
     
     // Nếu đang ở sub-tab nợ, cập nhật lại danh sách nợ trong tab đó
-    if (document.querySelector('.sub-tab.active')?.getAttribute('data-subtab') === 'debt') {
+    const activeSubTab = document.querySelector('.sub-tab.active');
+    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
         if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
     }
 }
@@ -364,7 +366,8 @@ async function addCustomerDebt(customerId, amount, note) {
     window.customers = await DB.getAll('customers');
     renderCustomerList();
     renderDebtList();
-    if (document.querySelector('.sub-tab.active')?.getAttribute('data-subtab') === 'debt') {
+    const activeSubTab = document.querySelector('.sub-tab.active');
+    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
         if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
     }
 }
@@ -522,7 +525,7 @@ async function createCustomerFromInput() {
     }
     
     // Kiểm tra trùng tên (không phân biệt hoa thường)
-    const existing = window.customers?.find(c => c.name.toLowerCase() === name.toLowerCase());
+    const existing = window.customers ? window.customers.find(c => c.name.toLowerCase() === name.toLowerCase()) : null;
     if (existing) {
         // Nếu trùng, hỏi có muốn chọn khách đó không
         if (confirm(`Khách "${existing.name}" đã tồn tại. Bạn có muốn chọn khách này không?`)) {
@@ -544,7 +547,7 @@ async function createCustomerFromInput() {
 }
 
 function selectCustomer(customerId) {
-    const customer = window.customers?.find(c => c.id === customerId);
+    const customer = window.customers ? window.customers.find(c => c.id === customerId) : null;
     if (customer && pendingCustomerCallback) {
         pendingCustomerCallback(customer);
         pendingCustomerCallback = null;

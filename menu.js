@@ -82,8 +82,7 @@ async function filterMenuByCategory(categoryId) {
            <div class="menu-item-card" onclick="showItemDetail('${item.id}')">
     <div class="menu-item-name">${escapeHtml(item.name)}</div>
     <div class="menu-item-price">
-        ${formatMoney(item.hasVariants ? (item.variants[0]?.price || 0) : item.price)}
-    </div>
+        ${formatMoney(item.hasVariants && item.variants && item.variants[0] ? (item.variants[0].price || 0) : item.price)}
 
     <div class="menu-item-meta">
         <div class="menu-item-ingredients">
@@ -113,7 +112,7 @@ async function showItemDetail(itemId) {
         </div>
         <div class="item-detail-row">
             <div class="item-detail-label">📂 Danh mục</div>
-            <div class="item-detail-value">${escapeHtml(menuCategories.find(c => c.id == item.categoryId)?.name || 'Không')}</div>
+            <div class="item-detail-value">${(() => { const menuCategory = menuCategories.find(c => c.id == item.categoryId); return escapeHtml(menuCategory ? menuCategory.name : 'Không'); })()}</div>
         </div>
     `;
     
@@ -131,7 +130,7 @@ async function showItemDetail(itemId) {
             const ings = window.ingredients || [];
             const ingList = item.ingredients.map(ing => {
                 const ingObj = ings.find(i => i.id == ing.ingredientId);
-                return `${ingObj?.name || '???'} (${ing.quantity} ${ingObj?.unit || ''})`;
+                return `${ingObj ? ingObj.name : '???'} (${ing.quantity} ${ingObj ? ingObj.unit : ''})`;
             }).join(', ');
             html += `<div class="item-detail-row">
                 <div class="item-detail-label">🥄 Nguyên liệu</div>
@@ -570,7 +569,8 @@ function renderOrderMenuByCategory(categoryId = 'all', searchTerm = '') {
 
 function filterOrderMenuByCategory(categoryId) {
     window.currentOrderCategory = categoryId;
-    const searchTerm = document.getElementById('menuSearchInput2')?.value || '';
+    const menuSearchInput = document.getElementById('menuSearchInput2');
+    const searchTerm = menuSearchInput && menuSearchInput.value ? menuSearchInput.value : '';
     renderOrderMenuByCategory(categoryId, searchTerm);
     document.querySelectorAll('#orderCategories .category-chip').forEach(chip => {
         chip.classList.remove('active');

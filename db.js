@@ -352,7 +352,8 @@ async function lockTable(tableId, userId, timeout = 30000) {
     const lock = { userId, expiresAt: Date.now() + timeout, tableData: { ...table } };
     tableLocks.set(String(tableId), lock);
     setTimeout(() => {
-        if (tableLocks.get(String(tableId))?.expiresAt <= Date.now()) tableLocks.delete(String(tableId));
+        const existingLock = tableLocks.get(String(tableId));
+        if (existingLock && existingLock.expiresAt <= Date.now()) tableLocks.delete(String(tableId));
     }, timeout);
     return { success: true, lock };
 }
