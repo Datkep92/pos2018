@@ -2779,5 +2779,538 @@ body {
 }
 
 
-.table-card:active, .menu-item-card:active, .customer-card:active, .modal-content { will-change:transform; }
-/* Các thành phần bạn đã viết giữ nguyên, chỉ chú ý transition: all -> cụ thể */
+/* Mặc định cho desktop */
+.tables-grid {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+/* Mobile (dưới 768px) - xoay dọc */
+@media (max-width: 767px) and (orientation: portrait) {
+    .tables-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Mobile (dưới 768px) - xoay ngang */
+@media (max-width: 767px) and (orientation: landscape) {
+    .tables-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* iPad dọc (chiều rộng từ 768px đến 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+    .tables-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* ========== TỐI ƯU POPUP TRÊN IPAD (GIỮ NGUYÊN MODAL THÊM MÓN) ========== */
+@media (min-width: 768px) and (max-width: 1024px) {
+    /* Giới hạn chiều rộng modal, trừ orderModal */
+    .modal:not(#orderModal) .modal-content {
+        max-width: 560px !important;
+        width: 90% !important;
+        margin: 0 auto !important;
+        border-radius: 28px !important;
+    }
+
+    /* Thu nhỏ padding trong modal-body */
+    .modal:not(#orderModal) .modal-body {
+        padding: 16px !important;
+    }
+
+    /* Các dòng món trong chi tiết bàn - căn chỉnh gọn */
+    .detail-item-row {
+        padding: 8px 12px !important;
+        gap: 8px !important;
+    }
+    .detail-item-info {
+        min-width: 120px !important;
+    }
+    .detail-item-name {
+        font-size: 14px !important;
+    }
+    .detail-item-controls .btn-qty {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 14px !important;
+    }
+    .detail-item-total {
+        font-size: 14px !important;
+        min-width: 70px !important;
+    }
+
+    /* Nút hành động (thanh toán, ghi nợ...) */
+    .payment-method-btn,
+    .action-icon {
+        padding: 10px 0 !important;
+        font-size: 14px !important;
+    }
+    .action-icon {
+        font-size: 18px !important;
+    }
+
+    /* Tổng kết */
+    .detail-summary {
+        padding: 10px 12px !important;
+        font-size: 14px !important;
+    }
+    #detailTotalAmount {
+        font-size: 16px !important;
+    }
+
+    /* Các modal khác: chia bill, gộp bàn, tách bàn, chọn khách... */
+    .split-item-row {
+        padding: 8px !important;
+    }
+    .split-qty-input {
+        width: 60px !important;
+    }
+    .transfer-item-row {
+        padding: 8px !important;
+    }
+    .customer-select-item {
+        padding: 8px !important;
+    }
+    .customer-select-avatar {
+        width: 36px !important;
+        height: 36px !important;
+        font-size: 14px !important;
+    }
+    .debt-card {
+        padding: 10px !important;
+    }
+}
+
+/* ========== TỐI ƯU CHO IPAD (từ 768px đến 1024px) ========== */
+@media (min-width: 768px) and (max-width: 1024px) {
+
+    /* ---------- 1. MODAL THÊM MÓN (orderModal) – GIỮ NGUYÊN KHÔNG THU NHỎ, CHỈ ĐIỀU CHỈNH SỐ CỘT ---------- */
+    .order-modal-content {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 85vh !important;
+        max-height: 85vh !important;
+    }
+
+    /* Lưới món trong order modal: mặc định 4 cột (dọc) */
+    #orderModal .menu-grid-simple {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+    }
+
+    /* Khi iPad xoay ngang (width > 900px) chuyển thành 6 cột */
+    @media (min-width: 900px) {
+        #orderModal .menu-grid-simple {
+            grid-template-columns: repeat(6, 1fr);
+        }
+    }
+
+    /* ---------- 2. CÁC POPUP KHÁC (chi tiết bàn, thanh toán, chia bill, gộp bàn, tách bàn, chọn khách, ...) ---------- */
+    /* Giới hạn chiều rộng, căn giữa, thu nhỏ padding */
+    .modal:not(#orderModal) .modal-content {
+        max-width: 560px !important;
+        width: 90% !important;
+        margin: 0 auto !important;
+        border-radius: 28px !important;
+    }
+
+    .modal:not(#orderModal) .modal-body {
+        padding: 16px !important;
+    }
+
+    /* Danh sách món trong chi tiết bàn */
+    .detail-item-row {
+        padding: 8px 12px !important;
+        gap: 8px !important;
+    }
+    .detail-item-info {
+        min-width: 120px !important;
+    }
+    .detail-item-name {
+        font-size: 14px !important;
+    }
+    .detail-item-price {
+        font-size: 12px !important;
+    }
+    .detail-item-controls .btn-qty {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 14px !important;
+    }
+    .detail-item-total {
+        font-size: 14px !important;
+        min-width: 70px !important;
+    }
+
+    /* Nút thanh toán, action icons */
+    .payment-method-btn,
+    .action-icon {
+        padding: 8px 0 !important;
+        font-size: 14px !important;
+    }
+    .action-icon {
+        font-size: 18px !important;
+    }
+    .payment-method-btn + .payment-method-btn,
+    .action-icon + .action-icon {
+        margin-left: 12px;
+    }
+
+    /* Tổng kết */
+    .detail-summary {
+        padding: 8px 12px !important;
+        font-size: 14px !important;
+    }
+    #detailTotalAmount {
+        font-size: 16px !important;
+    }
+
+    /* Các modal: chia bill, gộp bàn, tách bàn, chọn khách, nợ... */
+    .split-item-row {
+        padding: 8px !important;
+    }
+    .split-qty-input {
+        width: 60px !important;
+    }
+    .transfer-item-row {
+        padding: 8px !important;
+    }
+    .customer-select-item {
+        padding: 8px !important;
+    }
+    .customer-select-avatar {
+        width: 36px !important;
+        height: 36px !important;
+        font-size: 14px !important;
+    }
+    .debt-card {
+        padding: 10px !important;
+    }
+
+    /* Điều chỉnh tiêu đề modal */
+    .modal-header {
+        padding: 12px 16px !important;
+    }
+    .modal-title {
+        font-size: 16px !important;
+    }
+}
+
+
+
+/* ========== TỐI ƯU HIỂN THỊ MÓN TRONG ORDER MODAL (CHỈ TÊN VÀ SIZE) ========== */
+/* Món không size */
+.menu-item-simple {
+    background: white;
+    border-radius: 16px;
+    padding: 16px 8px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: transform 0.1s, background 0.1s;
+    font-weight: 600;
+    font-size: 15px;
+    color: #1e3a2f;
+}
+.menu-item-simple:active {
+    transform: scale(0.96);
+    background: #f8f9fa;
+}
+
+/* Món có size */
+.menu-item-card-variant {
+    background: white;
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.menu-item-card-variant .menu-item-name {
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 12px;
+    color: #1e3a2f;
+}
+
+
+/* Điều chỉnh lưới món cho order modal */
+.menu-grid-simple {
+    display: grid;
+    gap: 12px;
+}
+
+/* Mặc định mobile dọc: 2 cột */
+.menu-grid-simple {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+/* Mobile ngang (>= 500px) : 4 cột */
+@media (min-width: 500px) and (max-width: 767px) and (orientation: landscape) {
+    .menu-grid-simple {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* iPad dọc (>= 768px) : 4 cột */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+    .menu-grid-simple {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* iPad ngang (>= 768px and orientation landscape) : 6 cột */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
+    .menu-grid-simple {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+/* Desktop (>= 1024px) : 6 cột */
+@media (min-width: 1024px) {
+    .menu-grid-simple {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+/* Đảm bảo các nút size nằm trên cùng một dòng */
+.variant-buttons {
+    display: flex;
+    flex-wrap: nowrap; /* Không xuống dòng */
+    justify-content: center;
+    gap: 6px;
+    overflow-x: auto; /* Cho phép cuộn ngang nếu cần, nhưng thường không */
+    -webkit-overflow-scrolling: touch;
+}
+.variant-order-btn {
+    flex-shrink: 0; /* Không co lại */
+    padding: 6px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+/* Các ô món có kích thước tối thiểu và không bị kéo dãn quá mức */
+.menu-item-simple, .menu-item-card-variant {
+    width: 100%; /* Chiếm hết ô grid */
+    max-width: 180px; /* Giới hạn tối đa, tránh quá to trên màn lớn */
+    margin: 0 auto; /* Căn giữa nếu cần */
+}
+/* Nếu muốn các ô có cùng kích thước chính xác, có thể set width cố định nhưng không linh hoạt */
+/* Tên món trong modal thêm món */
+.menu-item-card-variant .menu-item-name {
+    font-weight: 800; /* đậm hơn */
+    color: #1e3a2f; /* màu xanh đậm, có thể đổi theo ý */
+    font-size: 15px;
+    margin-bottom: 8px;
+    text-align: center;
+}
+
+/* Các nút size luôn nằm trên 1 dòng, không cuộn ngang, chữ đậm */
+.variant-buttons {
+    display: flex;
+    flex-wrap: wrap; /* Cho phép xuống dòng nếu quá hẹp, nhưng với kích thước ô cố định 150px thì 3 nút sẽ vừa */
+    justify-content: center;
+    gap: 6px;
+}
+.variant-order-btn {
+    font-weight: 700; /* đậm */
+    background: #c2d4e5;
+    border: none;
+    border-radius: 30px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: #e4063d;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.variant-order-btn:active {
+    background: #ddbd0a;
+    transform: scale(0.96);
+}
+
+/* Đảm bảo ô món có chiều rộng đủ để chứa 3 nút size */
+.menu-item-card-variant {
+    width: 150px; /* hoặc 140px tùy ý */
+}
+/* Nếu có 3 nút size như M, L, XL thì vẫn vừa */
+
+/* Đồng nhất màu sắc và font chữ cho tất cả tên món trong order modal */
+.menu-item-simple,
+.menu-item-card-variant .menu-item-name {
+    font-weight: 800 !important;
+    color: #157762 !important;
+    font-size: 15px;
+    text-align: center;
+}
+
+/* ========== IPAD (DỌC VÀ NGANG) - ORDER MODAL 2 CỘT ========== */
+
+/* iPad dọc (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+    #orderModal .modal-content {
+        max-width: 95% !important;
+        width: 95% !important;
+        height: 85vh !important;
+        max-height: 85vh !important;
+    }
+    
+    .order-modal-body {
+        display: grid;
+        grid-template-columns: 1.6fr 0.8fr;
+        gap: 16px;
+        padding: 16px !important;
+        height: calc(100% - 60px);
+        overflow: hidden;
+    }
+    
+    .order-categories {
+        grid-column: 1 / 2;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+    }
+    
+    /* MENU LƯỚI 3 CỘT, KHÔNG VUỐT NGANG, CHỈ CUỘN DỌC */
+    .menu-grid-simple {
+        grid-column: 1 / 2;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: calc(100% - 50px);
+    }
+    
+    /* GIỎ HÀNG - FULL CHIỀU CAO, CUỘN DỌC NẾU NHIỀU */
+    .temp-cart {
+        grid-column: 2 / 3;
+        grid-row: 1 / 3;
+        background: white;
+        border-radius: 20px;
+        padding: 16px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        height: 100%;
+    }
+    
+    .temp-cart-items {
+        flex: 1;
+        overflow-y: auto;
+        max-height: none;
+    }
+    
+    .temp-cart-total {
+        margin: 12px 0;
+        text-align: right;
+        font-weight: 800;
+        font-size: 16px;
+    }
+    
+    #tempCartActions {
+        margin-top: 12px;
+    }
+}
+
+/* iPad ngang (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
+    #orderModal .modal-content {
+        max-width: 96% !important;
+        width: 96% !important;
+        height: 88vh !important;
+        max-height: 88vh !important;
+    }
+    
+    .order-modal-body {
+        display: grid;
+        grid-template-columns: 1.8fr 0.7fr;
+        gap: 20px;
+        padding: 16px !important;
+        height: calc(100% - 60px);
+        overflow: hidden;
+    }
+    
+    .order-categories {
+        grid-column: 1 / 2;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+    }
+    
+    /* MENU LƯỚI 4 CỘT, KHÔNG VUỐT NGANG, CHỈ CUỘN DỌC */
+    .menu-grid-simple {
+        grid-column: 1 / 2;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: calc(100% - 50px);
+    }
+    
+    /* GIỎ HÀNG - FULL CHIỀU CAO, CUỘN DỌC NẾU NHIỀU */
+    .temp-cart {
+        grid-column: 2 / 3;
+        grid-row: 1 / 3;
+        background: white;
+        border-radius: 20px;
+        padding: 16px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        height: 100%;
+    }
+    
+    .temp-cart-items {
+        flex: 1;
+        overflow-y: auto;
+        max-height: none;
+    }
+    
+    .temp-cart-total {
+        margin: 12px 0;
+        text-align: right;
+        font-weight: 800;
+        font-size: 16px;
+    }
+    
+    #tempCartActions {
+        margin-top: 12px;
+    }
+}
+
+/* Cải thiện ô món trên iPad */
+@media (min-width: 768px) and (max-width: 1024px) {
+    .menu-item-simple,
+    .menu-item-card-variant {
+        min-height: 90px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    
+    .menu-item-card-variant .menu-item-name {
+        cursor: pointer;
+        margin-bottom: 10px;
+    }
+    
+    .variant-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    
+    .variant-order-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+}
+
