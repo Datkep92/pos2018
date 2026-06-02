@@ -341,10 +341,10 @@ async function showTransferTableModal(tableId) {
     attachTransferQtyEvents();
     document.getElementById('transferTableModal').style.display = 'flex';
 
-    // Xử lý xác nhận chuyển
+    // Remove old listener and attach new one
     const confirmBtn = document.getElementById('confirmTransferBtn');
-    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
-    const newConfirmBtn = document.getElementById('confirmTransferBtn');
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
     newConfirmBtn.onclick = async () => {
         const selectedItems = [];
         const inputs = document.querySelectorAll('#transferItemsList .transfer-qty-input');
@@ -362,24 +362,28 @@ async function showTransferTableModal(tableId) {
             return;
         }
 
-        // Cập nhật bàn nguồn (trừ món)
-        var remainingItems = sourceTable.items.map(function(i) { return Object.assign({}, i); });
-        for (let sel of selectedItems) {
-            const existing = remainingItems.find(i => i.name === sel.name);
-            if (existing) existing.qty -= sel.qty;
-        }
-        remainingItems = remainingItems.filter(i => i.qty > 0);
-        const newSourceTotal = remainingItems.reduce((s, i) => s + i.price * i.qty, 0);
-        await DB.update('tables', tid, { items: remainingItems, total: newSourceTotal });
+        try {
+            var remainingItems = sourceTable.items ? sourceTable.items.map(function(i) { return Object.assign({}, i); }) : [];
+            for (let sel of selectedItems) {
+                const existing = remainingItems.find(i => i.name === sel.name);
+                if (existing) existing.qty -= sel.qty;
+            }
+            remainingItems = remainingItems.filter(i => i.qty > 0);
+            const newSourceTotal = remainingItems.reduce((s, i) => s + i.price * i.qty, 0);
+            await DB.update('tables', tid, { items: remainingItems, total: newSourceTotal });
 
-        // Thêm vào bàn mới
-        const newTargetTotal = selectedItems.reduce((s, i) => s + i.price * i.qty, 0);
-        const targetTableExists = await DB.get('tables', newTableId);
-        if (!targetTableExists) {
-            showToast('Bàn đích không còn tồn tại!', 'error');
+            const newTargetTotal = selectedItems.reduce((s, i) => s + i.price * i.qty, 0);
+            const targetTableExists = await DB.get('tables', newTableId);
+            if (!targetTableExists) {
+                showToast('Bàn đích không còn tồn tại!', 'error');
+                return;
+            }
+            await DB.update('tables', newTableId, { items: selectedItems, total: newTargetTotal });
+        } catch (err) {
+            console.error('Lỗi chuyển bàn:', err);
+            showToast('Lỗi chuyển bàn!', 'error');
             return;
         }
-        await DB.update('tables', newTableId, { items: selectedItems, total: newTargetTotal });
 
         // KHÔNG xử lý công nợ (theo yêu cầu)
         closeModal('transferTableModal');
@@ -486,19 +490,23 @@ async function mergeTables(sourceTable, targetId) {
         return;
     }
 
-    // Cộng dồn món từ bàn nguồn vào bàn đích
-    var targetItems = targetTable.items ? targetTable.items.slice() : [];
-    var sourceItems = sourceTable.items ? sourceTable.items.slice() : [];
-    for (let srcItem of sourceItems) {
-        const existing = targetItems.find(function(i) { return i.name === srcItem.name; });
-        if (existing) existing.qty += srcItem.qty;
-        else targetItems.push(Object.assign({}, srcItem));
-    }
-    const newTotal = targetItems.reduce((sum, i) => sum + (i.price * i.qty), 0);
-    await DB.update('tables', targetId, { items: targetItems, total: newTotal, status: 'occupied' });
+    try {
+        var targetItems = targetTable.items ? targetTable.items.slice() : [];
+        var sourceItems = sourceTable.items ? sourceTable.items.slice() : [];
+        for (let srcItem of sourceItems) {
+            const existing = targetItems.find(function(i) { return i.name === srcItem.name; });
+            if (existing) existing.qty += srcItem.qty;
+            else targetItems.push(Object.assign({}, srcItem));
+        }
+        const newTotal = targetItems.reduce((sum, i) => sum + (i.price * i.qty), 0);
+        await DB.update('tables', targetId, { items: targetItems, total: newTotal, status: 'occupied' });
 
-    // Xóa bàn nguồn
-    await DB.remove('tables', sourceId);
+        await DB.remove('tables', sourceId);
+    } catch (err) {
+        console.error('Lỗi gộp bàn:', err);
+        showToast('Lỗi gộp bàn!', 'error');
+        return;
+    }
 
     await renderTables();
     closeModal('tableDetailModal');
@@ -619,14 +627,18 @@ function updateSplitTotal() {
 
 async function confirmSplitPayment() {
     const tableId = window._currentSplitTableId;
-    const originalTable = window._currentSplitTable;
-    if (!tableId || !originalTable) {
+    if (!tableId) {
         showToast('Lỗi: không tìm thấy thông tin bàn', 'error');
+        return;
+    }
+    const originalTable = await DB.get('tables', String(tableId));
+    if (!originalTable) {
+        showToast('Lỗi: bàn không còn tồn tại', 'error');
         return;
     }
 
     const splitItems = [];
-    const remainingItems = JSON.parse(JSON.stringify(originalTable.items));
+    const remainingItems = originalTable.items ? originalTable.items.map(function(i) { return Object.assign({}, i); }) : [];
 
     const rows = document.querySelectorAll('.split-item-row');
     for (let row of rows) {
@@ -655,15 +667,23 @@ async function confirmSplitPayment() {
     // Cập nhật bàn sau khi chia (giảm món)
     const finalItems = remainingItems.filter(i => i.qty > 0);
     const newTotal = finalItems.reduce((sum, i) => sum + (i.price * i.qty), 0);
-    await DB.update('tables', tableId, {
-        items: finalItems,
-        total: newTotal
-    });
+    try {
+        await DB.update('tables', tableId, {
+            items: finalItems,
+            total: newTotal
+        });
+    } catch (err) {
+        console.error('Lỗi cập nhật bàn:', err);
+        showToast('Lỗi cập nhật bàn sau chia!', 'error');
+        return;
+    }
 
-    // KHÔNG xử lý công nợ
-
-    // Ghi nhận thanh toán phần đã chọn
-    await processPaymentDirect('dinein', tableId, splitTotal, 'cash', splitItems);
+    try {
+        await processPaymentDirect('dinein', tableId, splitTotal, 'cash', splitItems);
+    } catch (err) {
+        console.error('Lỗi xử lý thanh toán chia hóa đơn:', err);
+        showToast('Lỗi xử lý thanh toán!', 'error');
+    }
 
     closeModal('splitBillModal');
     await renderTables();
@@ -791,8 +811,12 @@ function openAddMenuForDebtTable(tableId) {
 async function processPaymentDirect(type, tableId, amount, paymentMethod, customItems = null) {
     console.log('💰 Thanh toán:', { type, tableId, amount, paymentMethod, customItems });
 
-    if (typeof addTransaction === 'function') {
-        addTransaction(type === 'takeaway' ? 'takeaway' : (type === 'dinein' ? 'dinein' : 'debt_payment'), amount, paymentMethod);
+    try {
+        if (typeof addTransaction === 'function') {
+            addTransaction(type === 'takeaway' ? 'takeaway' : (type === 'dinein' ? 'dinein' : 'debt_payment'), amount, paymentMethod);
+        }
+    } catch (err) {
+        console.error('Lỗi ghi transaction:', err);
     }
 
     let items = [];
@@ -804,11 +828,10 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
         let table = await DB.get('tables', tid);
         if (table) {
             if (customItems && customItems.length > 0) {
-                // Thanh toán một phần (chia hóa đơn) -> không xóa bàn
                 items = customItems;
                 customerName = table.customerName || '';
                 tableName = table.name;
-                var remainingItems = table.items.map(function(i) { return Object.assign({}, i); });
+                var remainingItems = table.items ? table.items.map(function(i) { return Object.assign({}, i); }) : [];
                 for (let paid of customItems) {
                     const idx = remainingItems.findIndex(function(i) { return i.name === paid.name; });
                     if (idx !== -1) {
@@ -817,22 +840,34 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
                     }
                 }
                 const newTotal = remainingItems.reduce((s, i) => s + i.price * i.qty, 0);
-                if (remainingItems.length === 0) {
-                    await DB.remove('tables', tid);
-                    console.log('🗑️ Đã xóa bàn (sau khi thanh toán phần còn lại):', tid);
-                } else {
-                    await DB.update('tables', tid, { items: remainingItems, total: newTotal });
+                try {
+                    if (remainingItems.length === 0) {
+                        await DB.remove('tables', tid);
+                        console.log('Đã xóa bàn (sau thanh toán phần còn lại):', tid);
+                    } else {
+                        await DB.update('tables', tid, { items: remainingItems, total: newTotal });
+                    }
+                } catch (err) {
+                    console.error('Lỗi cập nhật bàn:', err);
+                    showToast('Lỗi cập nhật bàn!', 'error');
+                    throw err;
                 }
             } else {
-                // Thanh toán toàn bộ bàn -> xóa bàn
                 items = table.items ? table.items.slice() : [];
                 customerName = table.customerName || '';
                 tableName = table.name;
-                await DB.remove('tables', tid);
-                console.log('🗑️ Đã xóa bàn (thanh toán toàn bộ):', tid);
+                try {
+                    await DB.remove('tables', tid);
+                    console.log('Đã xóa bàn (thanh toán toàn bộ):', tid);
+                } catch (err) {
+                    console.error('Lỗi xóa bàn:', err);
+                    showToast('Lỗi xóa bàn!', 'error');
+                    throw err;
+                }
             }
         } else {
-            console.warn('Không tìm thấy bàn để thanh toán:', tid);
+            console.warn('Không tìm thấy bàn:', tid);
+            showToast('Bàn không tồn tại!', 'error');
         }
     } else if (type === 'debt_table') {
         const tid = String(tableId);
@@ -841,29 +876,43 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
             items = customItems ? customItems : (table.items ? table.items.slice() : []);
             customerName = table.customerName || '';
             tableName = table.name;
-            await DB.remove('tables', tid);
-            console.log('🗑️ Đã xóa bàn nợ:', tid);
+            try {
+                await DB.remove('tables', tid);
+                console.log('Đã xóa bàn nợ:', tid);
+            } catch (err) {
+                console.error('Lỗi xóa bàn nợ:', err);
+                showToast('Lỗi xóa bàn nợ!', 'error');
+            }
         }
     } else {
         items = tempOrder.slice();
         customerName = currentSelectedCustomer && currentSelectedCustomer.name ? currentSelectedCustomer.name : '';
         tableName = 'Mang đi';
-        tempOrder = []; 
+        tempOrder = [];
     }
 
     if (typeof addHistory === 'function') {
-        await addHistory({
-            type: type === 'takeaway' ? 'takeaway' : (type === 'dinein' ? 'dinein' : 'debt_payment'),
-            amount, paymentMethod, items,
-            customer: customerName ? { name: customerName } : null,
-            tableName: type === 'dinein' ? (customerName || tableName) : tableName,
-            note: customerName ? `Khách: ${customerName}` : ''
-        });
+        try {
+            await addHistory({
+                type: type === 'takeaway' ? 'takeaway' : (type === 'dinein' ? 'dinein' : 'debt_payment'),
+                amount, paymentMethod, items,
+                customer: customerName ? { name: customerName } : null,
+                tableName: type === 'dinein' ? (customerName || tableName) : tableName,
+                note: customerName ? `Khách: ${customerName}` : ''
+            });
+        } catch (err) {
+            console.error('Lỗi ghi lịch sử:', err);
+        }
     }
 
     if (typeof deductIngredients === 'function') {
         let orderItems = (type === 'dinein' || type === 'debt_table') ? items : (type === 'takeaway' ? items : []);
-        await deductIngredients(orderItems);
+        try {
+            await deductIngredients(orderItems);
+        } catch (err) {
+            console.error('Lỗi trừ nguyên liệu:', err);
+            showToast('Thanh toán thành công nhưng lỗi trừ nguyên liệu!', 'warning');
+        }
     }
 
     showToast(`✅ Thanh toán thành công ${formatMoney(amount)}`, 'success');
@@ -1191,68 +1240,7 @@ function removeFromTempOrder(id) {
 }
 
 
-const confirmOrderButton = document.getElementById('confirmOrderBtn');
-if (confirmOrderButton) {
-    confirmOrderButton.addEventListener('click', async () => {
-        if (tempOrder.length === 0) { showToast('Vui lòng chọn món!', 'warning'); return; }
-    
-    // Kiểm tra tồn kho trước khi xác nhận
-    if (typeof checkStockForItems === 'function') {
-        const enough = await checkStockForItems(tempOrder);
-        if (!enough) return;
-    }
-    
-    const total = tempOrder.reduce((s, i) => s + ((i.price || 0) * (i.qty || 0)), 0);
-    if (currentContext && currentContext.type === 'takeaway') {
-        document.getElementById('orderModal').style.display = 'none';
-        showPaymentMethod('takeaway', null, total);
-    } else if (currentContext && currentContext.type === 'newtable' && currentContext.tableId) {
-        const table = await DB.get('tables', String(currentContext.tableId));
-        if (table) {
-            const existingItems = table.items || [];
-            tempOrder.forEach(function(newItem) {
-                const ex = existingItems.find(function(i) { return i.name === newItem.name; });
-                if (ex) ex.qty += newItem.qty;
-                else existingItems.push(Object.assign({}, newItem));
-            });
-            const newTotal = existingItems.reduce(function(s, i) { return s + ((i.price || 0) * (i.qty || 0)); }, 0);
-            const now = new Date();
-            await DB.update('tables', String(currentContext.tableId), {
-                items: existingItems, total: newTotal, status: 'occupied',
-                startTime: now.toISOString(), time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-            });
-            if (currentSelectedCustomer) {
-                await DB.update('tables', String(currentContext.tableId), { customerId: currentSelectedCustomer.id, customerName: currentSelectedCustomer.name });
-            }
-            await renderTables();
-            showToast(`✅ Đã tạo đơn tại bàn ${table.name}`, 'success');
-        }
-        document.getElementById('orderModal').style.display = 'none';
-        tempOrder = [];
-        currentSelectedCustomer = null;
-    } else if (currentContext && currentContext.type === 'addToTable' && currentContext.tableId) {
-        const table = await DB.get('tables', String(currentContext.tableId));
-        if (table) {
-            const existingItems = table.items || [];
-            tempOrder.forEach(function(newItem) {
-                const ex = existingItems.find(function(i) { return i.name === newItem.name; });
-                if (ex) ex.qty += newItem.qty;
-                else existingItems.push(Object.assign({}, newItem));
-            });
-            const newTotal = existingItems.reduce(function(s, i) { return s + ((i.price || 0) * (i.qty || 0)); }, 0);
-            await DB.update('tables', String(currentContext.tableId), { items: existingItems, total: newTotal });
-            if (table.status === 'empty') {
-                const now = new Date();
-                await DB.update('tables', String(currentContext.tableId), { status: 'occupied', startTime: now.toISOString(), time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) });
-            }
-            await renderTables();
-            showToast(`✅ Đã thêm món vào bàn`, 'success');
-        }
-        document.getElementById('orderModal').style.display = 'none';
-        tempOrder = [];
-    }
-    });
-}
+// Duplicate listener removed - already handled in renderTempCartOrder()
 
 const floatTakeawayBtn = document.getElementById('floatTakeawayBtn');
 if (floatTakeawayBtn) {
@@ -1507,9 +1495,20 @@ function saveSettings() {
 async function resetAllData() {
     if (confirm('⚠️ Xóa toàn bộ dữ liệu?')) {
         localStorage.clear();
-        indexedDB.deleteDatabase('pos_data');
-        showToast('Đã reset, reload...', 'success');
-        setTimeout(() => location.reload(), 1500);
+        return new Promise((resolve) => {
+            const deleteReq = indexedDB.deleteDatabase('pos_data');
+            deleteReq.onsuccess = () => {
+                console.log('IndexedDB deleted');
+                showToast('Đã reset, reload...', 'success');
+                setTimeout(() => location.reload(), 1500);
+                resolve();
+            };
+            deleteReq.onerror = () => {
+                console.error('Lỗi xóa IndexedDB');
+                showToast('Lỗi xóa dữ liệu!', 'error');
+                resolve();
+            };
+        });
     }
 }
 async function exportAllData() {
