@@ -236,19 +236,73 @@
     </div>
 
     <div class="modal" id="orderModal">
+
     <div class="modal-content modal-large order-modal-content">
+
         <div class="modal-header">
-            <span class="modal-title" id="orderModalTitle">🍽️ Tạo đơn</span>
+            <span class="modal-title" id="orderModalTitle">
+                🍽️ Tạo đơn
+            </span>
+
             <span class="modal-close">&times;</span>
         </div>
+
         <div class="modal-body order-modal-body">
-            <div class="order-categories" id="orderCategories"></div>
-            <div class="menu-grid-simple" id="menuGridOrder"></div>
-            <div class="temp-cart" id="tempCartOrder">
-    <div class="temp-cart-title">🛒 Giỏ hàng</div>
-    <div class="temp-cart-items" id="tempCartOrderItems">Chưa có món</div>
-    <div class="temp-cart-total">Tổng: <span id="tempCartOrderTotal">0</span>đ</div>
-    <div id="tempCartActions"></div> <!-- Thêm dòng này -->
+
+            <!-- DANH MỤC -->
+            <div class="order-categories" id="orderCategories">
+            </div>
+
+            <!-- KHU CHÍNH -->
+            <div class="order-main-layout">
+
+                <!-- DANH SÁCH MÓN -->
+                <div class="order-menu-panel">
+
+                    <div
+                        class="menu-grid-simple"
+                        id="menuGridOrder">
+                    </div>
+
+                </div>
+
+                <!-- GIỎ HÀNG -->
+                <div
+                    class="temp-cart"
+                    id="tempCartOrder">
+
+                    <div class="temp-cart-title">
+                        🛒 Giỏ hàng
+                    </div>
+
+                    <div
+                        class="temp-cart-items"
+                        id="tempCartOrderItems">
+
+                        Chưa có món
+
+                    </div>
+
+                    <div class="temp-cart-total">
+
+                        Tổng:
+                        <span id="tempCartOrderTotal">
+                            0
+                        </span>đ
+
+                    </div>
+
+                    <div id="tempCartActions">
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
 </div>
         </div>
     </div>
@@ -454,13 +508,14 @@
                 <div class="form-group">
                     <label>Đơn vị</label>
                     <select id="ingredientDetailUnit" class="form-input">
-                        <option value="kg">kg</option>
-                        <option value="g">g</option>
-                        <option value="lít">lít</option>
-                        <option value="ml">ml</option>
-                        <option value="cái">cái</option>
-                        <option value="gói">gói</option>
-                    </select>
+    <option value="kg">kg</option>
+    <option value="g">g</option>
+    <option value="lít">lít</option>
+    <option value="ml">ml</option>
+    <option value="cái">cái</option>
+    <option value="gói">gói</option>
+    <option value="hộp">Hộp</option>  <!-- Thêm dòng này -->
+</select>
                 </div>
                 <div class="form-group">
                     <label>Giá nhập</label>

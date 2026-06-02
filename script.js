@@ -1519,7 +1519,9 @@ function importAllData(input) {
 (async function () {
     await DB.init();
     console.log('Database ready');
-
+if (typeof migrateOldTransactions === 'function') {
+    await migrateOldTransactions();
+}
     // Load menu
     window.menuItems = await DB.getAll('menu');
     window.menuCategories = await DB.getAll('menu_categories');
@@ -1619,41 +1621,16 @@ function initModalCloseFeatures() {
             }
         });
 
-        // 2. Đóng khi kéo xuống (swipe down) trên modal-content - chỉ mobile
-        const modalContent = modal.querySelector('.modal-content');
-        if (modalContent) {
-            let touchStartY = 0;
-            let isSwipingDown = false;
-            
-            const handleTouchStart = (e) => {
-                touchStartY = e.touches[0].clientY;
-                isSwipingDown = false;
-            };
-            
-            const handleTouchMove = (e) => {
-                const currentY = e.touches[0].clientY;
-                const deltaY = currentY - touchStartY;
-                // Nếu kéo xuống > 40px và nội dung chưa cuộn lên đầu
-                if (deltaY > 40 && modalContent.scrollTop === 0) {
-                    isSwipingDown = true;
-                    // Chỉ preventDefault khi sự kiện có thể hủy (tránh lỗi)
-                    if (e.cancelable) {
-                        e.preventDefault();
-                    }
-                    modal.style.display = 'none';
-                    tempOrder = [];
-                    currentSelectedCustomer = null;
-                }
-            };
-            
-            const handleTouchEnd = () => {
-                // Không cần xử lý thêm
-                isSwipingDown = false;
-            };
-            
-            modalContent.addEventListener('touchstart', handleTouchStart, { passive: false });
-            modalContent.addEventListener('touchmove', handleTouchMove, { passive: false });
-            modalContent.addEventListener('touchend', handleTouchEnd);
+        // 2. Đóng khi click vào header (trừ nút close)
+        const header = modal.querySelector('.modal-header');
+        if (header) {
+            header.addEventListener('click', (e) => {
+                // Nếu click vào nút close (hoặc con của nó) thì không đóng modal ở đây
+                if (e.target.closest('.modal-close')) return;
+                modal.style.display = 'none';
+                tempOrder = [];
+                currentSelectedCustomer = null;
+            });
         }
     });
 }

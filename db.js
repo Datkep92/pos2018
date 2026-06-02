@@ -24,7 +24,70 @@ localStorage.setItem('device_id', CURRENT_DEVICE_ID);
 function generateDeviceId() {
     return 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
+// ========== HISTORICAL SYNC CONFIG ==========
+var SYNC_CONFIG = {
+    transactions: { lastSync: null, daysToSync: 30 },
+    reports: { lastSync: null, daysToSync: 30 }
+};
+var SYNC_STORAGE_KEY = 'pos_sync_metadata';
 
+function loadSyncMetadata() {
+    var stored = localStorage.getItem(SYNC_STORAGE_KEY);
+    if (stored) {
+        try {
+            var data = JSON.parse(stored);
+            if (data.transactions && typeof data.transactions.lastSync === 'number')
+                SYNC_CONFIG.transactions.lastSync = data.transactions.lastSync;
+            if (data.reports && typeof data.reports.lastSync === 'number')
+                SYNC_CONFIG.reports.lastSync = data.reports.lastSync;
+        } catch(e) {}
+    }
+}
+async function syncHistoricalTransactions() {
+    if (!isOnline) return;
+    var now = Date.now();
+    var lastSync = SYNC_CONFIG.transactions.lastSync;
+    if (lastSync && (now - lastSync) < 12 * 3600000) {
+        console.log('Historical sync transactions skipped, last sync within 12h');
+        return;
+    }
+    var startDate = new Date();
+    startDate.setDate(startDate.getDate() - SYNC_CONFIG.transactions.daysToSync);
+    var startDateStr = startDate.toISOString().slice(0,10);
+    var endDateStr = new Date().toISOString().slice(0,10);
+    console.log('Starting historical sync for transactions from', startDateStr, 'to', endDateStr);
+    
+    var ref = db.ref(CURRENT_SHOP_ID + '/transactions');
+    var query = ref.orderByChild('dateKey').startAt(startDateStr).endAt(endDateStr);
+    var snapshot = await query.once('value');
+    var remoteData = snapshot.val() || {};
+    
+    var count = 0;
+    for (var key in remoteData) {
+        if (remoteData.hasOwnProperty(key)) {
+            var remoteItem = remoteData[key];
+            remoteItem.id = key;
+            var localItem = await loadFromLocal('transactions', key);
+            var remoteVersion = remoteItem._version || 0;
+            var localVersion = localItem ? (localItem._version || 0) : 0;
+            if (remoteVersion > localVersion) {
+                await saveToLocal('transactions', remoteItem);
+                count++;
+            }
+        }
+    }
+    SYNC_CONFIG.transactions.lastSync = now;
+    saveSyncMetadata();
+    console.log('Historical sync transactions completed, updated', count, 'records');
+}
+
+function saveSyncMetadata() {
+    var toStore = {
+        transactions: { lastSync: SYNC_CONFIG.transactions.lastSync },
+        reports: { lastSync: SYNC_CONFIG.reports.lastSync }
+    };
+    localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify(toStore));
+}
 // ========== LOCAL DATABASE (IndexedDB) ==========
 let localDB = null;
 let dbReadyPromise = null;
@@ -37,7 +100,7 @@ function initLocalDB() {
     if (dbReadyPromise) return dbReadyPromise;
     
     dbReadyPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(STORE_NAME, 5); // bump version để thêm index tối ưu transactions
+        const request = indexedDB.open(STORE_NAME, 6); // bump version để thêm index tối ưu transactions
         
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -316,14 +379,34 @@ async function processSyncQueue() {
 }
 
 async function syncToFirebase(queueItem) {
-    const { action, collection, data, targetId, deviceId } = queueItem;
-    const ref = db.ref(`${CURRENT_SHOP_ID}/${collection}/${targetId}`);
-    // KHÔNG tăng _version (đã tăng ở update/create)
-    var syncData = Object.assign({}, data, {
-        _syncedAt: firebase.database.ServerValue.TIMESTAMP,
-        _syncedBy: deviceId,
-        _version: data._version || 1
-    });
+    var action = queueItem.action;
+    var collection = queueItem.collection;
+    var data = queueItem.data;
+    var targetId = queueItem.targetId;
+    var deviceId = queueItem.deviceId;
+    var ref = db.ref(CURRENT_SHOP_ID + '/' + collection + '/' + targetId);
+    
+    if (action === 'update' || action === 'create') {
+        var snapshot = await ref.once('value');
+        var remoteData = snapshot.val();
+        var remoteVersion = remoteData ? (remoteData._version || 0) : 0;
+        var localVersion = data._version || 0;
+        if (localVersion < remoteVersion) {
+            console.warn('Skip sync: local version older than remote', targetId);
+            return false;
+        }
+    }
+    
+    var syncData = {};
+    for (var key in data) {
+        if (data.hasOwnProperty(key)) {
+            syncData[key] = data[key];
+        }
+    }
+    syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
+    syncData._syncedBy = deviceId;
+    syncData._version = data._version || 1;
+    
     if (action === 'create' || action === 'update') {
         await ref.update(syncData);
     } else if (action === 'delete') {
@@ -670,6 +753,12 @@ const SYNC_COLLECTIONS = [
 
 async function initDatabase() {
     await initLocalDB();
+    loadSyncMetadata();
+    if (isOnline) {
+        console.log('🔄 Starting historical sync...');
+        await syncHistoricalTransactions();
+        await syncHistoricalReports();
+    }
     await pruneLocalData();
     initNetworkListener();
     initStaffList();
@@ -677,8 +766,6 @@ async function initDatabase() {
     if (isOnline) {
         console.log('🔄 Đang tải dữ liệu từ Firebase lần đầu...');
         await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Kiểm tra và sync queue pending items nếu có
         const pendingCount = syncQueue.filter(item => item.status === 'pending').length;
         if (pendingCount > 0) {
             console.log(`⏳ Đồng bộ ${pendingCount} thay đổi chưa sync...`);
@@ -692,18 +779,15 @@ async function initDatabase() {
     }
 
     subscribeToCollection('tables', async (tables) => {
-        for (const remote of tables) {
-            const local = await get('tables', remote.id);
-            if (local && local._version !== remote._version) {
-                const merged = mergeTableData(local, remote);
-                await saveToLocal('tables', merged);
-            }
-        }
+        // ... code xử lý bàn
     });
     subscribeToCollection('customers');
     subscribeToCollection('menu');
     subscribeToCollection('menu_categories');
     subscribeToCollection('ingredients');
+
+    // 👇 THÊM DÒNG NÀY
+    ensureAnalyticsSubscriptions();
 
     console.log('✅ Database initialized, device:', CURRENT_DEVICE_ID);
     return { isOnline, deviceId: CURRENT_DEVICE_ID };

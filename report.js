@@ -55,7 +55,43 @@ function attachReportDateControls() {
     if (nextBtn) nextBtn.onclick = () => changeReportDate(1);
 }
 
-
+async function syncHistoricalReports() {
+    if (!isOnline) return;
+    var now = Date.now();
+    var lastSync = SYNC_CONFIG.reports.lastSync;
+    if (lastSync && (now - lastSync) < 12 * 3600000) {
+        console.log('Historical sync reports skipped, last sync within 12h');
+        return;
+    }
+    var startDate = new Date();
+    startDate.setDate(startDate.getDate() - SYNC_CONFIG.reports.daysToSync);
+    var startDateStr = startDate.toISOString().slice(0,10);
+    var endDateStr = new Date().toISOString().slice(0,10);
+    console.log('Starting historical sync for reports from', startDateStr, 'to', endDateStr);
+    
+    var ref = db.ref(CURRENT_SHOP_ID + '/reports');
+    var query = ref.orderByChild('dateKey').startAt(startDateStr).endAt(endDateStr);
+    var snapshot = await query.once('value');
+    var remoteData = snapshot.val() || {};
+    
+    var count = 0;
+    for (var key in remoteData) {
+        if (remoteData.hasOwnProperty(key)) {
+            var remoteItem = remoteData[key];
+            remoteItem.id = key;
+            var localItem = await loadFromLocal('reports', key);
+            var remoteVersion = remoteItem._version || 0;
+            var localVersion = localItem ? (localItem._version || 0) : 0;
+            if (remoteVersion > localVersion) {
+                await saveToLocal('reports', remoteItem);
+                count++;
+            }
+        }
+    }
+    SYNC_CONFIG.reports.lastSync = now;
+    saveSyncMetadata();
+    console.log('Historical sync reports completed, updated', count, 'records');
+}
 
 async function renderReport() {
     const container = document.getElementById('reportContent');
@@ -64,13 +100,17 @@ async function renderReport() {
     const selectedDateStr = currentReportDate.toISOString().slice(0, 10);
     const { transactions, tables, customers } = await getReportData(selectedDateStr);
   
+    // === LỌC GIAO DỊCH HỢP LỆ (CHƯA BỊ HỦY) ===
+    const activeTransactions = transactions.filter(tx => tx.refunded !== true && tx.type !== 'refund');
+    const refundTransactions = transactions.filter(tx => tx.type === 'refund' || tx.refunded === true);
+    const totalRefundAmount = refundTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    
     const todayStr = new Date().toISOString().slice(0, 10);
     const isToday = (selectedDateStr === todayStr);
     const dateTitle = formatDateDisplay(selectedDateStr);
     const dateDisplay = isToday ? `Hôm nay - ${dateTitle}` : dateTitle;
 
-    // 1. Đã thanh toán (transactions trong ngày) - bao gồm cả thanh toán nợ
-    const selectedTxs = transactions;
+    // 1. Đã thanh toán (chỉ tính activeTransactions)
     let paidOrders = 0, paidRevenue = 0;
     let cashAmount = 0, cashCount = 0;
     let transferAmount = 0, transferCount = 0;
@@ -78,9 +118,8 @@ async function renderReport() {
     let dineinCount = 0, dineinTotal = 0;
     let debtPaymentCount = 0, debtPaymentTotal = 0;
 
-    for (const tx of selectedTxs) {
+    for (const tx of activeTransactions) {
         const amount = tx.amount;
-        // Tất cả các giao dịch đều đóng góp vào doanh thu và số đơn
         paidOrders++;
         paidRevenue += amount;
         if (tx.paymentMethod === 'cash') {
@@ -90,7 +129,6 @@ async function renderReport() {
             transferAmount += amount;
             transferCount++;
         }
-        // Phân loại theo loại hình (chỉ dành cho bán hàng)
         if (tx.type === 'takeaway') {
             takeawayCount++;
             takeawayTotal += amount;
@@ -103,37 +141,36 @@ async function renderReport() {
         }
     }
 
-    // 2. Chưa thanh toán (bàn đang phục vụ)
+    // 2. Chưa thanh toán (bàn đang phục vụ) - không đổi
     const pendingTables = tables.filter(t => t.status === 'occupied' && t.items && t.items.length > 0 && (t.total || 0) > 0);
     const pendingCount = pendingTables.length;
     const pendingAmount = pendingTables.reduce((sum, t) => sum + (t.total || 0), 0);
 
-    // 3. Khách nợ hôm nay (phát sinh nợ mới, không phải thanh toán)
+    // 3. Khách nợ hôm nay - không đổi
     let debtTodayCount = 0, debtTodayAmount = 0;
     for (const cust of customers) {
         const debtHistory = cust.debtHistory || [];
         const todayDebts = debtHistory.filter(d => d.date && d.date.slice(0, 10) === selectedDateStr);
         if (todayDebts.length > 0) {
             debtTodayCount++;
-            const totalToday = todayDebts.reduce((s, d) => s + (d.amount || 0), 0);
-            debtTodayAmount += totalToday;
+            debtTodayAmount += todayDebts.reduce((s, d) => s + (d.amount || 0), 0);
         }
     }
 
-  let totalDebtCustomers = 0, totalDebtAmount = 0;
-  
-for (const cust of customers) {
-    const debt = cust.totalDebt || 0;
-    if (debt > 0) {          // chỉ tính khách đang nợ (dương)
-        totalDebtCustomers++;
-        totalDebtAmount += debt;
+    // 4. Tổng nợ toàn bộ - không đổi
+    let totalDebtCustomers = 0, totalDebtAmount = 0;
+    for (const cust of customers) {
+        const debt = cust.totalDebt || 0;
+        if (debt > 0) {
+            totalDebtCustomers++;
+            totalDebtAmount += debt;
+        }
     }
-}
 
-    // 5. Top món bán chạy (chỉ tính từ giao dịch bán hàng takeaway/dinein, không tính debt_payment vì không có món)
+    // 5. Top món bán chạy (chỉ tính từ activeTransactions)
     const itemSales = {};
-    for (const tx of selectedTxs) {
-        if (tx.type === 'debt_payment') continue; // bỏ qua thanh toán nợ vì không có món
+    for (const tx of activeTransactions) {
+        if (tx.type === 'debt_payment') continue;
         const items = tx.items || [];
         for (const item of items) {
             const name = item.name;
@@ -145,13 +182,11 @@ for (const cust of customers) {
         }
     }
     var topItems = Object.entries(itemSales)
-        .map(function(pair) {
-            return Object.assign({ name: pair[0] }, pair[1]);
-        })
+        .map(function(pair) { return { name: pair[0], qty: pair[1].qty, revenue: pair[1].revenue }; })
         .sort(function(a, b) { return b.qty - a.qty; })
         .slice(0, 10);
 
-    // 6. Render HTML (có thêm dòng thu nợ nếu cần)
+    // 6. Render HTML (thêm dòng hiển thị hoàn tiền nếu có)
     container.innerHTML = `
         <div class="report-date-bar">
             <button id="reportPrevDay" class="nav-btn">‹</button>
@@ -160,7 +195,6 @@ for (const cust of customers) {
         </div>
 
         <div class="stats-grid">
-            <!-- Chưa thanh toán -->
             <div class="stat-card">
                 <div class="stat-icon">⏳</div>
                 <div class="stat-info">
@@ -168,7 +202,6 @@ for (const cust of customers) {
                     <div class="stat-amount">${formatMoney(pendingAmount)}</div>
                 </div>
             </div>
-            <!-- Đã thanh toán -->
             <div class="stat-card">
                 <div class="stat-icon">✅</div>
                 <div class="stat-info">
@@ -176,7 +209,6 @@ for (const cust of customers) {
                     <div class="stat-amount">${formatMoney(paidRevenue)}</div>
                 </div>
             </div>
-            <!-- Tiền mặt -->
             <div class="stat-card">
                 <div class="stat-icon">💰</div>
                 <div class="stat-info">
@@ -185,7 +217,6 @@ for (const cust of customers) {
                     <div class="stat-amount">${formatMoney(cashAmount)}</div>
                 </div>
             </div>
-            <!-- Chuyển khoản -->
             <div class="stat-card">
                 <div class="stat-icon">💳</div>
                 <div class="stat-info">
@@ -196,7 +227,6 @@ for (const cust of customers) {
             </div>
         </div>
 
-        <!-- Chi tiết theo loại hình bán hàng -->
         <div class="summary-card">
             <div class="summary-title">📊 Chi tiết doanh thu</div>
             <div class="summary-row small"><span>🛵 Mang đi: ${takeawayCount} đơn</span><span>${formatMoney(takeawayTotal)}</span></div>
@@ -204,14 +234,20 @@ for (const cust of customers) {
             <div class="summary-row small"><span>💸 Thu nợ: ${debtPaymentCount} giao dịch</span><span>${formatMoney(debtPaymentTotal)}</span></div>
         </div>
 
-        <!-- Khách nợ -->
-        <div class="summary-card" style="background: linear-gradient;">
+        ${totalRefundAmount > 0 ? `
+        <div class="summary-card" style="background:#fee2e2;">
+            <div class="summary-title">🔄 Hoàn tiền trong ngày</div>
+            <div class="summary-row"><span>Tổng hoàn trả</span><span class="summary-highlight" style="color:#dc2626;">- ${formatMoney(totalRefundAmount)}</span></div>
+            <div class="summary-row small">(Các giao dịch đã hủy)</div>
+        </div>
+        ` : ''}
+
+        <div class="summary-card">
             <div class="summary-title">💢 Khách nợ</div>
             <div class="summary-row"><span>Nợ phát sinh trong ngày</span><span class="summary-highlight">${debtTodayCount} khách - ${formatMoney(debtTodayAmount)}</span></div>
             <div class="summary-row"><span>Tổng nợ toàn bộ (tới nay)</span><span class="summary-highlight">${totalDebtCustomers} khách - ${formatMoney(totalDebtAmount)}</span></div>
         </div>
 
-        <!-- Top món bán chạy -->
         <div class="history-title">🔥 Top món bán chạy (ngày ${dateTitle})</div>
         <div class="history-list">
             ${topItems.length === 0 ? '<div class="empty-state">Chưa có dữ liệu</div>' : topItems.map((item, idx) => `

@@ -93,7 +93,33 @@ async function saveIngredientDetail() {
         showToast('Đã cập nhật "' + name + '"', 'success');
     }
 }
-
+// Hoàn trả nguyên liệu khi hủy giao dịch
+async function restoreIngredients(orderItems) {
+    if (!orderItems || orderItems.length === 0) return;
+    rebuildIngredientLookupMaps();
+    const updates = [];
+    for (const orderItem of orderItems) {
+        const menuItem = menuByNameMap.get(String(orderItem.name));
+        if (menuItem && menuItem.ingredients && menuItem.ingredients.length) {
+            for (const req of menuItem.ingredients) {
+                const ing = ingredientByIdMap.get(String(req.ingredientId));
+                if (ing) {
+                    const newStock = ing.stock + (req.quantity * orderItem.qty);
+                    ing.stock = newStock;
+                    updates.push(DB.update('ingredients', ing.id, { stock: ing.stock }));
+                }
+            }
+        }
+    }
+    const batchSize = 5;
+    for (let i = 0; i < updates.length; i += batchSize) {
+        const batch = updates.slice(i, i + batchSize);
+        await Promise.all(batch);
+        if (i + batchSize < updates.length) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    window.ingredients = ingredients;
+    renderIngredients();
+}
 // Xóa nguyên liệu từ popup chi tiết
 async function deleteIngredientDetail() {
     const id = document.getElementById('ingredientDetailId').value;
@@ -106,18 +132,52 @@ async function deleteIngredientDetail() {
     showToast('Đã xóa nguyên liệu', 'success');
 }
 
-// Mở modal thêm mới nguyên liệu (giữ nguyên)
+// Mở modal thêm nguyên liệu (dùng chung modal chi tiết)
 function openIngredientModal() {
-    document.getElementById('ingredientModalTitle').innerText = '➕ Thêm nguyên liệu';
-    document.getElementById('ingredientId').value = '';
-    document.getElementById('ingredientName').value = '';
-    document.getElementById('ingredientUnit').value = 'kg';
-    document.getElementById('ingredientStock').value = 0;
-    document.getElementById('ingredientPrice').value = 0;
-    document.getElementById('ingredientMinStock').value = 10;
-    document.getElementById('ingredientModal').style.display = 'flex';
+    document.getElementById('ingredientDetailId').value = '';
+    document.getElementById('ingredientDetailName').value = '';
+    document.getElementById('ingredientDetailUnit').value = 'kg';
+    document.getElementById('ingredientDetailStock').value = 0;
+    document.getElementById('ingredientDetailPrice').value = 0;
+    document.getElementById('ingredientDetailMinStock').value = 10;
+    document.getElementById('ingredientDetailModal').style.display = 'flex';
 }
 
+// Lưu nguyên liệu (thêm mới hoặc cập nhật)
+async function saveIngredientDetail() {
+    const id = document.getElementById('ingredientDetailId').value;
+    const name = document.getElementById('ingredientDetailName').value.trim();
+    const unit = document.getElementById('ingredientDetailUnit').value;
+    const stock = parseFloat(document.getElementById('ingredientDetailStock').value) || 0;
+    const price = parseFloat(document.getElementById('ingredientDetailPrice').value) || 0;
+    const minStock = parseFloat(document.getElementById('ingredientDetailMinStock').value) || 10;
+    
+    if (!name) {
+        showToast('Vui lòng nhập tên nguyên liệu!', 'warning');
+        return;
+    }
+
+    if (id) {
+        // Cập nhật nguyên liệu hiện có
+        const index = ingredients.findIndex(i => i.id === id);
+        if (index !== -1) {
+            const updatedIng = { ...ingredients[index], name, unit, stock, price, minStock };
+            await DB.update('ingredients', id, updatedIng);
+            ingredients[index] = updatedIng;
+        }
+    } else {
+        // Thêm mới nguyên liệu
+        const newId = Date.now().toString();
+        const newIng = { id: newId, name, unit, stock, price, minStock, createdAt: Date.now() };
+        await DB.create('ingredients', newIng);
+        ingredients.push(newIng);
+    }
+    
+    window.ingredients = ingredients;
+    renderIngredients();
+    closeModal('ingredientDetailModal');
+    showToast(`✅ Đã lưu nguyên liệu "${name}"`, 'success');
+}
 async function saveIngredient() {
     const id = document.getElementById('ingredientId').value;
     const name = document.getElementById('ingredientName').value.trim();
@@ -223,6 +283,7 @@ async function checkStockForItems(orderItems) {
     return true;
 }
 
+window.restoreIngredients = restoreIngredients;
 // Xuất global
 window.ingredients = ingredients;
 window.initIngredients = initIngredients;
@@ -236,3 +297,4 @@ window.checkStockForItems = checkStockForItems;
 window.showIngredientDetail = showIngredientDetail;
 window.saveIngredientDetail = saveIngredientDetail;
 window.deleteIngredientDetail = deleteIngredientDetail;
+window.restoreIngredients = restoreIngredients;
