@@ -1570,9 +1570,6 @@ function importAllData(input) {
     // Cảnh báo nếu dữ liệu quá cũ trên iOS 12
     await checkDataFreshness();
 
-        console.log('📌 Chưa có bàn nào. Hãy dùng nút "Tạo bàn mới".');
-    }
-
     await renderTables();
     if (typeof renderCustomerList === 'function') renderCustomerList();
     if (typeof renderMenuManager === 'function') renderMenuManager();

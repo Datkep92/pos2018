@@ -509,6 +509,7 @@ async function initDatabase() {
 
     console.log('✅ Database initialized, device:', CURRENT_DEVICE_ID);
     return { isOnline, deviceId: CURRENT_DEVICE_ID };
+}
 
 async function deleteItem(tableName, id) {
     try {
