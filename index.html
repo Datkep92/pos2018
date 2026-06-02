@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <style>
+    /* Ép GPU toàn bộ trang */
+    body, .app, .modal, .tab-content, .header, .bottom-nav {
+        -webkit-transform: translate3d(0,0,0);
+        transform: translate3d(0,0,0);
+    }
+    /* Cuộn mượt */
+    .tables-grid, .menu-items-grid, .ingredients-list, .history-list-container, .order-categories, .menu-grid-simple {
+        -webkit-overflow-scrolling: touch;
+        overflow-y: auto;
+    }
+    /* Xoá highlight xám khi chạm */
+    button, .float-btn, .bottom-nav-item, .table-icon-btn, .action-icon {
+        -webkit-tap-highlight-color: transparent;
+    }
+</style>
+    <meta name="theme-color" content="#f97316">
+    <title>POS Cafe - Quản lý bán hàng</title>
+    <link rel="stylesheet" href="style.css">
+        <link rel="stylesheet" href="style.css?v=1.0.0">
+  <link rel="apple-touch-icon" href="https://datkep92.github.io/milano/IMG_6068.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Milano POS">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+</head>
+<body>
+    <div class="app">
+        <!-- ========== HEADER ========== -->
+        <div class="header">
+            <div class="logo">
+                <span class="logo-icon">☕</span>
+                <span class="logo-text">POS CAFE</span>
+            </div>
+            <div class="header-right">
+                
+                <button class="logout-btn admin-only" id="logoutBtn" onclick="if(window.DB) DB.doLogout()" style="display:none;">🚪</button>
+                <span class="time" id="currentTime">--:--</span>
+            </div>
+        </div>
+
+        <!-- ========== MAIN TABS ========== -->
+        <div class="main-tabs">
+            <div class="main-tab active" data-tab="tables">🍽️ Bàn</div>
+            <div class="main-tab" data-tab="menu">📋 Menu</div>
+            <div class="main-tab" data-tab="ingredients">🥬 Kho</div>
+            <div class="main-tab" data-tab="customers">👥 KH</div>
+            <div class="main-tab" data-tab="history">📜 Sử</div>
+            <div class="main-tab" data-tab="report">📊 BC</div>
+            <div class="main-tab" data-tab="settings">⚙️ Setup</div>
+        </div>
+
+        <!-- ========== MAIN CONTENT ========== -->
+        <div class="main-content">
+            <!-- TAB BÀN -->
+            <div id="tablesView" class="tab-content active">
+                <div class="tables-header">
+                    <div class="sub-tabs">
+                        <button class="btn-add-table" onclick="document.getElementById('floatNewtableBtn').click()">+ Tạo bàn mới</button>
+                        
+                    </div>
+                </div>
+                <div class="tables-container">
+                    <div class="tables-grid" id="tablesGrid"></div>
+                </div>
+                <div class="float-buttons">
+                    <div class="float-btn float-takeaway" id="floatTakeawayBtn">
+                        <span class="float-icon">🛵</span>
+                        <span class="float-label">Mang đi</span>
+                    </div>
+                    <div class="float-btn float-newtable" id="floatNewtableBtn">
+                        <span class="float-icon">🍽️</span>
+                        <span class="float-label">Bàn mới</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="menuView" class="tab-content">
+    <div class="menu-manager">
+       <div class="menu-actions-top">
+    <button class="btn-add-item" onclick="openItemModal()">+ Món</button>
+    <button class="btn-manage-category" onclick="openManageCategoryModal()"> Danh mục</button>
+</div>
+        <div class="menu-categories" id="menuCategories"></div>
+        <div class="menu-items-grid" id="menuItemsGrid"></div>
+    </div>
+</div>
+
+            <!-- TAB NGUYÊN LIỆU -->
+            <div id="ingredientsView" class="tab-content">
+                <div class="ingredients-header">
+                    <button class="btn-add-ingredient" onclick="openIngredientModal()">+ Nguyên liệu</button>
+                    <button class="btn-warning" onclick="checkLowStock()">⚠️ Kiểm tra</button>
+                </div>
+                <div class="ingredients-list" id="ingredientsList"></div>
+            </div>
+
+            <!-- TAB KHÁCH HÀNG -->
+           <div id="customersView" class="tab-content">
+    <div class="customer-search-bar">
+        <input type="text" id="customerSearchInput" placeholder="🔍 Tìm theo tên hoặc SĐT..." oninput="searchCustomerList()">
+        <button id="quickAddCustomerBtn" class="btn-add-customer">+ Thêm</button>
+    </div>
+    <div class="debt-summary">
+        <span>💰 Tổng công nợ</span>
+        <span id="totalDebtAmount">0đ</span>
+    </div>
+    <div id="customerListContainer" class="customer-list-container"></div>
+</div>
+
+            <div id="historyView" class="tab-content">
+
+    <!-- HÀNG 1: LỊCH -->
+    <div class="history-row history-date-row">
+
+        <button class="nav-btn" id="prevDay">‹</button>
+
+        <div class="date-display">
+            📅 <span id="historyDate">01/06/2026</span>
+        </div>
+
+        <button class="nav-btn" id="nextDay">›</button>
+
+    </div>
+
+    <!-- HÀNG 2: BỘ LỌC -->
+    <div class="history-row history-filter-row">
+
+        <select id="historyFilter" class="history-select">
+            <option value="all">📋 Tất cả</option>
+            <option value="takeaway">🛵 Mang đi</option>
+            <option value="dinein">🍽️ Tại chỗ</option>
+            <option value="cash">💰 Tiền mặt</option>
+            <option value="transfer">💳 Chuyển khoản</option>
+            <option value="paid">✅ Thanh toán</option>
+            <option value="debt">💢 Nợ</option>
+        </select>
+
+    </div>
+
+    <!-- LIST -->
+    <div id="historyList" class="history-list-container"></div>
+
+</div>
+<!-- MODAL QUẢN LÝ DANH MỤC -->
+<div class="modal" id="manageCategoryModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <span class="modal-title">⚙️ Quản lý danh mục</span>
+            <span class="modal-close" onclick="closeModal('manageCategoryModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <button class="btn-add-category-inline" onclick="openCategoryModal(); closeModal('manageCategoryModal')">+ Thêm danh mục mới</button>
+            <div id="manageCategoryList" class="manage-category-list"></div>
+        </div>
+    </div>
+</div>
+            <!-- TAB BÁO CÁO -->
+            <div id="reportView" class="tab-content">
+                <div id="reportContent" class="report-container"></div>
+            </div>
+
+            <!-- TAB CÀI ĐẶT -->
+            <div id="settingsView" class="tab-content">
+                <div class="settings-container">
+                    <div class="settings-group">
+                        <h3>🛒 Bán hàng</h3>
+                        <label><input type="checkbox" id="settingAutoPrint" onchange="saveSettings()"> Tự động in hóa đơn</label>
+                        <label><input type="checkbox" id="settingAfterPay" onchange="saveSettings()"> Thanh toán xóa bàn</label>
+                        <label><input type="checkbox" id="settingShowCustomer" onchange="saveSettings()"> Hiển thị khách trên bàn</label>
+                    </div>
+                    <div class="settings-group">
+                        <h3>🔔 Cảnh báo</h3>
+                        <label>Tồn kho dưới: <input type="number" id="settingMinStock" value="10" onchange="saveSettings()" style="width:70px;"> đơn vị</label>
+                    </div>
+                    <div class="settings-group">
+                        <h3>💾 Dữ liệu</h3>
+                        <button class="btn-danger" onclick="resetAllData()">⚠️ Reset</button>
+                        <button class="btn-primary" onclick="exportAllData()">📎 Backup</button>
+                        <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importAllData(this)">
+                        <button class="btn-primary" onclick="document.getElementById('importFile').click()">📂 Restore</button>
+                    </div>
+                    <div class="settings-group">
+                        <h3>ℹ️ Thông tin</h3>
+                        <p>Phiên bản: 2.0.0</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== BOTTOM NAV (MOBILE) ========== -->
+        <div class="bottom-nav">
+            <div class="bottom-nav-item active" data-tab="tables"><span class="bottom-icon">🍽️</span><span>Bàn</span></div>
+            <div class="bottom-nav-item" data-tab="menu"><span class="bottom-icon">📋</span><span>Menu</span></div>
+            <div class="bottom-nav-item" data-tab="ingredients"><span class="bottom-icon">🥬</span><span>Kho</span></div>
+            <div class="bottom-nav-item" data-tab="customers"><span class="bottom-icon">👥</span><span>KH</span></div>
+            <div class="bottom-nav-item" data-tab="history"><span class="bottom-icon">📜</span><span>Sử</span></div>
+            <div class="bottom-nav-item" data-tab="report"><span class="bottom-icon">📊</span><span>BC</span></div>
+            <div class="bottom-nav-item" data-tab="settings"><span class="bottom-icon">⚙️</span><span>Setup</span></div>
+        </div>
+    </div>
+
+    <!-- ========== MODALS ========== -->
+<!-- MODAL CONFIRM -->
+<div class="modal" id="confirmModal">
+    <div class="modal-content" style="max-width: 350px;">
+        <div class="modal-header">
+            <span class="modal-title">⚠️ Xác nhận</span>
+            <span class="modal-close" onclick="closeModal('confirmModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p id="confirmMessage" style="font-size: 16px;">Bạn có chắc chắn?</p>
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn-save" id="confirmOkBtn" style="background:#10b981;">Đồng ý</button>
+                <button class="btn-cancel" id="confirmCancelBtn">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+    <!-- MODAL ĐĂNG NHẬP -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content" style="max-width: 350px;">
+            <div class="modal-header"><span class="modal-title">🔐 Đăng nhập</span><span class="modal-close" onclick="closeModal('loginModal')">&times;</span></div>
+            <div class="modal-body">
+                <div style="text-align:center; margin-bottom:20px;"><div style="font-size:50px;">☕</div><h3>POS Cafe</h3></div>
+                <div class="form-group"><label>Email</label><input type="email" id="loginEmail" class="form-input" placeholder="admin@pos.com" value="admin@pos.com"></div>
+                <div class="form-group"><label>Mật khẩu</label><input type="password" id="loginPassword" class="form-input" placeholder="••••••" value="admin123"></div>
+                <button class="btn-save" onclick="if(window.DB) DB.doLogin()" style="width:100%;">🔓 Đăng nhập</button>
+                <div style="margin-top:12px; font-size:11px; text-align:center; color:#6c757d;">Admin: admin@pos.com / admin123<br>NV: nhanvien@pos.com / staff123</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="orderModal">
+    <div class="modal-content modal-large order-modal-content">
+        <div class="modal-header">
+            <span class="modal-title" id="orderModalTitle">🍽️ Tạo đơn</span>
+            <span class="modal-close">&times;</span>
+        </div>
+        <div class="modal-body order-modal-body">
+            <div class="order-categories" id="orderCategories"></div>
+            <div class="menu-grid-simple" id="menuGridOrder"></div>
+            <div class="temp-cart" id="tempCartOrder">
+    <div class="temp-cart-title">🛒 Giỏ hàng</div>
+    <div class="temp-cart-items" id="tempCartOrderItems">Chưa có món</div>
+    <div class="temp-cart-total">Tổng: <span id="tempCartOrderTotal">0</span>đ</div>
+    <div id="tempCartActions"></div> <!-- Thêm dòng này -->
+</div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL CHI TIẾT BÀN (KIỂU MỚI) -->
+<div class="modal" id="tableDetailModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <div class="modal-title-group">
+                <span class="modal-title" id="detailTableName">🪑 Bàn 01</span>
+                <span class="modal-time" id="detailTime">⏱️ --:--</span>
+            </div>
+        </div>
+        <div class="modal-body">
+            <div class="detail-items-header">
+                <span>📋 Danh sách món</span>
+                <button class="btn-small" id="detailAddItemBtn">+ Thêm món</button>
+            </div>
+            <div id="detailItemsList" class="detail-items-list"></div>
+            <div class="detail-summary">
+                Tổng: <span id="detailTotalCount">0</span> món - <span id="detailTotalAmount">0đ</span>
+            </div>
+            <div class="detail-payment-buttons">
+                <button class="payment-method-btn cash" id="detailPayCashBtn">💰 Tiền mặt</button>
+                <button class="payment-method-btn transfer" id="detailPayTransferBtn">💳 Chuyển khoản</button>
+            </div>
+            <div class="detail-action-icons">
+                <button class="action-icon" id="detailDebtBtn" title="Ghi nợ">💢</button>
+                <button class="action-icon" id="detailSplitBillBtn" title="Chia hóa đơn">🧾</button>
+                <button class="action-icon" id="detailTransferBtn" title="Tách bàn">🔄</button>
+                <button class="action-icon" id="detailMergeBtn" title="Gộp bàn">🔗</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- MODAL GỘP BÀN -->
+<div class="modal" id="mergeTableModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <span class="modal-title">🔗 Gộp bàn (chọn bàn đích)</span>
+            <span class="modal-close" onclick="closeModal('mergeTableModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div id="mergeTablesList" class="merge-tables-list"></div>
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn-cancel" onclick="closeModal('mergeTableModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- MODAL CHIA HÓA ĐƠN THEO MÓN (Cải tiến) -->
+<div class="modal" id="splitBillModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <span class="modal-title">🧾 Chia hóa đơn theo món</span>
+            <span class="modal-close" onclick="closeModal('splitBillModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="split-header">
+                <button onclick="selectAllSplitItems(true)">Chọn tất cả</button>
+                <button onclick="selectAllSplitItems(false)">Bỏ chọn tất cả</button>
+            </div>
+            
+            <div id="splitItemsList" class="split-items-list"></div>
+            
+            <div class="split-total-bar">
+                <strong>Tổng tiền phần chia:</strong> 
+                <span id="splitTotalAmount" class="split-total-value">0đ</span>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn-save" id="confirmSplitBtn">✅ Thanh toán phần đã chọn</button>
+                <button class="btn-cancel" onclick="closeModal('splitBillModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="transferTableModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <span class="modal-title">🔄 Tách bàn (chuyển món sang bàn mới)</span>
+            <span class="modal-close">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="detail-items-title">📋 Chọn món và số lượng để chuyển:</div>
+            <div id="transferItemsList" style="max-height: 300px; overflow-y: auto;"></div>
+            <div class="form-actions" style="margin-top: 16px;">
+                <button class="btn-save" id="confirmTransferBtn">✅ Chuyển món đã chọn</button>
+                <button class="btn-cancel" onclick="closeModal('transferTableModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <!-- MODAL THANH TOÁN -->
+    <div class="modal" id="paymentModal">
+        <div class="modal-content payment-modal-content">
+            <div class="modal-header"><span class="modal-title">💸 Thanh toán</span><span class="modal-close">&times;</span></div>
+            <div class="modal-body" id="paymentModalBody"></div>
+        </div>
+    </div>
+
+    <!-- MODAL DANH MỤC -->
+<div class="modal" id="categoryModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="modal-title" id="categoryModalTitle">➕ Danh mục</span>
+            <span class="modal-close" onclick="closeModal('categoryModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="categoryId">
+            <div class="form-group"><label>Tên danh mục</label><input type="text" id="categoryName" class="form-input" placeholder="VD: Cà phê"></div>
+            <div class="form-group"><label>Màu sắc</label><input type="color" id="categoryColor" class="form-input" value="#f97316"></div>
+            <div class="form-actions">
+                <button class="btn-save" onclick="saveCategory()">💾 Lưu</button>
+                <button class="btn-cancel" onclick="closeModal('categoryModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- MODAL CHI TIẾT MÓN -->
+<div class="modal" id="itemDetailModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="modal-title">📋 Chi tiết món</span>
+            <span class="modal-close" onclick="closeModal('itemDetailModal')">&times;</span>
+        </div>
+        <div class="modal-body" id="itemDetailContent"></div>
+        <div class="modal-footer" style="display: flex; gap: 10px; padding: 16px;">
+            <button class="btn-save" id="detailEditItemBtn">✏️ Sửa món</button>
+            <button class="btn-danger" id="detailDeleteItemBtn" style="background:#dc2626;">🗑️ Xóa món</button>
+        </div>
+    </div>
+</div>
+    <div class="modal" id="itemModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <span class="modal-title" id="itemModalTitle">➕ Thêm món</span>
+            <span class="modal-close" onclick="closeModal('itemModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="itemId">
+            <div class="form-group">
+                <label>Tên món *</label>
+                <input type="text" id="itemName" class="form-input" placeholder="VD: Cà phê sữa">
+            </div>
+            <div class="form-group">
+                <label>Danh mục *</label>
+                <select id="itemCategory" class="form-input"></select>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" id="itemHasVariants" onchange="toggleVariantsSection()"> Có nhiều size</label>
+            </div>
+            <div id="variantsSection" style="display: none;">
+                <div class="form-group">
+                    <label>Danh sách size</label>
+                    <div id="variantsList"></div>
+                    <button type="button" class="btn-small" onclick="addVariant()">+ Thêm size</button>
+                </div>
+            </div>
+            <div id="normalSection">
+                <div class="form-group">
+                    <label>Giá bán *</label>
+                    <input type="number" id="itemPrice" class="form-input" placeholder="0" step="1000">
+                </div>
+                <div class="form-group">
+                    <label>📋 Công thức</label>
+                    <div id="ingredientsFormula" class="ingredients-formula"></div>
+                    <div class="ingredients-quick-list">
+                        <div class="quick-title">📦 Nguyên liệu có sẵn</div>
+                        <div id="ingredientsGrid" class="ingredients-list-grid"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+    <label>📝 Công thức pha chế (cách làm)</label>
+    <textarea id="itemRecipe" class="form-input" rows="3" placeholder="VD: Pha 20g bột cà phê với 30ml nước sôi..."></textarea>
+</div>
+            <div class="form-actions">
+                <button class="btn-save" onclick="saveItem()">💾 Lưu</button>
+                <button class="btn-cancel" onclick="closeModal('itemModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <!-- MODAL CHI TIẾT NGUYÊN LIỆU -->
+<div class="modal" id="ingredientDetailModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="modal-title">📦 Chi tiết nguyên liệu</span>
+            <span class="modal-close" onclick="closeModal('ingredientDetailModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="ingredientDetailId">
+            <div class="form-group">
+                <label>Tên nguyên liệu</label>
+                <input type="text" id="ingredientDetailName" class="form-input" placeholder="VD: Cà phê hạt">
+            </div>
+            <div class="form-row-2">
+                <div class="form-group">
+                    <label>Đơn vị</label>
+                    <select id="ingredientDetailUnit" class="form-input">
+                        <option value="kg">kg</option>
+                        <option value="g">g</option>
+                        <option value="lít">lít</option>
+                        <option value="ml">ml</option>
+                        <option value="cái">cái</option>
+                        <option value="gói">gói</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Giá nhập</label>
+                    <input type="number" id="ingredientDetailPrice" class="form-input" value="0">
+                </div>
+            </div>
+            <div class="form-row-2">
+                <div class="form-group">
+                    <label>Tồn kho</label>
+                    <input type="number" id="ingredientDetailStock" class="form-input" value="0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Cảnh báo dưới</label>
+                    <input type="number" id="ingredientDetailMinStock" class="form-input" value="10">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn-save" onclick="saveIngredientDetail()">💾 Lưu</button>
+                <button class="btn-danger" onclick="deleteIngredientDetail()" style="background:#dc2626;">🗑️ Xóa</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <!-- MODAL KHÁCH HÀNG - CHI TIẾT -->
+    <div class="modal" id="customerDetailModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header"><span class="modal-title">👤 Chi tiết khách</span><span class="modal-close">&times;</span></div>
+            <div class="modal-body" id="customerDetailContent"></div>
+        </div>
+    </div>
+
+    
+
+    <!-- MODAL CHỌN KHÁCH -->
+    <div class="modal" id="customerSelectorModal">
+        <div class="modal-content">
+            <div class="modal-header"><span class="modal-title">👥 Chọn khách</span><span class="modal-close">&times;</span></div>
+            <div class="modal-body">
+                <div class="customer-search-mini"><input type="text" id="customerSelectorSearch" placeholder="🔍 Tìm khách..." oninput="filterCustomerSelector()"></div>
+                <div id="customerSelectorList" class="customer-selector-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL GHI NỢ - CHỌN/TẠO KHÁCH -->
+    <div class="modal" id="debtCustomerModal">
+        <div class="modal-content">
+            <div class="modal-header"><span class="modal-title">💰 Ghi nợ</span><span class="modal-close">&times;</span></div>
+            <div class="modal-body"><div id="debtCustomerSelectorList" class="debt-customer-selector"></div></div>
+        </div>
+    </div>
+
+    <!-- MODAL THANH TOÁN NỢ -->
+    <div class="modal" id="debtPaymentModal">
+        <div class="modal-content">
+            <div class="modal-header"><span class="modal-title">💸 Thanh toán nợ</span><span class="modal-close">&times;</span></div>
+            <div class="modal-body" id="debtPaymentModalBody"></div>
+            <div class="modal-footer"><button class="btn-save" onclick="if(window.processDebtPayment) processDebtPayment()">✅ Xác nhận</button><button class="btn-cancel" onclick="closeModal('debtPaymentModal')">Hủy</button></div>
+        </div>
+    </div>
+
+    <!-- TOAST CONTAINER -->
+    <div class="toast-container" id="toastContainer"></div>
+
+   <!-- Load Firebase trước, không dùng defer/async -->
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+
+<!-- Sau đó mới load db.js -->
+<script src="db.js"></script>
+
+    <!-- Modules -->
+    <script src="menu.js"></script>
+    <script src="ingredients.js"></script>
+    <script src="customers.js"></script>
+    <script src="report.js"></script>
+    <script src="history.js"></script>
+    <script src="script.js"></script>
+    <script>
+    // Xử lý confirm modal
+    window.showConfirm = function(message, onOk, onCancel) {
+        const modal = document.getElementById('confirmModal');
+        const msgEl = document.getElementById('confirmMessage');
+        const okBtn = document.getElementById('confirmOkBtn');
+        const cancelBtn = document.getElementById('confirmCancelBtn');
+        if (!modal || !msgEl) return;
+        msgEl.innerText = message;
+        modal.style.display = 'flex';
+        const okHandler = () => {
+            modal.style.display = 'none';
+            if (onOk) onOk();
+            okBtn.removeEventListener('click', okHandler);
+            cancelBtn.removeEventListener('click', cancelHandler);
+        };
+        const cancelHandler = () => {
+            modal.style.display = 'none';
+            if (onCancel) onCancel();
+            okBtn.removeEventListener('click', okHandler);
+            cancelBtn.removeEventListener('click', cancelHandler);
+        };
+        okBtn.removeEventListener('click', okHandler);
+        cancelBtn.removeEventListener('click', cancelHandler);
+        okBtn.addEventListener('click', okHandler);
+        cancelBtn.addEventListener('click', cancelHandler);
+    };
+    // Đóng modal khi click ra ngoài
+    window.onclick = function(e) {
+        if (e.target.classList.contains('modal')) {
+            e.target.style.display = 'none';
+        }
+    };
+</script>
+</body>
+</html>
