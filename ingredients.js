@@ -63,13 +63,13 @@ async function saveIngredientDetail() {
     }
     const index = ingredients.findIndex(i => i.id === id);
     if (index !== -1) {
-        const updatedIng = { ...ingredients[index], name, unit, stock, price, minStock };
+        var updatedIng = Object.assign({}, ingredients[index], { name: name, unit: unit, stock: stock, price: price, minStock: minStock });
         await DB.update('ingredients', id, updatedIng);
         ingredients[index] = updatedIng;
         window.ingredients = ingredients;
         renderIngredients();
         closeModal('ingredientDetailModal');
-        showToast(`Đã cập nhật "${name}"`, 'success');
+        showToast('Đã cập nhật "' + name + '"', 'success');
     }
 }
 
@@ -109,9 +109,9 @@ async function saveIngredient() {
         return;
     }
     if (id) {
-        const index = ingredients.findIndex(i => i.id === id);
+        var index = ingredients.findIndex(function(i) { return i.id === id; });
         if (index !== -1) {
-            const updatedIng = { ...ingredients[index], name, unit, stock, price, minStock };
+            var updatedIng = Object.assign({}, ingredients[index], { name: name, unit: unit, stock: stock, price: price, minStock: minStock });
             await DB.update('ingredients', id, updatedIng);
             ingredients[index] = updatedIng;
         }

@@ -141,9 +141,11 @@ for (const cust of customers) {
             itemSales[name].revenue += price * qty;
         }
     }
-    const topItems = Object.entries(itemSales)
-        .map(([name, data]) => ({ name, ...data }))
-        .sort((a, b) => b.qty - a.qty)
+    var topItems = Object.entries(itemSales)
+        .map(function(pair) {
+            return Object.assign({ name: pair[0] }, pair[1]);
+        })
+        .sort(function(a, b) { return b.qty - a.qty; })
         .slice(0, 10);
 
     // 6. Render HTML (có thêm dòng thu nợ nếu cần)

@@ -469,7 +469,7 @@ async function editItem(id) {
         renderVariantsList();
         tempFormula = [];
     } else {
-        tempFormula = item.ingredients ? [...item.ingredients] : [];
+        tempFormula = item.ingredients ? item.ingredients.slice() : [];
         renderIngredientsFormula();
         document.getElementById('itemPrice').value = item.price;
     }
@@ -531,16 +531,18 @@ async function deleteItem(id) {
 function renderOrderCategories() {
     const container = document.getElementById('orderCategories');
     if (!container) return;
-    const cats = Array.isArray(window.menuCategories) ? window.menuCategories : [];
+    var cats = Array.isArray(window.menuCategories) ? window.menuCategories : [];
     if (cats.length === 0) { container.innerHTML = '<div>Chưa có danh mục</div>'; return; }
-    container.innerHTML = `<div class="category-chip active" data-cat="all" onclick="filterOrderMenuByCategory('all')">📋 Tất cả</div>
-        ${cats.map(c => `<div class="category-chip" data-cat="${c.id}" onclick="filterOrderMenuByCategory('${c.id}')">${c.icon || '📌'} ${escapeHtml(c.name)}</div>`).join('')}`;
+    container.innerHTML = '<div class="category-chip active" data-cat="all" onclick="filterOrderMenuByCategory(\'all\')">📋 Tất cả</div>' +
+        cats.map(function(c) { return '<div class="category-chip" data-cat="' + c.id + '" onclick="filterOrderMenuByCategory(\'' + c.id + '\')">' + (c.icon || '📌') + ' ' + escapeHtml(c.name) + '</div>'; }).join('');
 }
 
-function renderOrderMenuByCategory(categoryId = 'all', searchTerm = '') {
+function renderOrderMenuByCategory(categoryId, searchTerm) {
+    categoryId = categoryId === undefined ? 'all' : categoryId;
+    searchTerm = searchTerm === undefined ? '' : searchTerm;
     const container = document.getElementById('menuGridOrder');
     if (!container) return;
-    let items = Array.isArray(window.menuItems) ? [...window.menuItems] : [];
+    var items = Array.isArray(window.menuItems) ? window.menuItems.slice() : [];
     if (categoryId !== 'all') items = items.filter(i => i.categoryId == categoryId);
     if (searchTerm) items = items.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()));
     if (items.length === 0) { container.innerHTML = '<div style="padding:40px;">📭 Không có món</div>'; return; }

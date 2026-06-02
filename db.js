@@ -190,12 +190,11 @@ async function syncToFirebase(queueItem) {
     const { action, collection, data, targetId, deviceId } = queueItem;
     const ref = db.ref(`${CURRENT_SHOP_ID}/${collection}/${targetId}`);
     // KHÔNG tăng _version (đã tăng ở update/create)
-    const syncData = {
-        ...data,
+    var syncData = Object.assign({}, data, {
         _syncedAt: firebase.database.ServerValue.TIMESTAMP,
         _syncedBy: deviceId,
         _version: data._version || 1
-    };
+    });
     if (action === 'create' || action === 'update') {
         await ref.update(syncData);
     } else if (action === 'delete') {
@@ -214,8 +213,14 @@ function subscribeToCollection(collection, callback) {
         const remoteMap = new Map();
         if (remoteData) {
             for (const key of Object.keys(remoteData)) {
-                const { id: _, ...rest } = remoteData[key] || {};
-                remoteMap.set(key, { id: key, ...rest });
+                var rest = {};
+                var source = remoteData[key] || {};
+                for (var p in source) {
+                    if (Object.prototype.hasOwnProperty.call(source, p) && p !== 'id') {
+                        rest[p] = source[p];
+                    }
+                }
+                remoteMap.set(key, Object.assign({ id: key }, rest));
             }
         }
 
@@ -273,14 +278,12 @@ async function create(collection, data, customId = null) {
     if (!id) {
         id = generateId();
     }
-    const newData = {
-        id: id,   // dùng id đã xác định
-        ...data,
+    var newData = Object.assign({ id: id }, data, {
         createdAt: Date.now(),
         createdBy: CURRENT_DEVICE_ID,
         updatedAt: Date.now(),
         _version: 1
-    };
+    });
     // Loại bỏ trường id cũ trong data (nếu có) để tránh trùng
     delete newData.id; // dòng này thừa? Thực tế newData đã có id, không cần xóa
     // Nhưng cần đảm bảo newData.id = id
@@ -294,13 +297,11 @@ async function create(collection, data, customId = null) {
 async function update(collection, id, data) {
     const oldData = await loadFromLocal(collection, String(id));
     if (!oldData) throw new Error(`Không tìm thấy ${collection}/${id}`);
-    const updatedData = {
-        ...oldData,
-        ...data,
+    var updatedData = Object.assign({}, oldData, data, {
         updatedAt: Date.now(),
         updatedBy: CURRENT_DEVICE_ID,
         _version: (oldData._version || 0) + 1
-    };
+    });
     await saveToLocal(collection, updatedData);
     addToSyncQueue('update', collection, updatedData, String(id));
     if (isOnline) await processSyncQueue();
@@ -328,7 +329,7 @@ async function updateWithLock(collection, id, updateFn, maxRetries = 3) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         const current = await get(collection, id);
         if (!current) throw new Error(`Không tìm thấy ${collection}/${id}`);
-        const newData = await updateFn({ ...current });
+        const newData = await updateFn(Object.assign({}, current));
         if (newData._version !== current._version) {
             console.log(`Conflict, retry ${attempt+1}`);
             await new Promise(resolve => setTimeout(resolve, 100 * (attempt+1)));
@@ -349,7 +350,7 @@ async function lockTable(tableId, userId, timeout = 30000) {
     if (existing && existing.expiresAt > Date.now() && existing.userId !== userId) {
         return { success: false, lockedBy: existing.userId, expiresIn: existing.expiresAt - Date.now() };
     }
-    const lock = { userId, expiresAt: Date.now() + timeout, tableData: { ...table } };
+    const lock = { userId: userId, expiresAt: Date.now() + timeout, tableData: Object.assign({}, table) };
     tableLocks.set(String(tableId), lock);
     setTimeout(() => {
         const existingLock = tableLocks.get(String(tableId));
@@ -369,23 +370,22 @@ function getTableLock(tableId) {
 }
 
 function mergeTableData(localData, remoteData) {
-    const mergedItems = [...(localData.items || [])];
-    for (const remoteItem of (remoteData.items || [])) {
-        const existingIndex = mergedItems.findIndex(i => i.name === remoteItem.name);
+    var mergedItems = localData.items ? localData.items.slice() : [];
+    for (var ri = 0; ri < (remoteData.items || []).length; ri++) {
+        var remoteItem = remoteData.items[ri];
+        var existingIndex = mergedItems.findIndex(function(i) { return i.name === remoteItem.name; });
         if (existingIndex >= 0) {
             mergedItems[existingIndex].qty = Math.max(mergedItems[existingIndex].qty, remoteItem.qty);
         } else {
-            mergedItems.push({ ...remoteItem });
+            mergedItems.push(Object.assign({}, remoteItem));
         }
     }
-    const total = mergedItems.reduce((sum, i) => sum + (i.price || 0) * (i.qty || 0), 0);
-    return {
-        ...localData,
-        ...remoteData,
+    var total = mergedItems.reduce(function(sum, i) { return sum + (i.price || 0) * (i.qty || 0); }, 0);
+    return Object.assign({}, localData, remoteData, {
         items: mergedItems,
         total: total,
         _mergedAt: Date.now()
-    };
+    });
 }
 
 // ========== NETWORK STATUS (fix duplicate) ==========
@@ -476,9 +476,13 @@ function initStaffList() {
             });
             console.log('✅ Đã tạo danh sách nhân viên mặc định (không password)');
         } else {
-            const data = snapshot.val();
-            window.staffList = Object.keys(data).map(key => ({ id: key, ...data[key] }));
-            console.log(`✅ Đã tải ${window.staffList.length} nhân viên`);
+            var data = snapshot.val();
+            window.staffList = Object.keys(data).map(function(key) {
+                var item = data[key] || {};
+                var result = Object.assign({ id: key }, item);
+                return result;
+            });
+            console.log('✅ Đã tải ' + window.staffList.length + ' nhân viên');
         }
     });
 }

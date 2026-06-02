@@ -172,7 +172,7 @@ async function updateItemQuantity(tableId, itemIndex, delta) {
     const tid = String(tableId);
     let table = await DB.get('tables', tid);
     if (!table) return;
-    const items = [...(table.items || [])];
+    var items = table.items ? table.items.slice() : [];
     if (itemIndex < 0 || itemIndex >= items.length) return;
     const newQty = items[itemIndex].qty + delta;
     if (newQty <= 0) {
@@ -332,7 +332,7 @@ async function showTransferTableModal(tableId) {
         }
 
         // Cập nhật bàn nguồn (trừ món)
-        let remainingItems = sourceTable.items.map(i => ({ ...i }));
+        var remainingItems = sourceTable.items.map(function(i) { return Object.assign({}, i); });
         for (let sel of selectedItems) {
             const existing = remainingItems.find(i => i.name === sel.name);
             if (existing) existing.qty -= sel.qty;
@@ -456,12 +456,12 @@ async function mergeTables(sourceTable, targetId) {
     }
 
     // Cộng dồn món từ bàn nguồn vào bàn đích
-    let targetItems = targetTable.items ? [...targetTable.items] : [];
-    let sourceItems = sourceTable.items ? [...sourceTable.items] : [];
+    var targetItems = targetTable.items ? targetTable.items.slice() : [];
+    var sourceItems = sourceTable.items ? sourceTable.items.slice() : [];
     for (let srcItem of sourceItems) {
-        const existing = targetItems.find(i => i.name === srcItem.name);
+        const existing = targetItems.find(function(i) { return i.name === srcItem.name; });
         if (existing) existing.qty += srcItem.qty;
-        else targetItems.push({ ...srcItem });
+        else targetItems.push(Object.assign({}, srcItem));
     }
     const newTotal = targetItems.reduce((sum, i) => sum + (i.price * i.qty), 0);
     await DB.update('tables', targetId, { items: targetItems, total: newTotal, status: 'occupied' });
@@ -660,15 +660,15 @@ async function showPaymentMethod(type, tableId, amount) {
         const tid = String(tableId);
         const table = await DB.get('tables', tid);
         if (table) {
-            items = [...(table.items || [])];
+            items = table.items ? table.items.slice() : [];
             tableName = table.name;
             startTime = table.startTime;
         }
     } else {
-        items = [...tempOrder];
+        items = tempOrder.slice();
         tableName = 'Mang đi';
     }
-    let sittingTime = '';
+    let sittingTime = ''; 
     if (startTime) {
         const diffMins = Math.floor((Date.now() - new Date(startTime)) / 60000);
         const diffHours = Math.floor(diffMins / 60);
@@ -777,9 +777,9 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
                 items = customItems;
                 customerName = table.customerName || '';
                 tableName = table.name;
-                let remainingItems = table.items.map(i => ({ ...i }));
+                var remainingItems = table.items.map(function(i) { return Object.assign({}, i); });
                 for (let paid of customItems) {
-                    const idx = remainingItems.findIndex(i => i.name === paid.name);
+                    const idx = remainingItems.findIndex(function(i) { return i.name === paid.name; });
                     if (idx !== -1) {
                         remainingItems[idx].qty -= paid.qty;
                         if (remainingItems[idx].qty <= 0) remainingItems.splice(idx, 1);
@@ -794,7 +794,7 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
                 }
             } else {
                 // Thanh toán toàn bộ bàn -> xóa bàn
-                items = [...(table.items || [])];
+                items = table.items ? table.items.slice() : [];
                 customerName = table.customerName || '';
                 tableName = table.name;
                 await DB.remove('tables', tid);
@@ -807,17 +807,17 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
         const tid = String(tableId);
         const table = await DB.get('tables', tid);
         if (table) {
-            items = customItems ? customItems : [...(table.items || [])];
+            items = customItems ? customItems : (table.items ? table.items.slice() : []);
             customerName = table.customerName || '';
             tableName = table.name;
             await DB.remove('tables', tid);
             console.log('🗑️ Đã xóa bàn nợ:', tid);
         }
     } else {
-        items = [...tempOrder];
+        items = tempOrder.slice();
         customerName = currentSelectedCustomer && currentSelectedCustomer.name ? currentSelectedCustomer.name : '';
         tableName = 'Mang đi';
-        tempOrder = [];
+        tempOrder = []; 
     }
 
     if (typeof addHistory === 'function') {
@@ -1004,14 +1004,17 @@ function renderTempCartOrder() {
                         // Thêm vào bàn hiện có
                         const table = await DB.get('tables', String(currentContext.tableId));
                         if (table) {
-                            const existingItems = table.items || [];
-                            existingItems.push(...tempOrder.map(item => ({
-                                id: item.id,
-                                name: item.name,
-                                price: item.price,
-                                qty: item.qty,
-                                addedTime: item.addedTime
-                            })));
+                            var existingItems = table.items || [];
+                            var itemsToAdd = tempOrder.map(function(item) {
+                                return {
+                                    id: item.id,
+                                    name: item.name,
+                                    price: item.price,
+                                    qty: item.qty,
+                                    addedTime: item.addedTime
+                                };
+                            });
+                            existingItems.push.apply(existingItems, itemsToAdd);
                             const newTotal = existingItems.reduce((s, i) => s + ((i.price || 0) * (i.qty || 0)), 0);
                             await DB.update('tables', String(currentContext.tableId), { items: existingItems, total: newTotal });
                             if (table.status === 'empty') {
@@ -1052,14 +1055,17 @@ function renderTempCartOrder() {
                         };
                         await DB.create('tables', newTable, newId);
                         // Thêm món vào bàn mới
-                        const existingItems = newTable.items || [];
-                        existingItems.push(...tempOrder.map(item => ({
-                            id: item.id,
-                            name: item.name,
-                            price: item.price,
-                            qty: item.qty,
-                            addedTime: item.addedTime
-                        })));
+                        var existingItems = newTable.items || [];
+                        var itemsToAdd = tempOrder.map(function(item) {
+                            return {
+                                id: item.id,
+                                name: item.name,
+                                price: item.price,
+                                qty: item.qty,
+                                addedTime: item.addedTime
+                            };
+                        });
+                        existingItems.push.apply(existingItems, itemsToAdd);
                         const newTotal = existingItems.reduce((s, i) => s + ((i.price || 0) * (i.qty || 0)), 0);
                         const now = new Date();
                         await DB.update('tables', newId, {
@@ -1105,9 +1111,9 @@ async function processTakeawayPayment(method) {
             type: 'takeaway',
             amount: total,
             paymentMethod: method,
-            items: [...tempOrder],
+            items: tempOrder.slice(),
             customer: currentSelectedCustomer ? { id: currentSelectedCustomer.id, name: currentSelectedCustomer.name } : null,
-            note: `Bán mang đi - ${method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}`
+            note: 'Bán mang đi - ' + (method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản')
         });
     }
     showToast(`✅ Thanh toán thành công ${formatMoney(total)}`, 'success');
@@ -1173,12 +1179,12 @@ if (confirmOrderButton) {
         const table = await DB.get('tables', String(currentContext.tableId));
         if (table) {
             const existingItems = table.items || [];
-            tempOrder.forEach(newItem => {
-                const ex = existingItems.find(i => i.name === newItem.name);
+            tempOrder.forEach(function(newItem) {
+                const ex = existingItems.find(function(i) { return i.name === newItem.name; });
                 if (ex) ex.qty += newItem.qty;
-                else existingItems.push({ ...newItem });
+                else existingItems.push(Object.assign({}, newItem));
             });
-            const newTotal = existingItems.reduce((s, i) => s + ((i.price || 0) * (i.qty || 0)), 0);
+            const newTotal = existingItems.reduce(function(s, i) { return s + ((i.price || 0) * (i.qty || 0)); }, 0);
             const now = new Date();
             await DB.update('tables', String(currentContext.tableId), {
                 items: existingItems, total: newTotal, status: 'occupied',
@@ -1197,12 +1203,12 @@ if (confirmOrderButton) {
         const table = await DB.get('tables', String(currentContext.tableId));
         if (table) {
             const existingItems = table.items || [];
-            tempOrder.forEach(newItem => {
-                const ex = existingItems.find(i => i.name === newItem.name);
+            tempOrder.forEach(function(newItem) {
+                const ex = existingItems.find(function(i) { return i.name === newItem.name; });
                 if (ex) ex.qty += newItem.qty;
-                else existingItems.push({ ...newItem });
+                else existingItems.push(Object.assign({}, newItem));
             });
-            const newTotal = existingItems.reduce((s, i) => s + ((i.price || 0) * (i.qty || 0)), 0);
+            const newTotal = existingItems.reduce(function(s, i) { return s + ((i.price || 0) * (i.qty || 0)); }, 0);
             await DB.update('tables', String(currentContext.tableId), { items: existingItems, total: newTotal });
             if (table.status === 'empty') {
                 const now = new Date();
@@ -1541,9 +1547,49 @@ function importAllData(input) {
     if (typeof initHistory === 'function') initHistory();
     loadSettings();
 
+    window.addEventListener('db_update', async function (event) {
+        var collection = event.detail && event.detail.collection;
+        var data = event.detail && event.detail.data;
+        if (!collection) return;
+
+        if (collection === 'tables') {
+            cachedTables = null;
+            await renderTables();
+            if (currentContext && currentContext.type === 'detailView' && currentContext.tableId) {
+                refreshTableDetailContent(String(currentContext.tableId));
+            }
+        }
+
+        if (collection === 'customers') {
+            window.customers = Array.isArray(data) ? data : await DB.getAll('customers');
+            if (typeof renderCustomerList === 'function') renderCustomerList();
+        }
+
+        if (collection === 'menu' || collection === 'menu_categories') {
+            window.menuItems = await DB.getAll('menu');
+            window.menuCategories = await DB.getAll('menu_categories');
+            if (typeof renderMenuManager === 'function') renderMenuManager();
+        }
+
+        if (collection === 'ingredients') {
+            window.ingredients = Array.isArray(data) ? data : await DB.getAll('ingredients');
+            if (typeof renderIngredients === 'function') renderIngredients();
+        }
+
+        if (collection === 'transactions') {
+            if (typeof initHistory === 'function') initHistory();
+        }
+
+        if (collection === 'reports') {
+            if (typeof initReport === 'function') initReport();
+        }
+
+        if (typeof resetReportCache === 'function') resetReportCache();
+    });
+
     setInterval(() => {
         const activeTabContent = document.querySelector('.tab-content.active');
-    if (activeTabContent && activeTabContent.id === 'tablesView') renderTables();
+        if (activeTabContent && activeTabContent.id === 'tablesView') renderTables();
     }, 60000);
 })();
 
@@ -1706,34 +1752,58 @@ function applyFlexGapFallback() {
         return;
     }
 
+    const gapRules = [];
+
     function processRule(rule) {
         if (rule.type === CSSRule.STYLE_RULE && rule.style) {
             const gapValue = rule.style.gap || rule.style.rowGap || rule.style.columnGap;
             if (gapValue && gapValue !== '0px') {
-                try {
-                    const elements = document.querySelectorAll(rule.selectorText);
-                    elements.forEach(el => {
-                        el.style.margin = `calc(-1 * ${gapValue}) 0 0 calc(-1 * ${gapValue})`;
-                        Array.from(el.children).forEach(child => {
-                            child.style.margin = `${gapValue} 0 0 ${gapValue}`;
-                        });
-                    });
-                } catch (e) {
-                    // Ignore invalid selectors or unsupported rules
-                }
+                gapRules.push({ selector: rule.selectorText, gapValue: gapValue });
             }
         } else if (rule.cssRules) {
             Array.from(rule.cssRules).forEach(processRule);
         }
     }
 
-    Array.from(document.styleSheets).forEach(sheet => {
-        try {
-            Array.from(sheet.cssRules || []).forEach(processRule);
-        } catch (e) {
-            // Ignore cross-origin or invalid stylesheet access
-        }
+    function applyGapFallback() {
+        gapRules.forEach(rule => {
+            try {
+                const elements = document.querySelectorAll(rule.selector);
+                Array.from(elements).forEach(el => {
+                    el.style.margin = 'calc(-1 * ' + rule.gapValue + ') 0 0 calc(-1 * ' + rule.gapValue + ')';
+                    Array.from(el.children).forEach(function(child) {
+                        child.style.margin = rule.gapValue + ' 0 0 ' + rule.gapValue;
+                    });
+                });
+            } catch (e) {
+                // Ignore invalid selectors or unsupported rules
+            }
+        });
+    }
+
+    function scanStyleSheets() {
+        gapRules.length = 0;
+        Array.from(document.styleSheets).forEach(sheet => {
+            try {
+                Array.from(sheet.cssRules || []).forEach(processRule);
+            } catch (e) {
+                // Ignore cross-origin or invalid stylesheet access
+            }
+        });
+    }
+
+    scanStyleSheets();
+    applyGapFallback();
+
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                applyGapFallback();
+            }
+        });
     });
+
+    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
 }
 
 document.addEventListener('DOMContentLoaded', applyFlexGapFallback);
