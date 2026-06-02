@@ -31,17 +31,19 @@ let dbReadyPromise = null;
 let syncQueue = [];
 let isOnline = navigator.onLine;
 let listeners = {};
+let analyticsSubscriptionsStarted = false;
 
 function initLocalDB() {
     if (dbReadyPromise) return dbReadyPromise;
     
     dbReadyPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(STORE_NAME, 4); // tăng version để đảm bảo upgrade
+        const request = indexedDB.open(STORE_NAME, 5); // bump version để thêm index tối ưu transactions
         
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
             localDB = request.result;
             loadSyncQueue();
+            backfillTransactionIndexes();
             resolve(localDB);
         };
         
@@ -57,10 +59,41 @@ function initLocalDB() {
                     console.log(`✅ Created object store: ${storeName}`);
                 }
             }
+
+            if (db.objectStoreNames.contains('transactions')) {
+                const txStore = event.target.transaction.objectStore('transactions');
+                if (!txStore.indexNames.contains('dateKey')) {
+                    txStore.createIndex('dateKey', 'dateKey', { unique: false });
+                }
+                if (!txStore.indexNames.contains('type')) {
+                    txStore.createIndex('type', 'type', { unique: false });
+                }
+                if (!txStore.indexNames.contains('dateTypeKey')) {
+                    txStore.createIndex('dateTypeKey', 'dateTypeKey', { unique: false });
+                }
+            }
         };
     });
     
     return dbReadyPromise;
+}
+
+async function backfillTransactionIndexes() {
+    try {
+        if (!localDB || !localDB.objectStoreNames.contains('transactions')) return;
+        const txs = await loadFromLocal('transactions');
+        if (!txs || txs.length === 0) return;
+        for (let i = 0; i < txs.length; i++) {
+            const t = txs[i];
+            if (!t) continue;
+            if (!t.dateKey || !t.dateTypeKey) {
+                await saveToLocal('transactions', t);
+            }
+            if (i % 50 === 49) await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    } catch (err) {
+        console.warn('⚠️ backfillTransactionIndexes lỗi:', err);
+    }
 }
 
 // ---------- Local CRUD (có fallback number) ----------
@@ -73,10 +106,34 @@ async function saveToLocal(collection, data) {
     return new Promise((resolve, reject) => {
         const transaction = localDB.transaction([collection], 'readwrite');
         const store = transaction.objectStore(collection);
-        const request = store.put(data);
+        const normalizedData = normalizeIndexedFields(collection, data);
+        const request = store.put(normalizedData);
         request.onsuccess = () => resolve(data);
         request.onerror = () => reject(request.error);
     });
+}
+
+function toDateKey(value) {
+    if (!value) return '';
+    if (typeof value === 'string') {
+        if (value.length >= 10 && value[4] === '-' && value[7] === '-') return value.slice(0, 10);
+        const parsed = Date.parse(value);
+        if (!isNaN(parsed)) return new Date(parsed).toISOString().slice(0, 10);
+        return '';
+    }
+    if (typeof value === 'number') return new Date(value).toISOString().slice(0, 10);
+    return '';
+}
+
+function normalizeIndexedFields(collection, data) {
+    if (!data || typeof data !== 'object') return data;
+    if (collection !== 'transactions') return data;
+    const normalized = Object.assign({}, data);
+    const dateKey = toDateKey(normalized.date || normalized.createdAt || normalized.updatedAt);
+    normalized.dateKey = dateKey;
+    normalized.type = normalized.type || 'unknown';
+    normalized.dateTypeKey = `${dateKey}|${normalized.type}`;
+    return normalized;
 }
 
 async function loadFromLocal(collection, id = null) {
@@ -129,6 +186,58 @@ async function deleteFromLocal(collection, id) {
             } else reject(request.error);
         };
     });
+}
+
+async function pruneCollectionByAge(collection, maxAgeMs, dateFieldCandidates) {
+    const items = await loadFromLocal(collection);
+    if (!items || items.length === 0) return 0;
+    const now = Date.now();
+    let deletedCount = 0;
+
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i] || {};
+        let ts = 0;
+
+        for (const field of dateFieldCandidates) {
+            const value = item[field];
+            if (!value) continue;
+            if (typeof value === 'number') {
+                ts = value;
+                break;
+            }
+            if (typeof value === 'string') {
+                const parsed = Date.parse(value);
+                if (!isNaN(parsed)) {
+                    ts = parsed;
+                    break;
+                }
+            }
+        }
+
+        if (!ts) continue;
+        if ((now - ts) > maxAgeMs) {
+            await deleteFromLocal(collection, item.id);
+            deletedCount++;
+        }
+
+        // Yield nhẹ sau mỗi batch để tránh block UI trên thiết bị yếu.
+        if (i % 50 === 49) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return deletedCount;
+}
+
+async function pruneLocalData() {
+    try {
+        const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+        const prunedTransactions = await pruneCollectionByAge('transactions', THIRTY_DAYS_MS, ['date', 'createdAt', 'updatedAt']);
+        const prunedReports = await pruneCollectionByAge('reports', THIRTY_DAYS_MS, ['date', 'createdAt', 'updatedAt']);
+        const totalPruned = prunedTransactions + prunedReports;
+        if (totalPruned > 0) {
+            console.log(`🧹 Đã dọn localDB: ${prunedTransactions} transactions, ${prunedReports} reports`);
+        }
+    } catch (error) {
+        console.warn('⚠️ pruneLocalData lỗi:', error);
+    }
 }
 
 // ========== SYNC QUEUE ==========
@@ -225,6 +334,64 @@ async function syncToFirebase(queueItem) {
 
 function subscribeToCollection(collection, callback) {
     const ref = db.ref(`${CURRENT_SHOP_ID}/${collection}`);
+    const useIncremental = (collection === 'transactions' || collection === 'reports');
+
+    if (useIncremental) {
+        let updateScheduled = false;
+        const emitUpdate = async () => {
+            if (updateScheduled) return;
+            updateScheduled = true;
+            setTimeout(async () => {
+                updateScheduled = false;
+                const data = await loadFromLocal(collection);
+                if (callback) callback(data);
+                window.dispatchEvent(new CustomEvent('db_update', { detail: { collection, data } }));
+            }, 50);
+        };
+
+        const onAdded = async (snapshot) => {
+            if (!snapshot.exists()) return;
+            const key = snapshot.key;
+            const source = snapshot.val() || {};
+            const item = Object.assign({ id: key }, source);
+            await saveToLocal(collection, item);
+            await emitUpdate();
+        };
+
+        const onChanged = async (snapshot) => {
+            if (!snapshot.exists()) return;
+            const key = snapshot.key;
+            const source = snapshot.val() || {};
+            const item = Object.assign({ id: key }, source);
+            await saveToLocal(collection, item);
+            await emitUpdate();
+        };
+
+        const onRemoved = async (snapshot) => {
+            const key = snapshot.key;
+            await deleteFromLocal(collection, key);
+            await emitUpdate();
+        };
+
+        ref.on('child_added', onAdded);
+        ref.on('child_changed', onChanged);
+        ref.on('child_removed', onRemoved);
+
+        if (!listeners[collection]) listeners[collection] = [];
+        listeners[collection].push({
+            mode: 'incremental',
+            added: onAdded,
+            changed: onChanged,
+            removed: onRemoved
+        });
+
+        return () => {
+            ref.off('child_added', onAdded);
+            ref.off('child_changed', onChanged);
+            ref.off('child_removed', onRemoved);
+        };
+    }
+
     let lastDataStr = '';
     let updateScheduled = false;
     let isFirstSync = true;
@@ -376,6 +543,38 @@ async function getAll(collection) {
     return data || [];
 }
 
+async function getTransactionsByDate(dateKey, options = {}) {
+    await dbReadyPromise;
+    if (!localDB) return [];
+    if (!localDB.objectStoreNames.contains('transactions')) return [];
+
+    const type = options.type || 'all';
+    return new Promise((resolve, reject) => {
+        const tx = localDB.transaction(['transactions'], 'readonly');
+        const store = tx.objectStore('transactions');
+
+        let request;
+        if (type && type !== 'all' && store.indexNames.contains('dateTypeKey')) {
+            request = store.index('dateTypeKey').getAll(`${dateKey}|${type}`);
+        } else if (store.indexNames.contains('dateKey')) {
+            request = store.index('dateKey').getAll(dateKey);
+        } else {
+            // Fallback cho dữ liệu/index cũ
+            request = store.getAll();
+        }
+
+        request.onsuccess = () => {
+            let rows = request.result || [];
+            if (!store.indexNames.contains('dateKey')) {
+                rows = rows.filter(r => toDateKey(r.date) === dateKey);
+                if (type && type !== 'all') rows = rows.filter(r => r.type === type);
+            }
+            resolve(rows);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
 // ========== CHỐNG TRÙNG & LOCK ==========
 async function updateWithLock(collection, id, updateFn, maxRetries = 3) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -471,6 +670,7 @@ const SYNC_COLLECTIONS = [
 
 async function initDatabase() {
     await initLocalDB();
+    await pruneLocalData();
     initNetworkListener();
     initStaffList();
 
@@ -504,11 +704,17 @@ async function initDatabase() {
     subscribeToCollection('menu');
     subscribeToCollection('menu_categories');
     subscribeToCollection('ingredients');
-    subscribeToCollection('transactions');
-    subscribeToCollection('reports');
 
     console.log('✅ Database initialized, device:', CURRENT_DEVICE_ID);
     return { isOnline, deviceId: CURRENT_DEVICE_ID };
+}
+
+function ensureAnalyticsSubscriptions() {
+    if (analyticsSubscriptionsStarted) return;
+    analyticsSubscriptionsStarted = true;
+    subscribeToCollection('transactions');
+    subscribeToCollection('reports');
+    console.log('📊 Analytics realtime subscriptions started');
 }
 
 async function deleteItem(tableName, id) {
@@ -571,10 +777,12 @@ function showToast(message, type = 'info') {
 window.DB = {
     init: initDatabase,
     create, update, remove, get, getAll,
+    getTransactionsByDate,
     updateWithLock, lockTable, unlockTable, getTableLock,
     isOnline: () => isOnline,
     getDeviceId: () => CURRENT_DEVICE_ID,
     subscribe: subscribeToCollection,
+    ensureAnalyticsSubscriptions,
     getSyncQueue: () => syncQueue,
     processSyncQueue
 };

@@ -1,15 +1,36 @@
 // ========== QUẢN LÝ NGUYÊN LIỆU (ĐỒNG BỘ FIREBASE) ==========
 let ingredients = [];
+let menuByNameMap = new Map();
+let ingredientByIdMap = new Map();
+
+function rebuildIngredientLookupMaps() {
+    const menuItems = Array.isArray(window.menuItems) ? window.menuItems : [];
+    const ingredientItems = Array.isArray(window.ingredients) ? window.ingredients : ingredients;
+
+    menuByNameMap = new Map();
+    ingredientByIdMap = new Map();
+
+    for (const item of menuItems) {
+        if (item && item.name) menuByNameMap.set(String(item.name), item);
+    }
+    for (const ing of ingredientItems) {
+        if (ing && ing.id !== undefined && ing.id !== null) {
+            ingredientByIdMap.set(String(ing.id), ing);
+        }
+    }
+}
 
 async function initIngredients() {
     ingredients = await DB.getAll('ingredients') || [];
     window.ingredients = ingredients;
+    rebuildIngredientLookupMaps();
     renderIngredients();
     console.log(`✅ Đã tải ${ingredients.length} nguyên liệu`);
 }
 
 function renderIngredients() {
     ingredients = window.ingredients || [];
+    rebuildIngredientLookupMaps();
     const container = document.getElementById('ingredientsList');
     if (!container) return;
     if (ingredients.length === 0) {
@@ -155,13 +176,13 @@ function checkLowStock() {
 
 async function deductIngredients(orderItems) {
     if (!orderItems || orderItems.length === 0) return;
-    const menuItems = window.menuItems || [];
+    rebuildIngredientLookupMaps();
     const updates = [];
     for (const orderItem of orderItems) {
-        const menuItem = menuItems.find(m => m.name === orderItem.name);
+        const menuItem = menuByNameMap.get(String(orderItem.name));
         if (menuItem && menuItem.ingredients && menuItem.ingredients.length) {
             for (const req of menuItem.ingredients) {
-                const ing = ingredients.find(i => i.id === req.ingredientId);
+                const ing = ingredientByIdMap.get(String(req.ingredientId));
                 if (ing) {
                     const newStock = ing.stock - (req.quantity * orderItem.qty);
                     ing.stock = Math.max(0, newStock);
@@ -181,14 +202,13 @@ async function deductIngredients(orderItems) {
 }
 
 async function checkStockForItems(orderItems) {
-    const menuItems = window.menuItems || [];
-    const ingredients = window.ingredients || [];
+    rebuildIngredientLookupMaps();
     for (const orderItem of orderItems) {
-        const menuItem = menuItems.find(m => m.name === orderItem.name);
+        const menuItem = menuByNameMap.get(String(orderItem.name));
         if (!menuItem) continue;
         const formula = menuItem.ingredients || [];
         for (const req of formula) {
-            const ing = ingredients.find(i => i.id === req.ingredientId);
+            const ing = ingredientByIdMap.get(String(req.ingredientId));
             if (!ing) {
                 showToast(`Nguyên liệu không tồn tại cho món ${orderItem.name}`, 'error');
                 return false;

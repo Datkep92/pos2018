@@ -2,22 +2,20 @@
 let historyData = [];
 let currentDisplayDate = new Date(); // KHỞI TẠO NGAY
 let historyRenderTimer;
+let historyRenderedCount = 0;
+const HISTORY_BATCH_SIZE = 60;
 // Khởi tạo: load dữ liệu từ DB
 async function initHistory() {
-    historyData = await DB.getAll('transactions') || [];
-    historyData.sort((a, b) => new Date(b.date) - new Date(a.date));
-    window.historyData = historyData;
     // Đảm bảo currentDisplayDate là ngày hợp lệ
     if (!currentDisplayDate || isNaN(currentDisplayDate.getTime())) {
         currentDisplayDate = new Date();
     }
-    renderHistoryByDate(currentDisplayDate);
-    console.log(`✅ Đã tải ${historyData.length} giao dịch`);
+    await renderHistoryByDate(currentDisplayDate);
 }
 function debouncedRenderHistory() {
     if (historyRenderTimer) clearTimeout(historyRenderTimer);
-    historyRenderTimer = setTimeout(() => {
-        renderHistoryByDate(currentDisplayDate);
+    historyRenderTimer = setTimeout(async () => {
+        await renderHistoryByDate(currentDisplayDate);
     }, 80);
 }
 // Thêm giao dịch mới
@@ -34,20 +32,17 @@ async function addHistory(transaction) {
         note: transaction.note || ''
     };
     await DB.create('transactions', newTrans);
-    historyData.unshift(newTrans);
-    if (historyData.length > 500) historyData.pop();
-    window.historyData = historyData;
     // Nếu đang ở tab lịch sử và ngày hiển thị là hôm nay, cập nhật lại
     const todayStr = new Date().toISOString().slice(0,10);
     const currentDateStr = currentDisplayDate.toISOString().slice(0,10);
     const historyView = document.getElementById('historyView');
     if (currentDateStr === todayStr && historyView && historyView.classList.contains('active')) {
-    debouncedRenderHistory();
-}
+        debouncedRenderHistory();
+    }
 }
 
 // Hiển thị lịch sử theo ngày (chuỗi YYYY-MM-DD)
-function renderHistoryByDate(dateObj) {
+async function renderHistoryByDate(dateObj) {
     // Kiểm tra dateObj hợp lệ
     if (!dateObj || isNaN(dateObj.getTime())) {
         dateObj = new Date();
@@ -60,12 +55,18 @@ function renderHistoryByDate(dateObj) {
         dateSpan.innerText = `${day}/${month}/${year}`;
     }
 
-    // Lọc giao dịch theo ngày
-    let filtered = historyData.filter(h => h.date && h.date.slice(0,10) === dateStr);
-    
-    // Lọc theo select
     const historyFilter = document.getElementById('historyFilter');
     const filterValue = historyFilter && historyFilter.value ? historyFilter.value : 'all';
+
+    // Query theo index ngày/type để tránh getAll + filter toàn bộ.
+    let filtered = [];
+    if (filterValue === 'all' || filterValue === 'cash' || filterValue === 'transfer' || filterValue === 'paid' || filterValue === 'debt') {
+        filtered = await DB.getTransactionsByDate(dateStr);
+    } else {
+        filtered = await DB.getTransactionsByDate(dateStr, { type: filterValue });
+    }
+    
+    // Lọc theo select
     if (filterValue !== 'all') {
         if (filterValue === 'cash') {
             filtered = filtered.filter(h => h.paymentMethod === 'cash');
@@ -82,6 +83,8 @@ function renderHistoryByDate(dateObj) {
     
     // Sắp xếp theo thời gian giảm dần (mới nhất trước)
     filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+    historyData = filtered;
+    window.historyData = historyData;
     
     const container = document.getElementById('historyList');
     if (!container) return;
@@ -89,8 +92,12 @@ function renderHistoryByDate(dateObj) {
         container.innerHTML = '<div class="empty-state">📭 Không có giao dịch trong ngày này</div>';
         return;
     }
-    // Hiển thị danh sách kèm STT và số lượng món
-    container.innerHTML = filtered.map((h, index) => {
+    historyRenderedCount = Math.min(HISTORY_BATCH_SIZE, filtered.length);
+    renderHistoryBatched(container, filtered, historyRenderedCount);
+}
+
+function renderHistoryBatched(container, filtered, visibleCount) {
+    const html = filtered.slice(0, visibleCount).map((h, index) => {
         const stt = index + 1;
         const totalItems = h.items ? h.items.reduce((sum, item) => sum + item.qty, 0) : 0;
         return `
@@ -110,6 +117,19 @@ function renderHistoryByDate(dateObj) {
             </div>
         `;
     }).join('');
+
+    const hasMore = visibleCount < filtered.length;
+    container.innerHTML = html + (hasMore ? `<button id="historyLoadMoreBtn" class="btn-primary" style="width:100%; margin-top:8px;">Xem thêm</button>` : '');
+
+    if (hasMore) {
+        const loadMoreBtn = document.getElementById('historyLoadMoreBtn');
+        if (loadMoreBtn) {
+            loadMoreBtn.onclick = () => {
+                historyRenderedCount = Math.min(historyRenderedCount + HISTORY_BATCH_SIZE, filtered.length);
+                renderHistoryBatched(container, filtered, historyRenderedCount);
+            };
+        }
+    }
 }
 
 function changeDisplayDate(delta) {

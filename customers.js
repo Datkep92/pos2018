@@ -171,8 +171,7 @@ function renderCustomerList() {
     const customerSearchInput = document.getElementById('customerSearchInput');
     const keyword = customerSearchInput && customerSearchInput.value ? customerSearchInput.value.toLowerCase() : '';
     let filtered = customers;
-    if (keyword) filtered = customers.filter(c => c.name.toLowerCase().includes(keyword) || c.phone.includes(keyword));
-    const totalNet = filtered.reduce((s, c) => s + (c.totalDebt || 0), 0);
+if (keyword) filtered = customers.filter(c => c.name.toLowerCase().includes(keyword) || (c.phone && c.phone.includes(keyword)));    const totalNet = filtered.reduce((s, c) => s + (c.totalDebt || 0), 0);
     const totalDebtEl = document.getElementById('totalDebtAmount');
     if (totalDebtEl) totalDebtEl.innerText = totalNet > 0 ? formatMoney(totalNet) : (totalNet < 0 ? `💚 Dư ${formatMoney(-totalNet)}` : '0đ');
     if (filtered.length === 0) {

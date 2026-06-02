@@ -7,6 +7,8 @@ let dbUpdateTimer = null;
 let lastTablesFetch = 0;
 const TABLES_CACHE_TTL = 2000;
 let cachedTables = null;  // <-- THÊM DÒNG NÀY
+let renderTablesRafId = null;
+let renderTablesPending = false;
 
 // ========== UTILS ==========
 function formatMoney(amount) {
@@ -82,10 +84,7 @@ async function renderTables() {
         t.status === 'debt'
     );
     
-    if (activeTables.length === 0) {
-        grid.innerHTML = `<div class="empty-state"><div class="empty-icon">🍽️</div><div>Không có bàn nào đang phục vụ</div><button class="btn-add-table" onclick="document.getElementById('floatNewtableBtn').click()">+ Tạo bàn mới</button></div>`;
-        return;
-    }
+   
     
     grid.innerHTML = activeTables.map(table => {
         const itemCount = (table.items || []).reduce((s, i) => s + (i.qty || 0), 0);
@@ -118,8 +117,9 @@ async function renderTables() {
                 </div>
                 <div class="table-icons">
                     <div class="table-icon-btn" onclick="event.stopPropagation(); openAddMenuForTable('${table.id}')">➕</div>
-                    <div class="table-icon-btn" onclick="event.stopPropagation(); showPaymentMethod('dinein', '${table.id}', ${total})">💸</div>
                     <div class="table-icon-btn" onclick="event.stopPropagation(); debtTable('${table.id}')">💢</div>
+                    <div class="table-icon-btn" onclick="event.stopPropagation(); showPaymentMethod('dinein', '${table.id}', ${total})">💸</div>
+
                 </div>
             </div>
         `;
@@ -127,6 +127,18 @@ async function renderTables() {
     
     const diningCount = document.getElementById('diningCount');
     if (diningCount) diningCount.innerText = activeTables.length;
+}
+
+function scheduleRenderTables(force = false) {
+    if (force) cachedTables = null;
+    renderTablesPending = true;
+    if (renderTablesRafId) return;
+    renderTablesRafId = window.requestAnimationFrame(async () => {
+        renderTablesRafId = null;
+        if (!renderTablesPending) return;
+        renderTablesPending = false;
+        await renderTables();
+    });
 }
 async function showTableDetail(tableId) {
     const tid = String(tableId);
@@ -154,7 +166,7 @@ async function showTableDetail(tableId) {
         <div class="detail-item-row" data-item-idx="${idx}">
             <div class="detail-item-info">
                 <div class="detail-item-name">${escapeHtml(item.name)}</div>
-                <div class="detail-item-price">${formatMoney(item.price)}đ</div>
+                <div class="detail-item-price">${formatMoney(item.price)}</div>
                 ${timeStr ? `<div class="detail-item-time" style="font-size:10px; color:#888;">🕒 ${timeStr}</div>` : ''}
             </div>
             <div class="detail-item-controls">
@@ -220,7 +232,7 @@ async function updateItemQuantity(tableId, itemIndex, delta) {
     if (detailModal && detailModal.style.display === 'flex' && currentContext && currentContext.tableId === tid) {
         await refreshTableDetailContent(tid);
     }
-    await renderTables();
+    scheduleRenderTables();
     showToast('Đã cập nhật món', 'success');
 }
 
@@ -242,8 +254,8 @@ async function refreshTableDetailContent(tableId) {
                 <div class="detail-item-row" data-item-idx="${idx}">
                     <div class="detail-item-info">
                         <div class="detail-item-name">${escapeHtml(item.name)}</div>
-                        <div class="detail-item-price">${formatMoney(item.price)}đ</div>
-                        ${timeStr ? `<div class="detail-item-time" style="font-size:10px; color:#888;">🕒 ${timeStr}</div>` : ''}
+                        <div class="detail-item-price">${formatMoney(item.price)}</div>
+                        ${timeStr ? `<div class="detail-item-time">🕒 ${timeStr}</div>` : ''}
                     </div>
                     <div class="detail-item-controls">
                         <button class="btn-qty" onclick="updateItemQuantity('${table.id}', ${idx}, -1)">-</button>
@@ -387,7 +399,7 @@ async function showTransferTableModal(tableId) {
 
         // KHÔNG xử lý công nợ (theo yêu cầu)
         closeModal('transferTableModal');
-        await renderTables();
+        scheduleRenderTables(true);
         if (document.getElementById('tableDetailModal').style.display === 'flex') {
             await showTableDetail(tid);
         }
@@ -508,7 +520,7 @@ async function mergeTables(sourceTable, targetId) {
         return;
     }
 
-    await renderTables();
+    scheduleRenderTables(true);
     closeModal('tableDetailModal');
     closeModal('mergeTableModal');
     showToast(`✅ Đã gộp bàn "${sourceTable.name}" vào bàn "${targetTable.name}"`, 'success');
@@ -686,7 +698,7 @@ async function confirmSplitPayment() {
     }
 
     closeModal('splitBillModal');
-    await renderTables();
+    scheduleRenderTables(true);
     if (document.getElementById('tableDetailModal').style.display === 'flex') {
         await showTableDetail(tableId);
     }
@@ -730,28 +742,29 @@ async function showPaymentMethod(type, tableId, amount) {
     
     const modalBody = document.getElementById('paymentModalBody');
     modalBody.innerHTML = `
-        <div class="payment-info-section">
-            <div class="payment-info-row"><span>📌 Bàn</span><span>${tableName}</span></div>
-            <div class="payment-info-row"><span>⏱️ Thời gian</span><span>${new Date().toLocaleString('vi-VN')}</span></div>
-            ${sittingTime ? `<div class="payment-info-row"><span>🕑 Thời gian ngồi</span><span>${sittingTime}</span></div>` : ''}
-        </div>
-        <div class="payment-items-title">📋 Danh sách món</div>
-        <div class="payment-items-list">
-            ${items.map(item => `<div><span>${item.name} x${item.qty}</span><span>${formatMoney((item.price || 0) * (item.qty || 0))}</span></div>`).join('')}
-        </div>
-        <div class="payment-summary-row">
-    <div class="payment-items-count">📦 <strong>${totalItems} món</strong></div>
-
-    <div class="payment-total">
-        <span class="label">💰 Tổng tiền</span>
-        <span class="amount">${formatMoney(amount)}</span>
+    <div class="payment-header">
+        💸 Thanh toán - ${escapeHtml(tableName)}
     </div>
-</div>
-        <div class="payment-methods">
-            <button class="payment-method-btn cash" onclick="processPaymentDirect('${type}', '${tableId}', ${amount}, 'cash')">💰 Tiền mặt</button>
-            <button class="payment-method-btn transfer" onclick="processPaymentDirect('${type}', '${tableId}', ${amount}, 'transfer')">💳 Chuyển khoản</button>
+    <div class="payment-time-row">
+        <span>🕒 ${new Date().toLocaleString('vi-VN')}</span>
+        ${sittingTime ? `<span>⏱️ ${sittingTime}</span>` : ''}
+    </div>
+    <div class="payment-items-title">📋 Danh sách món</div>
+    <div class="payment-items-list">
+        ${items.map(item => `<div><span>${escapeHtml(item.name)} x${item.qty}</span><span>${formatMoney((item.price || 0) * (item.qty || 0))}</span></div>`).join('')}
+    </div>
+    <div class="payment-summary-row">
+        <div class="payment-items-count">📦 <strong>${totalItems} món</strong></div>
+        <div class="payment-total">
+            <span class="label">💰 Tổng tiền</span>
+            <span class="amount">${formatMoney(amount)}</span>
         </div>
-    `;
+    </div>
+    <div class="payment-methods">
+        <button class="payment-method-btn cash" onclick="processPaymentDirect('${type}', '${tableId}', ${amount}, 'cash')">💰 Tiền mặt</button>
+        <button class="payment-method-btn transfer" onclick="processPaymentDirect('${type}', '${tableId}', ${amount}, 'transfer')">💳 Chuyển khoản</button>
+    </div>
+`;
     document.getElementById('paymentModal').style.display = 'flex';
 }
 async function showDebtTableDetail(tableId) {
@@ -916,7 +929,7 @@ async function processPaymentDirect(type, tableId, amount, paymentMethod, custom
     }
 
     showToast(`✅ Thanh toán thành công ${formatMoney(amount)}`, 'success');
-    await renderTables();
+    scheduleRenderTables(true);
     document.getElementById('paymentModal').style.display = 'none';
     document.getElementById('tableDetailModal').style.display = 'none';
     const reportView = document.getElementById('reportView');
@@ -944,7 +957,7 @@ async function debtTable(tableId) {
         if (typeof addCustomerDebt === 'function') {
             await addCustomerDebt(customer.id, total, note);
             await DB.remove('tables', tid);
-            await renderTables();
+            scheduleRenderTables(true);
             showToast(`💰 Đã ghi nợ ${formatMoney(total)} cho ${customer.name}`, 'success');
             document.getElementById('tableDetailModal').style.display = 'none';
             if (typeof renderDebtList === 'function') renderDebtList();
@@ -1058,8 +1071,8 @@ function renderTempCartOrder() {
     }).join('');
     totalSpan.innerText = `${totalQty} món - ${formatMoney(total)}`;
 
-    // Tạo nút hành động dựa trên context
     if (actionDiv) {
+        // Kiểm tra an toàn, không dùng optional chaining
         if (currentContext && currentContext.type === 'takeaway') {
             actionDiv.innerHTML = `
                 <div class="temp-cart-actions">
@@ -1070,7 +1083,6 @@ function renderTempCartOrder() {
             `;
         } else {
             actionDiv.innerHTML = `<button class="btn-confirm-add" id="confirmOrderBtn">✅ Xác nhận</button>`;
-            // Gắn lại sự kiện cho nút xác nhận (tránh gắn nhiều lần)
             const confirmBtn = document.getElementById('confirmOrderBtn');
             if (confirmBtn && !confirmBtn.hasClickListener) {
                 confirmBtn.hasClickListener = true;
@@ -1081,7 +1093,6 @@ function renderTempCartOrder() {
                         if (!enough) return;
                     }
                     if (currentContext && currentContext.type === 'addToTable' && currentContext.tableId) {
-                        // Thêm vào bàn hiện có
                         const table = await DB.get('tables', String(currentContext.tableId));
                         if (table) {
                             var existingItems = table.items || [];
@@ -1102,10 +1113,9 @@ function renderTempCartOrder() {
                                 await DB.update('tables', String(currentContext.tableId), { status: 'occupied', startTime: now.toISOString(), time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) });
                             }
                             await renderTables();
-                            showToast(`✅ Đã thêm món vào bàn`, 'success');
+                            showToast('✅ Đã thêm món vào bàn', 'success');
                         }
                     } else if (currentContext && currentContext.type === 'newtable') {
-                        // Tạo bàn mới với số thứ tự tự động
                         const allTables = await DB.getAll('tables');
                         let maxNumber = 0;
                         allTables.forEach(t => {
@@ -1134,7 +1144,6 @@ function renderTempCartOrder() {
                             customerName: null
                         };
                         await DB.create('tables', newTable, newId);
-                        // Thêm món vào bàn mới
                         var existingItems = newTable.items || [];
                         var itemsToAdd = tempOrder.map(function(item) {
                             return {
@@ -1289,7 +1298,7 @@ async function showCustomerSelectorForTable(tableId) {
                 updateData.time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
             }
             await DB.update('tables', tid, updateData);
-            await renderTables();
+            scheduleRenderTables(true);
             showToast(`✅ Đã gán khách hàng "${newCustomer.name}" cho bàn`, 'success');
 
             const activeSubTab = document.querySelector('.sub-tab.active');
@@ -1470,6 +1479,9 @@ document.querySelectorAll('.main-tab, .bottom-nav-item').forEach(tab => {
         if (tabId === 'customers' && typeof renderCustomerList === 'function') renderCustomerList();
         if (tabId === 'report' && typeof renderReport === 'function') renderReport();
         if (tabId === 'history' && typeof renderHistory === 'function') renderHistory();
+        if ((tabId === 'history' || tabId === 'report') && window.DB && typeof DB.ensureAnalyticsSubscriptions === 'function') {
+            DB.ensureAnalyticsSubscriptions();
+        }
         if (tabId === 'settings' && typeof loadSettings === 'function') loadSettings();
     });
 });
@@ -1569,7 +1581,7 @@ function importAllData(input) {
     // Cảnh báo nếu dữ liệu quá cũ trên iOS 12
     await checkDataFreshness();
 
-    await renderTables();
+    scheduleRenderTables(true);
     if (typeof renderCustomerList === 'function') renderCustomerList();
     if (typeof renderMenuManager === 'function') renderMenuManager();
     if (typeof renderIngredients === 'function') renderIngredients();
@@ -1587,7 +1599,7 @@ function importAllData(input) {
 
         if (collection === 'tables') {
             cachedTables = null;
-            await renderTables();
+            scheduleRenderTables(true);
             if (currentContext && currentContext.type === 'detailView' && currentContext.tableId) {
                 refreshTableDetailContent(String(currentContext.tableId));
             }
@@ -1620,10 +1632,7 @@ function importAllData(input) {
         if (typeof resetReportCache === 'function') resetReportCache();
     });
 
-    setInterval(() => {
-        const activeTabContent = document.querySelector('.tab-content.active');
-        if (activeTabContent && activeTabContent.id === 'tablesView') renderTables();
-    }, 60000);
+    // Realtime đã chủ động cập nhật bảng, tránh polling định kỳ gây tốn CPU trên máy yếu.
 })();
 
 

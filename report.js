@@ -3,22 +3,24 @@
 let currentReportDate = new Date();
 let cachedTransactions = null, cachedReportTables = null, cachedCustomers = null;
 let lastCacheTime = 0;
+let cachedDateKey = '';
 const CACHE_TTL = 5000;
 let reportDateDebounceTimer;
 
-async function getReportData() {
+async function getReportData(selectedDateStr) {
     const now = Date.now();
-    if (cachedTransactions && cachedReportTables && cachedCustomers && (now - lastCacheTime) < CACHE_TTL) {
+    if (cachedDateKey === selectedDateStr && cachedTransactions && cachedReportTables && cachedCustomers && (now - lastCacheTime) < CACHE_TTL) {
         return { transactions: cachedTransactions, tables: cachedReportTables, customers: cachedCustomers };
     }
     const [transactions, tables, customers] = await Promise.all([
-        DB.getAll('transactions'),
+        DB.getTransactionsByDate(selectedDateStr),
         DB.getAll('tables'),
         DB.getAll('customers')
     ]);
     cachedTransactions = transactions;
     cachedReportTables = tables;
     cachedCustomers = customers;
+    cachedDateKey = selectedDateStr;
     lastCacheTime = now;
     return { transactions, tables, customers };
 }
@@ -27,6 +29,7 @@ function resetReportCache() {
     cachedTransactions = null;
     cachedReportTables = null;
     cachedCustomers = null;
+    cachedDateKey = '';
     lastCacheTime = 0;
 }
 window.resetReportCache = resetReportCache;
@@ -58,16 +61,16 @@ async function renderReport() {
     const container = document.getElementById('reportContent');
     if (!container) return;
 
-    const { transactions, tables, customers } = await getReportData();
-  
     const selectedDateStr = currentReportDate.toISOString().slice(0, 10);
+    const { transactions, tables, customers } = await getReportData(selectedDateStr);
+  
     const todayStr = new Date().toISOString().slice(0, 10);
     const isToday = (selectedDateStr === todayStr);
     const dateTitle = formatDateDisplay(selectedDateStr);
     const dateDisplay = isToday ? `Hôm nay - ${dateTitle}` : dateTitle;
 
     // 1. Đã thanh toán (transactions trong ngày) - bao gồm cả thanh toán nợ
-    const selectedTxs = transactions.filter(tx => tx.date && tx.date.slice(0, 10) === selectedDateStr);
+    const selectedTxs = transactions;
     let paidOrders = 0, paidRevenue = 0;
     let cashAmount = 0, cashCount = 0;
     let transferAmount = 0, transferCount = 0;
@@ -232,8 +235,7 @@ function formatDateDisplay(dateStr) {
 
 async function exportReportByDate() {
     const dateStr = currentReportDate.toISOString().slice(0, 10);
-    const transactions = await DB.getAll('transactions');
-    const txs = transactions.filter(tx => tx.date && tx.date.slice(0, 10) === dateStr);
+    const txs = await DB.getTransactionsByDate(dateStr);
     let takeawayTotal = 0, dineinTotal = 0, cashTotal = 0, transferTotal = 0;
     let cashCount = 0, transferCount = 0;
     for (const tx of txs) {
