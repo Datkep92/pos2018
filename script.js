@@ -38,6 +38,37 @@ function showToast(message, type = 'info') {
 
 function refreshCustomerList() {} // Giữ để tránh lỗi
 
+async function checkDataFreshness() {
+    const now = Date.now();
+    const ONE_HOUR = 3600000;
+    const ONE_DAY = 86400000;
+    
+    let hasStaleData = false;
+    let staledItems = [];
+    
+    const collections = ['tables', 'customers', 'menu', 'ingredients', 'transactions'];
+    for (const col of collections) {
+        try {
+            const items = await DB.getAll(col);
+            for (const item of items) {
+                const itemAge = now - (item.updatedAt || item.createdAt || now);
+                if (itemAge > ONE_DAY) {
+                    hasStaleData = true;
+                    staledItems.push({ col, id: item.id, ageHours: Math.floor(itemAge / ONE_HOUR) });
+                }
+            }
+        } catch (err) {
+            console.log(`Lỗi check freshness ${col}:`, err);
+        }
+    }
+    
+    if (hasStaleData) {
+        const msg = `⚠️ Dữ liệu cũ (${staledItems.length} item > 24h). ${DB.isOnline() ? 'Đang đồng bộ...' : 'Offline - dùng data cũ.'}`;
+        console.warn(msg);
+        showToast(msg, 'warning');
+    }
+}
+
 async function renderTables() {
     console.log('🔄 renderTables called');
     const grid = document.getElementById('tablesGrid');
@@ -1533,6 +1564,12 @@ function importAllData(input) {
     let tables = await DB.getAll('tables');
     console.log(`📌 Số bàn hiện có: ${tables.length}`);
     if (tables.length === 0) {
+        console.log('📌 Chưa có bàn nào. Hãy dùng nút "Tạo bàn mới".');
+    }
+
+    // Cảnh báo nếu dữ liệu quá cũ trên iOS 12
+    await checkDataFreshness();
+
         console.log('📌 Chưa có bàn nào. Hãy dùng nút "Tạo bàn mới".');
     }
 

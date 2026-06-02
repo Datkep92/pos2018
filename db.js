@@ -167,6 +167,8 @@ function addToSyncQueue(action, collection, data, targetId) {
 async function processSyncQueue() {
     if (!isOnline) return;
     const pendingItems = syncQueue.filter(item => item.status === 'pending');
+    const MAX_RETRIES = 5;
+    
     for (let i = 0; i < pendingItems.length; i++) {
         const item = pendingItems[i];
         try {
@@ -174,14 +176,32 @@ async function processSyncQueue() {
             item.status = 'synced';
             await saveToLocal('sync_queue', item);
             await deleteFromLocal('sync_queue', item.id);
-            syncQueue = syncQueue.filter(i => i.id !== item.id);
+            syncQueue = syncQueue.filter(s => s.id !== item.id);
             console.log(`✅ Synced: ${item.action} ${item.collection}/${item.targetId}`);
             if (i % 3 === 2) await new Promise(resolve => setTimeout(resolve, 0));
         } catch (error) {
             item.retryCount++;
-            item.status = 'failed';
+            if (item.retryCount < MAX_RETRIES) {
+                item.status = 'pending';
+                console.warn(`⚠️ Sync retry (${item.retryCount}/${MAX_RETRIES}): ${item.action} ${item.collection}/${item.targetId}`);
+                await new Promise(resolve => setTimeout(resolve, 2000 * item.retryCount));
+                const retryItem = Object.assign({}, item);
+                try {
+                    await syncToFirebase(retryItem);
+                    item.status = 'synced';
+                    console.log(`✅ Retry synced: ${item.action} ${item.collection}/${item.targetId}`);
+                    await deleteFromLocal('sync_queue', item.id);
+                    syncQueue = syncQueue.filter(s => s.id !== item.id);
+                } catch (retryError) {
+                    item.status = 'failed';
+                    console.error(`❌ Retry failed: ${item.action} ${item.collection}`, retryError);
+                }
+            } else {
+                item.status = 'failed_max_retries';
+                console.error(`❌ Sync failed (max retries): ${item.action} ${item.collection}/${item.targetId}`);
+                showToast(`❌ Không thể sync: ${item.action} ${item.collection}`, 'error');
+            }
             await saveToLocal('sync_queue', item);
-            console.error(`❌ Sync failed: ${item.action} ${item.collection}`, error);
         }
     }
 }
@@ -207,6 +227,7 @@ function subscribeToCollection(collection, callback) {
     const ref = db.ref(`${CURRENT_SHOP_ID}/${collection}`);
     let lastDataStr = '';
     let updateScheduled = false;
+    let isFirstSync = true;
     
     const listener = ref.on('value', async (snapshot) => {
         const remoteData = snapshot.val();
@@ -229,17 +250,47 @@ function subscribeToCollection(collection, callback) {
         const now = Date.now();
         const toDelete = [];
         const toSave = [];
+        const ONE_DAY_MS = 86400000;
+        const STALE_THRESHOLD = ONE_DAY_MS;
 
         for (const [id, localItem] of localMap.entries()) {
             if (!remoteMap.has(id)) {
                 const createdAt = localItem.createdAt || 0;
-                if (now - createdAt >= 5000) toDelete.push(id);
+                if (now - createdAt >= 5000) {
+                    toDelete.push(id);
+                    if (isFirstSync) console.log(`🗑️ Xóa item cũ (không có remote): ${collection}/${id}`);
+                }
             }
         }
         for (const [id, remoteItem] of remoteMap.entries()) {
             const localItem = localMap.get(id);
-            if (!localItem || (remoteItem.updatedAt || 0) > (localItem.updatedAt || 0)) {
+            const remoteUpdated = remoteItem.updatedAt || 0;
+            const remoteVersion = remoteItem._version || 1;
+            const localUpdated = localItem ? (localItem.updatedAt || 0) : 0;
+            const localVersion = localItem ? (localItem._version || 1) : 0;
+            const dataAge = now - remoteUpdated;
+            const timeDiff = remoteUpdated - localUpdated;
+            
+            if (!localItem) {
                 toSave.push(remoteItem);
+                if (isFirstSync && dataAge > STALE_THRESHOLD) {
+                    console.warn(`⚠️ Dữ liệu remote cũ (${Math.floor(dataAge/3600000)}h): ${collection}/${id}`);
+                }
+            } else if (localVersion < remoteVersion && remoteUpdated > localUpdated) {
+                // Remote version cao hơn, accept nó
+                if (dataAge > STALE_THRESHOLD) {
+                    console.warn(`⚠️ Cập nhật item bằng data remote cũ (${Math.floor(dataAge/3600000)}h), version: ${localVersion}->${remoteVersion}`);
+                }
+                toSave.push(remoteItem);
+            } else if (localVersion > remoteVersion) {
+                // Local version cao hơn, reject remote (dữ liệu local mới hơn)
+                console.log(`ℹ️ Bỏ qua remote (local version cao hơn ${localVersion}>${remoteVersion}): ${collection}/${id}`);
+            } else if (remoteUpdated > localUpdated && Math.abs(timeDiff) < STALE_THRESHOLD) {
+                // Cùng version nhưng remote mới hơn và không quá cũ
+                toSave.push(remoteItem);
+            } else if (remoteUpdated > localUpdated && timeDiff > STALE_THRESHOLD) {
+                // Local cũ hơn remote hơn 1 ngày, đó là lỗi, reject
+                console.warn(`⚠️ Loại bỏ remote (local cũ hơn ${Math.floor(Math.abs(timeDiff)/3600000)}h): ${collection}/${id}`);
             }
         }
         for (const id of toDelete) await deleteFromLocal(collection, id);
@@ -257,6 +308,7 @@ function subscribeToCollection(collection, callback) {
                 window.dispatchEvent(new CustomEvent('db_update', { detail: { collection, data: newData } }));
             }, 50);
         }
+        isFirstSync = false;
     });
     
     if (!listeners[collection]) listeners[collection] = [];
@@ -422,7 +474,23 @@ async function initDatabase() {
     initNetworkListener();
     initStaffList();
 
-    // Đăng ký lắng nghe tất cả collection cần realtime
+    if (isOnline) {
+        console.log('🔄 Đang tải dữ liệu từ Firebase lần đầu...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Kiểm tra và sync queue pending items nếu có
+        const pendingCount = syncQueue.filter(item => item.status === 'pending').length;
+        if (pendingCount > 0) {
+            console.log(`⏳ Đồng bộ ${pendingCount} thay đổi chưa sync...`);
+            await processSyncQueue();
+        }
+    } else {
+        const pendingCount = syncQueue.filter(item => item.status === 'pending').length;
+        if (pendingCount > 0) {
+            console.log(`⚠️ Offline, sẽ sync ${pendingCount} thay đổi sau khi online`);
+        }
+    }
+
     subscribeToCollection('tables', async (tables) => {
         for (const remote of tables) {
             const local = await get('tables', remote.id);
@@ -434,14 +502,14 @@ async function initDatabase() {
     });
     subscribeToCollection('customers');
     subscribeToCollection('menu');
-    subscribeToCollection('menu_categories');  // QUAN TRỌNG
+    subscribeToCollection('menu_categories');
     subscribeToCollection('ingredients');
     subscribeToCollection('transactions');
     subscribeToCollection('reports');
 
     console.log('✅ Database initialized, device:', CURRENT_DEVICE_ID);
     return { isOnline, deviceId: CURRENT_DEVICE_ID };
-}
+
 async function deleteItem(tableName, id) {
     try {
         const db = firebase.database();
