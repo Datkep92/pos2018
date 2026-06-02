@@ -70,29 +70,34 @@ async function filterMenuByCategory(categoryId) {
     let items = menuItems;
     if (categoryId !== 'all') items = items.filter(i => i.categoryId == categoryId);
     if (items.length === 0) {
-        container.innerHTML = '<div class="empty-state">📭 Không có món</div>';
+        container.innerHTML = '<div style="text-align:center; padding:40px;">📭 Không có món</div>';
         return;
     }
-    
-    // Tạo HTML đúng cấu trúc, đóng thẻ đầy đủ
-    let html = '';
-    for (const item of items) {
-        const price = item.hasVariants && item.variants && item.variants[0] 
-            ? (item.variants[0].price || 0) 
-            : (item.price || 0);
-        
-        html += `
-            <div class="menu-item-card" onclick="showItemDetail('${item.id}')">
-                <div class="menu-item-name">${escapeHtml(item.name)}</div>
-                <div class="menu-item-price">${formatMoney(price)}</div>
-                <div class="menu-item-meta">
-                    <div class="menu-item-ingredients">🧂 ${(item.ingredients || []).length} NL</div>
-                    ${item.hasVariants ? `<div class="menu-item-sizes">📏 ${item.variants.length} size</div>` : ''}
-                </div>
+    container.innerHTML = items.map(item => {
+        let sizeInfo = '';
+        if (item.hasVariants && item.variants && item.variants.length) {
+            sizeInfo = `<div class="menu-item-sizes">📏 ${item.variants.length} size</div>`;
+        }
+        return `
+           <div class="menu-item-card" onclick="showItemDetail('${item.id}')">
+    <div class="menu-item-name">${escapeHtml(item.name)}</div>
+    <div class="menu-item-price">
+        ${formatMoney(item.hasVariants && item.variants && item.variants[0] ? (item.variants[0].price || 0) : item.price)}
+
+    <div class="menu-item-meta">
+        <div class="menu-item-ingredients">
+            🧂 ${(item.ingredients || []).length} NL
+        </div>
+
+        ${item.hasVariants ? `
+            <div class="menu-item-sizes">
+                📏 ${item.variants.length} size
             </div>
+        ` : ''}
+    </div>
+</div>
         `;
-    }
-    container.innerHTML = html;
+    }).join('');
 }
 
 // ========== CHI TIẾT MÓN (POPUP) ==========
@@ -540,35 +545,24 @@ function renderOrderMenuByCategory(categoryId, searchTerm) {
     var items = Array.isArray(window.menuItems) ? window.menuItems.slice() : [];
     if (categoryId !== 'all') items = items.filter(i => i.categoryId == categoryId);
     if (searchTerm) items = items.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()));
-    if (items.length === 0) {
-        container.innerHTML = '<div style="padding:40px;">📭 Không có món</div>';
-        return;
-    }
+    if (items.length === 0) { container.innerHTML = '<div style="padding:40px;">📭 Không có món</div>'; return; }
     container.innerHTML = items.map(item => {
         if (item.hasVariants && item.variants && item.variants.length) {
-            const variants = item.variants;
-            const firstVariant = variants[0];
-            const otherVariants = variants.slice(1); // các size còn lại (từ 2 đến hết)
-            // Nút cho size đầu tiên được gắn vào chính tên món
-            const itemNameHtml = `<div class="menu-item-name" onclick="addToTempOrderWithVariant('${item.id}', '${firstVariant.name}', ${firstVariant.price})">${escapeHtml(item.name)}</div>`;
-            // Các nút cho size còn lại (chỉ hiển thị nếu có)
-            let otherButtonsHtml = '';
-            if (otherVariants.length > 0) {
-                otherButtonsHtml = `<div class="variant-buttons">` + 
-                    otherVariants.map(v => `<button class="variant-order-btn" onclick="addToTempOrderWithVariant('${item.id}', '${v.name}', ${v.price})">${v.name}</button>`).join('') +
-                    `</div>`;
-            }
+            const variantBtns = item.variants.map(v => 
+                `<button class="variant-order-btn" onclick="addToTempOrderWithVariant('${item.id}', '${v.name}', ${v.price})">${v.name} ${formatMoney(v.price)}</button>`
+            ).join('');
             return `
                 <div class="menu-item-card-variant">
-                    ${itemNameHtml}
-                    ${otherButtonsHtml}
+                    <div class="menu-item-name">${escapeHtml(item.name)}</div>
+                    <div class="variant-buttons">${variantBtns}</div>
                 </div>
             `;
         } else {
-            // Món không size
+            const price = item.price || 0;
             return `
-                <div class="menu-item-simple" onclick="addToTempOrder('${item.name}', ${item.price || 0})">
-                    ${escapeHtml(item.name)}
+                <div class="menu-item-simple" onclick="addToTempOrder('${item.name}', ${price})">
+                    ${escapeHtml(item.name)}<br>
+                    <span>${formatMoney(price)}</span>
                 </div>
             `;
         }
