@@ -19,38 +19,102 @@ body{
     left:0;
     right:0;
     bottom:0;
-    -webkit-text-size-adjust:100%;
+
     background:#fff;
+    -webkit-text-size-adjust:100%;
 }
 
+/* APP ROOT */
 .app{
     position:fixed;
     top:0;
     left:0;
     right:0;
     bottom:0;
+
     overflow:hidden;
+
+    display:-webkit-flex;
     display:flex;
+
+    -webkit-flex-direction:column;
     flex-direction:column;
 }
 
+/* HEADER + TABS KHÔNG CUỘN */
+.header,
+.main-tabs{
+    -webkit-flex:0 0 auto;
+    flex:0 0 auto;
+}
+
+/* VÙNG NỘI DUNG */
 .main-content{
+    -webkit-flex:1;
     flex:1;
+
+    min-height:0;
     overflow:hidden;
     position:relative;
 }
 
+/* TAB */
+.tab-content{
+    display:none;
+}
+
 .tab-content.active{
     position:absolute;
+
     top:0;
     left:0;
     right:0;
     bottom:0;
-    overflow-y:auto;
-    overflow-x:hidden;
-    -webkit-overflow-scrolling:touch;
+
+    overflow:hidden;
+
+    display:-webkit-flex;
+    display:flex;
+
+    -webkit-flex-direction:column;
+    flex-direction:column;
+
+    min-height:0;
 }
 
+/* CHỈ NHỮNG DANH SÁCH ĐƯỢC CUỘN */
+.tables-grid,
+.menu-items-grid,
+.ingredients-list,
+.history-list-container,
+.customer-list-container,
+.menu-grid-simple,
+.temp-cart-items,
+.modal-body{
+
+    overflow-y:auto;
+
+    -webkit-overflow-scrolling:touch;
+
+    -webkit-flex:1;
+    flex:1;
+
+    min-height:0;
+}
+
+/* SCROLL NGANG DANH MỤC */
+.menu-categories,
+.order-categories{
+    overflow-x:auto;
+    overflow-y:hidden;
+
+    -webkit-overflow-scrolling:touch;
+
+    -webkit-flex:0 0 auto;
+    flex:0 0 auto;
+}
+
+/* MODAL */
 .modal{
     position:fixed;
     top:0;
@@ -59,25 +123,14 @@ body{
     bottom:0;
 }
 
-.modal-body,
-.tables-grid,
-.menu-items-grid,
-.ingredients-list,
-.history-list-container,
-.customer-list-container,
-.order-categories,
-.menu-grid-simple{
-    overflow-y:auto;
-    -webkit-overflow-scrolling:touch;
-}
-
-.tables-grid,
-.menu-items-grid,
-.modal-content{
+/* KHÔNG GPU HACK TOÀN BỘ */
+.header,
+.bottom-nav{
     -webkit-transform:translateZ(0);
     transform:translateZ(0);
 }
 
+/* TAP */
 button,
 .float-btn,
 .bottom-nav-item,
@@ -86,6 +139,7 @@ button,
     -webkit-tap-highlight-color:transparent;
 }
 
+/* SAFE AREA */
 .header{
     padding-top:env(safe-area-inset-top);
 }
@@ -94,6 +148,7 @@ button,
     padding-bottom:env(safe-area-inset-bottom);
 }
 
+/* IOS KHÔNG ZOOM INPUT */
 input,
 textarea,
 select{
