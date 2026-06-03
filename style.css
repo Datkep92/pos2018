@@ -135,14 +135,7 @@ body {
     min-height: 0;
 }
 
-.tab-content.active {
-    display: -webkit-flex;
-    display: flex;
-}
 
-.tab-content.active {
-    display: block;
-}
 
 .bottom-nav {
     position: fixed;
