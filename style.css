@@ -2192,4 +2192,256 @@ textarea {
 .history-item.refund .history-amount {
     color: #f97316;
 }
+/* ==========================================
+   POS iOS 12-18 OPTIMIZED
+========================================== */
 
+html,
+body{
+    margin:0;
+    padding:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+}
+
+body{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+    -webkit-text-size-adjust:100%;
+}
+
+.app{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+
+    overflow:hidden;
+
+    display:flex;
+    flex-direction:column;
+}
+
+.main-content{
+    flex:1;
+    min-height:0;
+    overflow:hidden;
+    position:relative;
+}
+
+.tab-content{
+    height:100%;
+    overflow:hidden;
+}
+
+/* ===== TAB BÀN ===== */
+
+#tablesView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.tables-header{
+    flex-shrink:0;
+}
+
+.tables-container{
+    flex:1;
+    min-height:0;
+    overflow:hidden;
+}
+
+.tables-grid{
+    height:100%;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB MENU ===== */
+
+#menuView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.menu-manager{
+    display:flex;
+    flex-direction:column;
+    flex:1;
+    min-height:0;
+}
+
+.menu-actions-top,
+.menu-categories{
+    flex-shrink:0;
+}
+
+.menu-items-grid{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB KHO ===== */
+
+#ingredientsView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.ingredients-header{
+    flex-shrink:0;
+}
+
+.ingredients-list{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB KHÁCH HÀNG ===== */
+
+#customersView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.customer-search-bar,
+.debt-summary{
+    flex-shrink:0;
+}
+
+.customer-list-container{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB LỊCH SỬ ===== */
+
+#historyView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.history-date-row,
+.history-filter-row{
+    flex-shrink:0;
+}
+
+.history-list-container{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB BÁO CÁO ===== */
+
+#reportView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.report-container{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== TAB CÀI ĐẶT ===== */
+
+#settingsView{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    overflow:hidden;
+}
+
+.settings-container{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== MODAL ===== */
+
+.modal{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+}
+
+.modal-content{
+    max-height:90vh;
+    overflow:hidden;
+}
+
+.modal-body{
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+}
+
+/* ===== IOS FIX ===== */
+
+button,
+.float-btn,
+.bottom-nav-item,
+.table-icon-btn,
+.action-icon{
+    -webkit-tap-highlight-color:transparent;
+}
+
+input,
+textarea,
+select{
+    font-size:16px;
+}
+
+.header{
+    padding-top:env(safe-area-inset-top);
+}
+
+.bottom-nav{
+    padding-bottom:env(safe-area-inset-bottom);
+}
+
+/* GPU chỉ nơi cần */
+
+.tables-grid,
+.menu-items-grid,
+.modal-content{
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
+}
