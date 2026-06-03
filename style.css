@@ -2303,3 +2303,10 @@ textarea {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
+
+.float-buttons{
+    position:fixed;
+    right:16px;
+    bottom:calc(var(--bottom-h) + 16px);
+    z-index:9999;
+}
