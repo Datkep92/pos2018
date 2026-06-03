@@ -238,27 +238,33 @@ async function deductIngredients(orderItems) {
     if (!orderItems || orderItems.length === 0) return;
     rebuildIngredientLookupMaps();
     const updates = [];
-    for (const orderItem of orderItems) {
-        const menuItem = menuByNameMap.get(String(orderItem.name));
+    for (let i = 0; i < orderItems.length; i++) {
+        const orderItem = orderItems[i];
+        // Lấy tên gốc (bỏ phần size)
+        let originalName = orderItem.name;
+        const lastParen = originalName.lastIndexOf('(');
+        if (lastParen !== -1 && originalName.indexOf(')') === originalName.length - 1) {
+            originalName = originalName.substring(0, lastParen).trim();
+        }
+        const menuItem = menuByNameMap.get(String(originalName));
         if (menuItem && menuItem.ingredients && menuItem.ingredients.length) {
-            for (const req of menuItem.ingredients) {
+            for (let j = 0; j < menuItem.ingredients.length; j++) {
+                const req = menuItem.ingredients[j];
                 const ing = ingredientByIdMap.get(String(req.ingredientId));
                 if (ing) {
-                    const newStock = ing.stock - (req.quantity * orderItem.qty);
-                    ing.stock = Math.max(0, newStock);
+                    ing.stock -= req.quantity * orderItem.qty;
+                    if (ing.stock < 0) ing.stock = 0;
                     updates.push(DB.update('ingredients', ing.id, { stock: ing.stock }));
                 }
             }
         }
+        if (i % 20 === 19) await new Promise(resolve => setTimeout(resolve, 0));
     }
-    const batchSize = 5;
-    for (let i = 0; i < updates.length; i += batchSize) {
-        const batch = updates.slice(i, i + batchSize);
-        await Promise.all(batch);
-        if (i + batchSize < updates.length) await new Promise(resolve => setTimeout(resolve, 0));
+    for (let i = 0; i < updates.length; i += 5) {
+        await Promise.all(updates.slice(i, i + 5));
     }
     window.ingredients = ingredients;
-    renderIngredients();
+    if (typeof renderIngredients === 'function') renderIngredients();
 }
 
 async function checkStockForItems(orderItems) {

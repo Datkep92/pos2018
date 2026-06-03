@@ -1433,7 +1433,7 @@ textarea {
     .detail-item-total {
         display: inline-block;
         margin-top: 8px;
-        float: right;
+    
     }
     .detail-item-row::after {
         content: "";
@@ -2192,12 +2192,893 @@ textarea {
 .history-item.refund .history-amount {
     color: #f97316;
 }
-
-/* Cố định nút thêm bàn */
+/* Cố định nút thêm bàn - tương thích iOS 12 */
 .tables-header {
+    position: -webkit-sticky;  /* cho iOS 12 */
     position: sticky;
     top: 0;
     background: var(--bg);
     z-index: 10;
     padding: 8px 0;
+}
+
+/* Điều chỉnh 2 nút trong thẻ bàn - sát trái và sát phải */
+.table-icons {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    gap: 0;
+}
+.table-icons .table-icon-btn {
+    flex: 0 0 auto;
+    min-width: 44px;
+    background: #f8fafc;
+    border-radius: 999px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    min-height: 36px;
+    font-size: 18px;
+}
+/* Nút + Thêm món trong modal chi tiết bàn */
+#detailAddItemBtn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: 0.1s ease;
+}
+#detailAddItemBtn:active {
+    transform: scale(0.96);
+    background: var(--primary-dark);
+}
+/* Đảm bảo nút nằm bên phải trong header */
+.detail-items-header {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    -webkit-align-items: center;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.detail-items-header span {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+/* Cải thiện vuốt ngang danh mục trên iOS 12 */
+.order-categories {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    gap: 8px;
+    padding: 8px 12px;
+}
+.order-categories .category-chip {
+    scroll-snap-align: start;
+    flex: 0 0 auto;
+    margin-right: 0; /* dùng gap thay cho margin-right */
+}
+/* Ẩn thanh cuộn trên iOS (tuỳ chọn) */
+.order-categories::-webkit-scrollbar {
+    display: none;
+}
+
+.order-categories {
+    touch-action: pan-x;
+}
+
+.btn-refund-small {
+    background: #10b981;  /* xanh lá */
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* 3 nút hành động trong giỏ hàng tạm */
+.temp-cart-actions {
+    display: -webkit-flex;
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+.cart-action-btn {
+    -webkit-flex: 1;
+    flex: 1;
+    min-height: 44px;
+    border: none;
+    border-radius: 999px;   /* bo tròn hoàn toàn như nút nấm */
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    gap: 6px;
+    background: #eef2f7;
+    color: #334155;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-transition: 0.1s ease;
+    transition: 0.1s ease;
+}
+.cart-action-btn:active {
+    -webkit-transform: scale(0.96);
+    transform: scale(0.96);
+}
+/* Nút Tiền mặt */
+.cart-action-btn.cash {
+    background: linear-gradient(135deg, #10b981, #0d9488);
+    color: white;
+}
+/* Nút Chuyển khoản */
+.cart-action-btn.transfer {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+}
+/* Nút Ghi nợ */
+.cart-action-btn.debt {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+}
+
+/* ========== LỊCH SỬ GIAO DỊCH - CẢI TIẾN GIAO DIỆN ========== */
+.history-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.history-item {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    padding: 12px 16px;
+    transition: 0.1s ease;
+    border-left: 4px solid var(--primary);
+}
+
+/* Màu sắc theo loại giao dịch */
+.history-item.dinein { border-left-color: #3b82f6; }
+.history-item.takeaway { border-left-color: #f59e0b; }
+.history-item.debt_payment { border-left-color: #10b981; }
+.history-item.refund { border-left-color: #ef4444; background: #fef2f2; }
+.history-item.refunded { background: #f8fafc; border-left-color: #94a3b8; opacity: 0.9; }
+
+/* Hàng trên cùng: STT + giờ + số tiền + badge */
+.history-header-row:first-child {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: #475569;
+}
+
+.history-header-row:first-child span:first-child {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.history-amount {
+    font-size: 16px;
+    font-weight: 800;
+}
+
+/* Hàng thứ hai: loại hình + phương thức thanh toán + nút */
+.history-header-row:last-child {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+
+/* Badge trạng thái */
+.badge-refunded {
+    display: inline-block;
+    background: #94a3b8;
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* Nút Hoàn thành (hủy) */
+.btn-refund-small {
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.1s;
+    min-width: 80px;
+}
+.btn-refund-small:active {
+    transform: scale(0.96);
+    background: #0d9488;
+}
+
+/* Chi tiết món, bàn, khách */
+.history-detail {
+    font-size: 12px;
+    color: #334155;
+    margin-top: 6px;
+    padding: 4px 0;
+    border-top: 1px solid #eef2f7;
+    line-height: 1.4;
+}
+
+.history-detail:first-of-type {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.refund-reason {
+    background: #fef2f2;
+    padding: 8px 10px;
+    border-radius: 12px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: #b91c1c;
+    font-style: normal;
+    border-left: 3px solid #ef4444;
+}
+
+/* Responsive cho mobile nhỏ */
+@media (max-width: 480px) {
+    .history-item {
+        padding: 10px 12px;
+    }
+    .history-header-row:first-child {
+        font-size: 12px;
+    }
+    .history-amount {
+        font-size: 14px;
+    }
+    .btn-refund-small {
+        font-size: 11px;
+        padding: 3px 10px;
+        min-width: 70px;
+    }
+    .history-detail {
+        font-size: 11px;
+    }
+}
+
+/* ========== LỊCH SỬ GIAO DỊCH - GIAO DIỆN MỚI ========== */
+.history-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.history-item {
+    background: #ffffff;
+    border-radius: 20px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    padding: 14px 16px;
+    transition: 0.1s ease;
+    border-left: 5px solid var(--primary);
+}
+/* Màu viền trái theo loại giao dịch */
+.history-item.dinein { border-left-color: #3b82f6; }
+.history-item.takeaway { border-left-color: #f59e0b; }
+.history-item.debt_payment { border-left-color: #10b981; }
+.history-item.refund { border-left-color: #ef4444; background: #fef2f2; }
+.history-item.refunded { background: #f8fafc; border-left-color: #94a3b8; opacity: 0.9; }
+
+/* Hàng đầu: STT + giờ + số tiền + badge */
+.history-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #475569;
+}
+.history-header-row span:first-child {
+    font-weight: 600;
+    color: #1e293b;
+}
+.history-amount {
+    font-size: 18px;
+    font-weight: 800;
+    color: #dc2626;
+}
+.history-amount.text-success {
+    color: #10b981;
+}
+.badge-refunded {
+    display: inline-block;
+    background: #94a3b8;
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 30px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* Hàng thông tin chính: loại, số lượng, thanh toán, nút */
+.history-info-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+.history-type {
+    font-weight: 600;
+    background: #f1f5f9;
+    padding: 4px 10px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.history-qty {
+    color: #475569;
+}
+.history-payment {
+    color: #475569;
+}
+.history-action {
+    margin-left: auto;
+}
+.history-action .btn-refund-small {
+    margin: 0;
+    padding: 4px 14px;
+}
+
+/* Chi tiết món, bàn, khách */
+.history-detail {
+    font-size: 13px;
+    color: #334155;
+    margin-top: 8px;
+    padding: 6px 0;
+    border-top: 1px solid #f1f5f9;
+    line-height: 1.4;
+}
+.history-detail:first-of-type {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
+}
+.refund-reason {
+    background: #fee2e2;
+    padding: 8px 12px;
+    border-radius: 14px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #b91c1c;
+    font-style: normal;
+    border-left: 3px solid #ef4444;
+}
+
+/* Nút Hoàn thành (hủy) màu xanh */
+.btn-refund-small {
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.1s;
+    min-width: 90px;
+}
+.btn-refund-small:active {
+    transform: scale(0.96);
+    background: #0d9488;
+}
+
+/* Responsive Mobile */
+@media (max-width: 480px) {
+    .history-item {
+        padding: 12px;
+    }
+    .history-header-row {
+        font-size: 12px;
+    }
+    .history-amount {
+        font-size: 16px;
+    }
+    .history-info-row {
+        gap: 8px;
+        font-size: 11px;
+    }
+    .history-type {
+        padding: 2px 8px;
+    }
+    .btn-refund-small {
+        font-size: 11px;
+        padding: 4px 12px;
+        min-width: 75px;
+    }
+    .history-detail {
+        font-size: 11px;
+    }
+}
+
+/* ========== CHI PHÍ ========== */
+.cost-header {
+    display: -webkit-flex;
+    display: flex;
+    flex-wrap: wrap;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    -webkit-align-items: center;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+}
+.cost-filter-bar {
+    display: -webkit-flex;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.filter-btn {
+    background: #f1f5f9;
+    border: none;
+    border-radius: 40px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    cursor: pointer;
+}
+.filter-btn.active {
+    background: var(--primary);
+    color: white;
+}
+.cost-date-range {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    gap: 8px;
+    background: white;
+    padding: 6px 12px;
+    border-radius: 40px;
+}
+.cost-date-range input {
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+.btn-add-cost, .btn-add-cost-quick {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.cost-summary {
+    background: white;
+    border-radius: 20px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+}
+.cost-list-container {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 10px;
+}
+.cost-item {
+    background: white;
+    border-radius: 20px;
+    padding: 12px 16px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-justify-content: space-between;
+    justify-content: space-between;
+    -webkit-align-items: center;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.cost-info {
+    -webkit-flex: 1;
+    flex: 1;
+    cursor: pointer;
+}
+.cost-name {
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+.cost-detail {
+    display: -webkit-flex;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--muted);
+}
+.cost-amount {
+    font-weight: 700;
+    color: var(--primary-dark);
+}
+.cost-actions {
+    display: -webkit-flex;
+    display: flex;
+    gap: 8px;
+}
+.cost-actions button {
+    background: #f1f5f9;
+    border: none;
+    border-radius: 30px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.cost-actions .cost-edit-btn { background: #e0f2fe; color: #0284c7; }
+.cost-actions .cost-delete-btn { background: #fee2e2; color: #dc2626; }
+
+/* Lịch sử danh mục */
+.cost-history-header {
+    font-size: 16px;
+    font-weight: 700;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 12px;
+}
+.cost-history-list {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.cost-history-item {
+    background: #f8fafc;
+    border-radius: 16px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+.cost-history-date {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+.cost-history-amount {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--primary-dark);
+}
+.cost-history-note {
+    font-size: 12px;
+    color: #475569;
+    margin-top: 6px;
+}
+
+/* ========== POPUP CHI PHÍ MỚI ========== */
+.popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: white;
+    border-radius: 28px 28px 0 0;
+}
+.popup-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+.close-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 30px;
+    font-size: 20px;
+    color: white;
+    cursor: pointer;
+}
+.recent-wrap {
+    margin: 16px 0;
+    max-height: 240px;
+    overflow-y: auto;
+}
+.recent-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.recent-btn {
+    flex: 1;
+    background: #f1f5f9;
+    border: none;
+    border-radius: 40px;
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.action-btn-edit, .action-btn-delete {
+    background: #eef2f7;
+    border: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 30px;
+    font-size: 16px;
+    cursor: pointer;
+}
+.action-btn-edit { background: #e0f2fe; color: #0284c7; }
+.action-btn-delete { background: #fee2e2; color: #dc2626; }
+.quick-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 12px 0 8px;
+}
+.quick-money {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.quick-money-btn {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 40px;
+    padding: 8px 0;
+    flex: 1;
+    font-weight: 600;
+    cursor: pointer;
+}
+.expense-action-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+.expense-action-row input {
+    flex: 2;
+}
+.primary-btn {
+    flex: 1;
+    background: linear-gradient(135deg, var(--ok), #0d9488);
+    border: none;
+    border-radius: 40px;
+    font-weight: 700;
+    color: white;
+    cursor: pointer;
+}
+#expenseHistoryBox {
+    background: #f8fafc;
+    border-radius: 20px;
+    padding: 12px;
+    margin-top: 12px;
+}
+.popup-history-title {
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+.today-cost-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+.today-cost-item {
+    background: white;
+    border-radius: 14px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.today-cost-name {
+    font-weight: 600;
+}
+.today-cost-amount {
+    font-weight: 700;
+    color: var(--primary-dark);
+}
+.empty-text {
+    text-align: center;
+    color: var(--muted);
+    padding: 20px;
+}
+
+.nav-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: white;
+    border-radius: 60px;
+    padding: 6px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    flex: 1;
+}
+.mode-select {
+    border: 1px solid var(--line);
+    border-radius: 40px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    background: white;
+    color: var(--text);
+}
+.period-display {
+    flex: 1;
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--primary-dark);
+}
+
+/* ========== MANAGER (TỔNG QUAN) ========== */
+.manager-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.manager-box {
+    background: white;
+    border-radius: 20px;
+    padding: 14px 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    transition: 0.1s;
+    cursor: pointer;
+}
+.manager-box label {
+    font-size: 12px;
+    color: #64748b;
+    display: block;
+    margin-bottom: 6px;
+}
+.manager-box .big-value {
+    font-size: 20px;
+    font-weight: 800;
+    color: #1e293b;
+    margin: 6px 0;
+}
+.manager-box .summary-hint {
+    font-size: 10px;
+    color: #94a3b8;
+    margin-top: 6px;
+}
+.card {
+    background: white;
+    border-radius: 24px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid #eef2f6;
+    cursor: pointer;
+}
+.card-header h2 {
+    font-size: 16px;
+    margin: 0;
+}
+.card-body {
+    padding: 12px;
+}
+.collapsed .card-body {
+    display: none;
+}
+.toggle-icon {
+    font-size: 18px;
+    transition: transform 0.2s;
+}
+.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+.manager-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f2f5;
+    cursor: pointer;
+}
+.manager-item:last-child {
+    border-bottom: none;
+}
+.admin-expense-btn {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 40px;
+    font-weight: 600;
+    cursor: pointer;
+}
+/* Bộ lọc dạng thanh */
+.nav-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: white;
+    border-radius: 60px;
+    padding: 6px 12px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.mode-select {
+    border: 1px solid #e2e8f0;
+    border-radius: 40px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    background: white;
+}
+.period-display {
+    flex: 1;
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--primary-dark);
+}
+.nav-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 40px;
+    background: #f1f5f9;
+    border: none;
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--primary);
+    cursor: pointer;
+}
+
+#managerView {
+    padding-top: calc(var(--header-h) + 10px);
 }

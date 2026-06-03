@@ -55,43 +55,7 @@ function attachReportDateControls() {
     if (nextBtn) nextBtn.onclick = () => changeReportDate(1);
 }
 
-async function syncHistoricalReports() {
-    if (!isOnline) return;
-    var now = Date.now();
-    var lastSync = SYNC_CONFIG.reports.lastSync;
-    if (lastSync && (now - lastSync) < 12 * 3600000) {
-        console.log('Historical sync reports skipped, last sync within 12h');
-        return;
-    }
-    var startDate = new Date();
-    startDate.setDate(startDate.getDate() - SYNC_CONFIG.reports.daysToSync);
-    var startDateStr = startDate.toISOString().slice(0,10);
-    var endDateStr = new Date().toISOString().slice(0,10);
-    console.log('Starting historical sync for reports from', startDateStr, 'to', endDateStr);
-    
-    var ref = db.ref(CURRENT_SHOP_ID + '/reports');
-    var query = ref.orderByChild('dateKey').startAt(startDateStr).endAt(endDateStr);
-    var snapshot = await query.once('value');
-    var remoteData = snapshot.val() || {};
-    
-    var count = 0;
-    for (var key in remoteData) {
-        if (remoteData.hasOwnProperty(key)) {
-            var remoteItem = remoteData[key];
-            remoteItem.id = key;
-            var localItem = await loadFromLocal('reports', key);
-            var remoteVersion = remoteItem._version || 0;
-            var localVersion = localItem ? (localItem._version || 0) : 0;
-            if (remoteVersion > localVersion) {
-                await saveToLocal('reports', remoteItem);
-                count++;
-            }
-        }
-    }
-    SYNC_CONFIG.reports.lastSync = now;
-    saveSyncMetadata();
-    console.log('Historical sync reports completed, updated', count, 'records');
-}
+
 
 async function renderReport() {
     const container = document.getElementById('reportContent');

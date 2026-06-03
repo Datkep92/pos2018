@@ -7,7 +7,8 @@ let dbUpdateTimer = null;
 let lastTablesFetch = 0;
 const TABLES_CACHE_TTL = 2000;
 let cachedTables = null;  // <-- THÊM DÒNG NÀY
-
+window.currentDeviceId = localStorage.getItem('device_id') || DB.getDeviceId();
+window.currentUserRole = localStorage.getItem('userRole') || 'admin';
 // ========== UTILS ==========
 function formatMoney(amount) {
     return (amount || 0).toLocaleString('vi-VN') + 'đ';
@@ -88,7 +89,7 @@ async function renderTables() {
                 <div class="table-icons">
                     <div class="table-icon-btn" onclick="event.stopPropagation(); openAddMenuForTable('${table.id}')">➕</div>
                     <div class="table-icon-btn" onclick="event.stopPropagation(); showPaymentMethod('dinein', '${table.id}', ${total})">💸</div>
-                    <div class="table-icon-btn" onclick="event.stopPropagation(); debtTable('${table.id}')">💢</div>
+                   
                 </div>
             </div>
         `;
@@ -167,7 +168,22 @@ async function showTableDetail(tableId) {
     document.getElementById('detailTransferBtn').onclick = () => showTransferTableModal(table.id);
     document.getElementById('detailMergeBtn').onclick = () => showMergeTableModal(table.id);
 }
-
+window.addEventListener('resize', function() {
+    var activeTab = document.querySelector('.tab-content.active');
+    if (activeTab && activeTab.id === 'tablesView') {
+        // Gọi lại hàm adjustScroll (cần đưa ra ngoài hoặc gọi lại)
+        var tablesView = document.getElementById('tablesView');
+        if (tablesView) {
+            setTimeout(function() {
+                if (tablesView.scrollHeight > tablesView.clientHeight) {
+                    tablesView.style.overflowY = 'auto';
+                } else {
+                    tablesView.style.overflowY = 'hidden';
+                }
+            }, 20);
+        }
+    }
+});
 async function updateItemQuantity(tableId, itemIndex, delta) {
     const tid = String(tableId);
     let table = await DB.get('tables', tid);
@@ -860,22 +876,25 @@ async function debtTable(tableId) {
 
     // Hàm xử lý ghi nợ sau khi có customer
     const processDebt = async (customer) => {
-        if (!customer) return;
-        if (typeof addCustomerDebt === 'function') {
-            await addCustomerDebt(customer.id, total, note);
-            await DB.remove('tables', tid);
-            await renderTables();
-            showToast(`💰 Đã ghi nợ ${formatMoney(total)} cho ${customer.name}`, 'success');
-            document.getElementById('tableDetailModal').style.display = 'none';
-            if (typeof renderDebtList === 'function') renderDebtList();
-            if (typeof renderCustomerList === 'function') renderCustomerList();
-            // Nếu đang ở subtab nợ (bàn nợ trong ngày), cập nhật danh sách
-            const activeSubTab = document.querySelector('.sub-tab.active');
-            if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
-                if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
-            }
+    if (!customer) return;
+    if (typeof addCustomerDebt === 'function') {
+        await addCustomerDebt(customer.id, total, note);
+        // Trừ nguyên liệu cho các món đã ghi nợ
+        if (typeof deductIngredients === 'function') {
+            await deductIngredients(table.items);
         }
-    };
+        await DB.remove('tables', tid);
+        await renderTables();
+        showToast(`💰 Đã ghi nợ ${formatMoney(total)} cho ${customer.name}`, 'success');
+        document.getElementById('tableDetailModal').style.display = 'none';
+        if (typeof renderDebtList === 'function') renderDebtList();
+        if (typeof renderCustomerList === 'function') renderCustomerList();
+        const activeSubTab = document.querySelector('.sub-tab.active');
+        if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
+            if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
+        }
+    }
+};
 
     // Trường hợp 1: Bàn đã có khách (customerId hoặc customerName)
     let existingCustomer = null;
@@ -984,8 +1003,9 @@ function renderTempCartOrder() {
             actionDiv.innerHTML = `
                 <div class="temp-cart-actions">
                     <button class="cart-action-btn cash" onclick="processTakeawayPayment('cash')">💰 Tiền mặt</button>
+                    <button class="cart-action-btn debt" onclick="processTakeawayDebt()">💢</button>
                     <button class="cart-action-btn transfer" onclick="processTakeawayPayment('transfer')">💳 Chuyển khoản</button>
-                    <button class="cart-action-btn debt" onclick="processTakeawayDebt()">💢 Ghi nợ</button>
+                    
                 </div>
             `;
         } else {
@@ -1133,15 +1153,16 @@ async function processTakeawayDebt() {
         return;
     }
     const total = tempOrder.reduce((sum, i) => sum + (i.price * i.qty), 0);
-    // Chọn hoặc tạo khách hàng
     if (typeof showCustomerSelector === 'function') {
         showCustomerSelector(async (customer) => {
-            // Ghi nợ cho khách
             if (typeof addCustomerDebt === 'function') {
                 await addCustomerDebt(customer.id, total, `Mang đi - ${tempOrder.map(i => `${i.name}x${i.qty}`).join(', ')}`);
+                // Trừ nguyên liệu
+                if (typeof deductIngredients === 'function') {
+                    await deductIngredients(tempOrder);
+                }
                 showToast(`💰 Đã ghi nợ ${formatMoney(total)} cho khách ${customer.name}`, 'success');
             }
-            // Đóng modal và reset
             document.getElementById('orderModal').style.display = 'none';
             tempOrder = [];
             currentSelectedCustomer = null;
@@ -1152,7 +1173,6 @@ async function processTakeawayDebt() {
         showToast('Chức năng chọn khách chưa sẵn sàng', 'error');
     }
 }
-
 
 function removeFromTempOrder(id) {
     tempOrder = tempOrder.filter(i => i.id !== id);
@@ -1547,6 +1567,8 @@ if (typeof migrateOldTransactions === 'function') {
     if (typeof initCustomers === 'function') initCustomers();
     if (typeof initReport === 'function') initReport();
     if (typeof initHistory === 'function') initHistory();
+    if (typeof initCost === 'function') initCost();
+    if (typeof initManager === 'function') initManager();
     loadSettings();
 
     window.addEventListener('db_update', async function (event) {
@@ -1555,17 +1577,31 @@ if (typeof migrateOldTransactions === 'function') {
         if (!collection) return;
 
         if (collection === 'tables') {
-            cachedTables = null;
-            await renderTables();
-            if (currentContext && currentContext.type === 'detailView' && currentContext.tableId) {
-                refreshTableDetailContent(String(currentContext.tableId));
-            }
-        }
+    cachedTables = null;
+    await renderTables();
+    
+    // Cập nhật subtab nợ nếu đang mở
+    var activeSubTab = document.querySelector('.sub-tab.active');
+    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
+        if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
+    }
+    
+    if (currentContext && currentContext.type === 'detailView' && currentContext.tableId) {
+        refreshTableDetailContent(String(currentContext.tableId));
+    }
+}
 
         if (collection === 'customers') {
-            window.customers = Array.isArray(data) ? data : await DB.getAll('customers');
-            if (typeof renderCustomerList === 'function') renderCustomerList();
-        }
+    window.customers = Array.isArray(data) ? data : await DB.getAll('customers');
+    if (typeof renderCustomerList === 'function') renderCustomerList();
+    if (typeof renderDebtList === 'function') renderDebtList();
+    
+    // Cập nhật subtab nợ nếu đang mở
+    var activeSubTab = document.querySelector('.sub-tab.active');
+    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
+        if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
+    }
+}
 
         if (collection === 'menu' || collection === 'menu_categories') {
             window.menuItems = await DB.getAll('menu');
@@ -1579,8 +1615,13 @@ if (typeof migrateOldTransactions === 'function') {
         }
 
         if (collection === 'transactions') {
-            if (typeof initHistory === 'function') initHistory();
-        }
+    if (typeof initHistory === 'function') initHistory();
+    if (typeof resetReportCache === 'function') resetReportCache();
+    var reportView = document.getElementById('reportView');
+    if (reportView && reportView.classList.contains('active') && typeof renderReport === 'function') {
+        renderReport();
+    }
+}
 
         if (collection === 'reports') {
             if (typeof initReport === 'function') initReport();
@@ -1657,6 +1698,12 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('orderModal').style.display = 'flex';
         });
     }
+    var quickCostBtn = document.getElementById('quickCostBtn');
+if (quickCostBtn) {
+    quickCostBtn.onclick = function() {
+        if (typeof openCostModal === 'function') openCostModal();
+    };
+}
 });
 // ========== VUỐT NGANG CHUYỂN TAB (CHỈ MOBILE) ==========
 (function initSwipeTabs() {
@@ -1677,7 +1724,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return -1;
     }
-
+// Điều chỉnh cuộn tab bàn
+function adjustTablesScroll() {
+    var tablesView = document.getElementById('tablesView');
+    if (!tablesView) return;
+    setTimeout(function() {
+        if (tablesView.scrollHeight > tablesView.clientHeight) {
+            tablesView.style.overflowY = 'auto';
+        } else {
+            tablesView.style.overflowY = 'hidden';
+        }
+    }, 20);
+}
+// Gọi sau khi cập nhật grid
+adjustTablesScroll();
     function switchToTab(index) {
         if (index < 0 || index >= tabOrder.length) return;
         const tabId = tabOrder[index];

@@ -35,37 +35,13 @@ function debouncedRenderHistory() {
         await renderHistoryByDate(currentDisplayDate);
     }, 80);
 }
-async function restoreIngredients(orderItems) {
-    if (!orderItems || orderItems.length === 0) return;
-    rebuildIngredientLookupMaps();
-    const updates = [];
-    for (const orderItem of orderItems) {
-        const menuItem = menuByNameMap.get(String(orderItem.name));
-        if (menuItem && menuItem.ingredients && menuItem.ingredients.length) {
-            for (const req of menuItem.ingredients) {
-                const ing = ingredientByIdMap.get(String(req.ingredientId));
-                if (ing) {
-                    ing.stock += (req.quantity * orderItem.qty);
-                    updates.push(DB.update('ingredients', ing.id, { stock: ing.stock }));
-                }
-            }
-        }
-    }
-    // Thực thi batch
-    for (let i = 0; i < updates.length; i += 5) {
-        await Promise.all(updates.slice(i, i+5));
-    }
-    window.ingredients = ingredients;
-    renderIngredients();
-}
-window.restoreIngredients = restoreIngredients;
+
 async function refundTransaction(transactionId, reason) {
     const trans = await DB.get('transactions', transactionId);
     if (!trans) {
         showToast('Không tìm thấy giao dịch!', 'error');
         return false;
     }
-    // Không cho hủy giao dịch hoàn tiền
     if (trans.type === 'refund') {
         showToast('Không thể hủy giao dịch hoàn tiền!', 'warning');
         return false;
@@ -78,7 +54,7 @@ async function refundTransaction(transactionId, reason) {
         reason = 'Khách yêu cầu hoàn tiền';
     }
 
-    // 1. Khôi phục nguyên liệu (chỉ nếu có items)
+    // 1. Khôi phục nguyên liệu
     if ((trans.type === 'dinein' || trans.type === 'takeaway') && trans.items && trans.items.length) {
         if (typeof window.restoreIngredients === 'function') {
             await window.restoreIngredients(trans.items);
@@ -87,42 +63,24 @@ async function refundTransaction(transactionId, reason) {
         }
     }
 
-    // 2. Xử lý công nợ (nếu là debt_payment) - cải tiến: cập nhật trực tiếp totalDebt
+    // 2. Xử lý công nợ (nếu là debt_payment)
     if (trans.type === 'debt_payment' && trans.customer && trans.customer.id) {
         const customer = window.customers.find(c => c.id === trans.customer.id);
         if (customer && typeof window.updateCustomerDebt === 'function') {
-            // Tăng nợ lên bằng số tiền đã trả (vì hủy thanh toán nợ)
             await window.updateCustomerDebt(customer.id, trans.amount, 'add_debt', `Hoàn tiền hủy giao dịch ${transactionId} - ${reason}`);
         } else if (customer && typeof window.addCustomerDebt === 'function') {
             await window.addCustomerDebt(customer.id, trans.amount, `Hoàn tiền hủy giao dịch ${transactionId} - ${reason}`);
         }
     }
 
-    // 3. Tạo giao dịch hoàn tiền (refund)
-    const refundId = Date.now().toString();
-    const refundTransactionObj = {
-        id: refundId,
-        date: new Date().toISOString(),
-        type: 'refund',
-        amount: trans.amount,
-        paymentMethod: trans.paymentMethod,
-        items: trans.items ? trans.items.slice() : [],
-        customer: trans.customer ? { ...trans.customer } : null,
-        tableName: trans.tableName,
-        note: `Hoàn tiền cho giao dịch ${transactionId} - Lý do: ${reason}`,
-        refunded: false,
-        originalTransactionId: transactionId
-    };
-    await DB.create('transactions', refundTransactionObj);
-
-    // 4. Đánh dấu giao dịch cũ
+    // 3. Đánh dấu giao dịch cũ đã hủy (KHÔNG tạo refund)
     trans.refunded = true;
     trans.refundReason = reason;
     trans.refundedAt = Date.now();
-    trans.refundTransactionId = refundId;
+    // trans.refundTransactionId = null; // không còn
     await DB.update('transactions', transactionId, trans);
 
-    // 5. Cập nhật các view
+    // 4. Cập nhật các view
     if (typeof window.renderReport === 'function') window.renderReport();
     if (typeof window.renderCustomerList === 'function') window.renderCustomerList();
     if (typeof window.renderDebtList === 'function') window.renderDebtList();
@@ -135,6 +93,43 @@ async function refundTransaction(transactionId, reason) {
 
     showToast(`✅ Đã hủy giao dịch ${formatMoney(trans.amount)} và hoàn trả`, 'success');
     return true;
+}
+
+// Hoàn trả nguyên liệu khi hủy giao dịch (hỗ trợ món có size)
+async function restoreIngredients(orderItems) {
+    if (!orderItems || orderItems.length === 0) return;
+    rebuildIngredientLookupMaps();
+    const updates = [];
+    for (let i = 0; i < orderItems.length; i++) {
+        const orderItem = orderItems[i];
+        // Lấy tên gốc: bỏ phần (size) nếu có
+        let originalName = orderItem.name;
+        const lastParen = originalName.lastIndexOf('(');
+        if (lastParen !== -1 && originalName.indexOf(')') === originalName.length - 1) {
+            originalName = originalName.substring(0, lastParen).trim();
+        }
+        const menuItem = menuByNameMap.get(String(originalName));
+        if (menuItem && menuItem.ingredients && menuItem.ingredients.length) {
+            for (let j = 0; j < menuItem.ingredients.length; j++) {
+                const req = menuItem.ingredients[j];
+                const ing = ingredientByIdMap.get(String(req.ingredientId));
+                if (ing) {
+                    ing.stock += (req.quantity * orderItem.qty);
+                    updates.push(DB.update('ingredients', ing.id, { stock: ing.stock }));
+                }
+            }
+        } else {
+            console.warn('Không tìm thấy món để hoàn nguyên liệu:', orderItem.name);
+        }
+        // Yield nhẹ sau mỗi 20 item để tránh block
+        if (i % 20 === 19) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    // Thực thi batch
+    for (let i = 0; i < updates.length; i += 5) {
+        await Promise.all(updates.slice(i, i + 5));
+    }
+    window.ingredients = ingredients;
+    if (typeof renderIngredients === 'function') renderIngredients();
 }
 // Thêm giao dịch mới
 async function addHistory(transaction) {
@@ -223,7 +218,6 @@ function renderHistoryBatched(container, filtered, visibleCount) {
     var html = '';
     for (var i = 0; i < visibleCount; i++) {
         var h = filtered[i];
-        var stt = i + 1;
         
         // Tính tổng số lượng món
         var totalItems = 0;
@@ -239,9 +233,8 @@ function renderHistoryBatched(container, filtered, visibleCount) {
         // Chỉ hiển thị nút Hủy nếu chưa bị hủy và không phải giao dịch hoàn tiền
         var refundButton = '';
         if (!isRefunded && h.type !== 'refund') {
-            // Thoát dấu nháy đơn trong ID để tránh lỗi
             var safeId = h.id.replace(/'/g, "\\'");
-            refundButton = '<button class="btn-refund-small" data-id="' + safeId + '" onclick="event.stopPropagation(); refundTransactionWithPrompt(\'' + safeId + '\')">🗑️ Hủy</button>';
+            refundButton = '<button class="btn-refund-small" data-id="' + safeId + '" onclick="event.stopPropagation(); refundTransactionWithPrompt(\'' + safeId + '\')">✅ Hoàn thành</button>';
         }
         
         var dateStr = new Date(h.date).toLocaleTimeString('vi-VN');
@@ -258,16 +251,36 @@ function renderHistoryBatched(container, filtered, visibleCount) {
         
         var paymentText = (h.paymentMethod === 'cash') ? '💰 Tiền mặt' : '💳 Chuyển khoản';
         
-        var detailHtml = '';
-        if (totalItems > 0) {
-            detailHtml += '<div class="history-detail">📦 Số lượng: ' + totalItems + ' món</div>';
-        }
+        // Tạo thông tin bàn/khách để hiển thị trên dòng đầu
+        var tableInfo = '';
         if (h.tableName) {
-            var customerDisplay = (h.customer && h.customer.name) ? '👤 ' + escapeHtml(h.customer.name) : '🪑 ' + h.tableName;
-            detailHtml += '<div class="history-detail">📌 ' + customerDisplay + '</div>';
+            if (h.customer && h.customer.name) {
+                tableInfo = '👤 ' + escapeHtml(h.customer.name);
+            } else {
+                tableInfo = '🪑 ' + h.tableName;
+            }
         } else if (h.customer && !h.tableName) {
-            detailHtml += '<div class="history-detail">👤 ' + escapeHtml(h.customer.name) + '</div>';
+            tableInfo = '👤 ' + escapeHtml(h.customer.name);
         }
+        
+        // Dòng đầu: Giờ + bàn/khách + số tiền + badge (không có STT)
+        var headerHtml = '<div class="history-header-row">' +
+            '<span class="history-time">' + dateStr + '</span>' +
+            (tableInfo ? '<span class="history-table">' + tableInfo + '</span>' : '') +
+            '<span class="history-amount ' + amountClass + '">' + amountSign + formattedAmount + '</span>' +
+            refundBadge +
+        '</div>';
+        
+        // Dòng thông tin chính: loại hình + số lượng món + phương thức thanh toán + nút
+        var infoHtml = '<div class="history-info-row">' +
+            '<span class="history-type">' + typeText + '</span>' +
+            '<span class="history-qty">📦 SL: ' + totalItems + '</span>' +
+            '<span class="history-payment">' + paymentText + '</span>' +
+            (refundButton ? '<span class="history-action">' + refundButton + '</span>' : '') +
+        '</div>';
+        
+        // Chi tiết món và lý do hủy
+        var detailHtml = '';
         if (h.items && h.items.length) {
             var itemsStr = '';
             for (var k = 0; k < h.items.length; k++) {
@@ -277,20 +290,12 @@ function renderHistoryBatched(container, filtered, visibleCount) {
             detailHtml += '<div class="history-detail">📋 ' + itemsStr + '</div>';
         }
         if (isRefunded && h.refundReason) {
-            detailHtml += '<div class="history-detail refund-reason">Lý do: ' + escapeHtml(h.refundReason) + '</div>';
+            detailHtml += '<div class="history-detail refund-reason">📝 Lý do: ' + escapeHtml(h.refundReason) + '</div>';
         }
         
-        html += '<div class="history-item ' + h.type + '">' +
-            '<div class="history-header-row">' +
-                '<span>' + stt + '. ' + dateStr + '</span>' +
-                '<span class="history-amount ' + amountClass + '">' + amountSign + formattedAmount + '</span>' +
-                refundBadge +
-            '</div>' +
-            '<div class="history-header-row">' +
-                '<span>' + typeText + '</span>' +
-                '<span>' + paymentText + '</span>' +
-                refundButton +
-            '</div>' +
+        html += '<div class="history-item ' + h.type + (isRefunded ? ' refunded' : '') + '">' +
+            headerHtml +
+            infoHtml +
             detailHtml +
         '</div>';
     }
@@ -302,7 +307,6 @@ function renderHistoryBatched(container, filtered, visibleCount) {
     if (hasMore) {
         var loadMoreBtn = document.getElementById('historyLoadMoreBtn');
         if (loadMoreBtn) {
-            // Gán lại sự kiện, tránh trùng lặp
             loadMoreBtn.onclick = function() {
                 historyRenderedCount = Math.min(historyRenderedCount + HISTORY_BATCH_SIZE, filtered.length);
                 renderHistoryBatched(container, filtered, historyRenderedCount);

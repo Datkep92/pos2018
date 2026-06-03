@@ -80,6 +80,43 @@ async function syncHistoricalTransactions() {
     saveSyncMetadata();
     console.log('Historical sync transactions completed, updated', count, 'records');
 }
+async function syncHistoricalReports() {
+    if (!isOnline) return;
+    var now = Date.now();
+    var lastSync = SYNC_CONFIG.reports.lastSync;
+    if (lastSync && (now - lastSync) < 12 * 3600000) {
+        console.log('Historical sync reports skipped, last sync within 12h');
+        return;
+    }
+    var startDate = new Date();
+    startDate.setDate(startDate.getDate() - SYNC_CONFIG.reports.daysToSync);
+    var startDateStr = startDate.toISOString().slice(0,10);
+    var endDateStr = new Date().toISOString().slice(0,10);
+    console.log('Starting historical sync for reports from', startDateStr, 'to', endDateStr);
+    
+    var ref = db.ref(CURRENT_SHOP_ID + '/reports');
+    var query = ref.orderByChild('dateKey').startAt(startDateStr).endAt(endDateStr);
+    var snapshot = await query.once('value');
+    var remoteData = snapshot.val() || {};
+    
+    var count = 0;
+    for (var key in remoteData) {
+        if (remoteData.hasOwnProperty(key)) {
+            var remoteItem = remoteData[key];
+            remoteItem.id = key;
+            var localItem = await loadFromLocal('reports', key);
+            var remoteVersion = remoteItem._version || 0;
+            var localVersion = localItem ? (localItem._version || 0) : 0;
+            if (remoteVersion > localVersion) {
+                await saveToLocal('reports', remoteItem);
+                count++;
+            }
+        }
+    }
+    SYNC_CONFIG.reports.lastSync = now;
+    saveSyncMetadata();
+    console.log('Historical sync reports completed, updated', count, 'records');
+}
 
 function saveSyncMetadata() {
     var toStore = {
@@ -96,50 +133,7 @@ let isOnline = navigator.onLine;
 let listeners = {};
 let analyticsSubscriptionsStarted = false;
 
-function initLocalDB() {
-    if (dbReadyPromise) return dbReadyPromise;
-    
-    dbReadyPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(STORE_NAME, 6); // bump version để thêm index tối ưu transactions
-        
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-            localDB = request.result;
-            loadSyncQueue();
-            backfillTransactionIndexes();
-            resolve(localDB);
-        };
-        
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            const stores = [
-                'tables', 'customers', 'menu', 'menu_categories',
-                'ingredients', 'transactions', 'reports', 'sync_queue', 'staffs'
-            ];
-            for (const storeName of stores) {
-                if (!db.objectStoreNames.contains(storeName)) {
-                    db.createObjectStore(storeName, { keyPath: 'id' });
-                    console.log(`✅ Created object store: ${storeName}`);
-                }
-            }
 
-            if (db.objectStoreNames.contains('transactions')) {
-                const txStore = event.target.transaction.objectStore('transactions');
-                if (!txStore.indexNames.contains('dateKey')) {
-                    txStore.createIndex('dateKey', 'dateKey', { unique: false });
-                }
-                if (!txStore.indexNames.contains('type')) {
-                    txStore.createIndex('type', 'type', { unique: false });
-                }
-                if (!txStore.indexNames.contains('dateTypeKey')) {
-                    txStore.createIndex('dateTypeKey', 'dateTypeKey', { unique: false });
-                }
-            }
-        };
-    });
-    
-    return dbReadyPromise;
-}
 
 async function backfillTransactionIndexes() {
     try {
@@ -755,10 +749,10 @@ async function initDatabase() {
     await initLocalDB();
     loadSyncMetadata();
     if (isOnline) {
-        console.log('🔄 Starting historical sync...');
-        await syncHistoricalTransactions();
-        await syncHistoricalReports();
-    }
+    console.log('🔄 Starting historical sync...');
+    await syncHistoricalTransactions();
+    await syncHistoricalReports();
+}
     await pruneLocalData();
     initNetworkListener();
     initStaffList();
@@ -785,6 +779,11 @@ async function initDatabase() {
     subscribeToCollection('menu');
     subscribeToCollection('menu_categories');
     subscribeToCollection('ingredients');
+    subscribeToCollection('cost_categories');
+    subscribeToCollection('cost_transactions');
+    subscribeToCollection('cost_transactions_admin');
+
+
 
     // 👇 THÊM DÒNG NÀY
     ensureAnalyticsSubscriptions();
@@ -870,5 +869,68 @@ window.DB = {
     getSyncQueue: () => syncQueue,
     processSyncQueue
 };
-
+function initLocalDB() {
+    if (dbReadyPromise) return dbReadyPromise;
+    
+    dbReadyPromise = new Promise((resolve, reject) => {
+        const DB_VERSION = 8; // tăng lên 8 để chắc chắn
+        
+        function doOpen(version) {
+            const request = indexedDB.open(STORE_NAME, version);
+            
+            request.onerror = (event) => {
+                const error = event.target.error;
+                if (error && error.name === 'VersionError') {
+                    console.warn('VersionError: Xóa database cũ và thử lại...');
+                    const deleteRequest = indexedDB.deleteDatabase(STORE_NAME);
+                    deleteRequest.onsuccess = () => {
+                        doOpen(version);
+                    };
+                    deleteRequest.onerror = () => reject(deleteRequest.error);
+                    return;
+                }
+                reject(error);
+            };
+            
+            request.onsuccess = () => {
+                localDB = request.result;
+                loadSyncQueue();
+                backfillTransactionIndexes();
+                resolve(localDB);
+            };
+            
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const stores = [
+    'tables', 'customers', 'menu', 'menu_categories',
+    'ingredients', 'transactions', 'reports', 'sync_queue', 'staffs',
+    'cost_categories', 'cost_transactions', 'cost_transactions_admin'
+];
+                for (let i = 0; i < stores.length; i++) {
+                    const storeName = stores[i];
+                    if (!db.objectStoreNames.contains(storeName)) {
+                        db.createObjectStore(storeName, { keyPath: 'id' });
+                        console.log('✅ Created object store: ' + storeName);
+                    }
+                }
+                if (db.objectStoreNames.contains('transactions')) {
+                    const txStore = event.target.transaction.objectStore('transactions');
+                    if (!txStore.indexNames.contains('dateKey')) {
+                        txStore.createIndex('dateKey', 'dateKey', { unique: false });
+                    }
+                    if (!txStore.indexNames.contains('type')) {
+                        txStore.createIndex('type', 'type', { unique: false });
+                    }
+                    if (!txStore.indexNames.contains('dateTypeKey')) {
+                        txStore.createIndex('dateTypeKey', 'dateTypeKey', { unique: false });
+                    }
+                }
+            };
+        }
+        
+        doOpen(DB_VERSION);
+    });
+    
+    return dbReadyPromise;
+}
 console.log('✅ db.js loaded - Firebase + Offline Queue ready');
