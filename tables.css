@@ -1,0 +1,153 @@
+/* =======================================================
+   TABLES (BÀN)
+   ======================================================= */
+.tables-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.sub-tabs {
+    display: flex;
+    gap: 12px;
+}
+.tables-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(2, 1fr);
+}
+.table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid transparent;
+    border-radius: 16px;
+    padding: 14px;
+    transition: transform 0.1s, box-shadow 0.1s;
+    cursor: pointer;
+}
+.table-card:active {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+.table-card.occupied {
+    border-left-color: var(--primary);
+}
+.table-card.debt {
+    border-left-color: var(--danger);
+}
+.table-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.table-name {
+    font-weight: 600;
+    font-size: 15px;
+}
+.table-time {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 30px;
+}
+.table-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+}
+.table-item-count {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.table-total {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--primary);
+}
+.table-icons {
+    display: flex;
+    justify-content: space-between;
+}
+.table-icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 40px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+/* Float buttons */
+.float-buttons {
+    position: fixed;
+    right: 20px;
+    bottom: calc(var(--bottom-h) + 20px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 99;
+}
+.float-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+.float-takeaway {
+    background: var(--primary);
+    color: white;
+    border: none;
+}
+.float-newtable {
+    background: var(--success);
+    color: white;
+    border: none;
+}
+.float-icon {
+    font-size: 24px;
+    margin-bottom: 2px;
+}
+.float-label {
+    font-size: 9px;
+    font-weight: 600;
+}
+
+/* Nút xác nhận trong giỏ hàng */
+#confirmOrderBtn {
+    width: 100%;
+    margin-top: 8px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    border: none;
+    border-radius: 40px;
+    padding: 14px 0;
+    color: white;
+    font-weight: 700;
+    font-size: 16px;
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.1s;
+}
+#confirmOrderBtn:active {
+    transform: scale(0.98);
+}
+
+.cart-action-btn.grab {
+    background: linear-gradient(135deg, #00b14f, #008c3a);
+    color: white;
+    border: none;
+}

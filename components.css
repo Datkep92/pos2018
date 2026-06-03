@@ -1,0 +1,711 @@
+/* =======================================================
+   COMPONENTS – NÚT, CARD, FORM, MODAL, DETAIL, PAYMENT, ...
+   ======================================================= */
+
+/* ---------- BUTTONS ---------- */
+.btn-primary {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 0 20px;
+    min-height: var(--hit);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.1s;
+}
+.btn-primary:active {
+    transform: scale(0.96);
+}
+.btn-secondary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 40px;
+    padding: 0 20px;
+    min-height: var(--hit);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.btn-danger {
+    background: var(--danger);
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 0 16px;
+    min-height: var(--hit);
+    font-weight: 600;
+}
+.btn-small {
+    background: #f1f5f9;
+    border: none;
+    border-radius: 30px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.btn-save {
+    background: var(--success);
+    color: white;
+}
+.btn-cancel {
+    background: #f1f5f9;
+    color: var(--text-secondary);
+}
+.nav-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 40px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    transition: 0.1s;
+}
+.nav-btn:active {
+    transform: scale(0.94);
+}
+
+/* ---------- CARDS ---------- */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+}
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    cursor: pointer;
+}
+.card-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+}
+.card-body {
+    padding-top: 8px;
+}
+.collapsed .card-body {
+    display: none;
+}
+.toggle-icon {
+    font-size: 18px;
+    transition: transform 0.2s;
+}
+.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+
+/* ---------- FORM ELEMENTS ---------- */
+.form-group {
+    margin-bottom: 16px;
+}
+.form-group label {
+    display: block;
+    font-weight: 500;
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+}
+.form-input, select, textarea {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    font-size: 14px;
+    background: var(--surface);
+    font-family: inherit;
+}
+.form-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+/* ---------- MODAL (CHUNG) ---------- */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+    justify-content: center;
+    align-items: center;
+}
+.modal-content {
+    width: 100%;
+    max-width: 720px;
+    background: var(--surface);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    margin: 16px;
+}
+.modal-header {
+    min-height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.modal-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+.modal-close {
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.modal-body {
+    max-height: calc(85vh - 56px);
+    overflow-y: auto;
+    padding: 20px;
+}
+.modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+/* ---------- MODAL CHI TIẾT BÀN (tableDetailModal) ---------- */
+.detail-items-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.detail-items-list {
+    max-height: 360px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+}
+.detail-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+.detail-item-info {
+    flex: 2;
+}
+.detail-item-name {
+    font-weight: 600;
+}
+.detail-item-price {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.detail-item-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.detail-item-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.btn-qty {
+    width: 32px;
+    height: 32px;
+    border-radius: 30px;
+    background: #f1f5f9;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+}
+.detail-item-total {
+    font-weight: 600;
+    min-width: 80px;
+    text-align: right;
+}
+.detail-summary {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.detail-payment-buttons, .payment-methods, .detail-action-icons {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+}
+.payment-method-btn {
+    flex: 1;
+    padding: 14px;
+    border-radius: 40px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+}
+.payment-method-btn.cash {
+    background: var(--success);
+    color: white;
+}
+.payment-method-btn.transfer {
+    background: var(--primary);
+    color: white;
+}
+.action-icon {
+    flex: 1;
+    background: #f1f5f9;
+    border: none;
+    border-radius: 40px;
+    padding: 12px;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+/* ---------- MODAL THANH TOÁN (paymentModal) ---------- */
+.payment-modal-content {
+    max-width: 500px;
+    width: 90%;
+}
+.payment-info-section {
+    background: #f8fafc;
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+.payment-info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+}
+.payment-info-row:last-child {
+    border-bottom: none;
+}
+.payment-items-title {
+    font-weight: 600;
+    margin: 12px 0 8px;
+}
+.payment-items-list {
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+.payment-items-list > div {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 14px;
+}
+.payment-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    background: #fff7ed;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+}
+.payment-total .amount {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary);
+}
+.payment-items-count {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* ---------- MODAL TÁCH BÀN (transferTableModal) ---------- */
+.transfer-item-row {
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.transfer-qty-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.transfer-qty-input {
+    width: 70px;
+    text-align: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.transfer-qty-minus, .transfer-qty-plus {
+    width: 32px;
+    height: 32px;
+    border-radius: 30px;
+    background: #f1f5f9;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+/* ---------- MODAL GỘP BÀN (mergeTableModal) ---------- */
+.merge-table-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+}
+.merge-table-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+.merge-total {
+    color: var(--primary);
+}
+.merge-table-customer {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* ---------- MODAL CHIA HÓA ĐƠN (splitBillModal) ---------- */
+.split-item-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.split-qty-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.split-qty-input {
+    width: 70px;
+    text-align: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.split-item-price {
+    font-weight: 600;
+    min-width: 80px;
+    text-align: right;
+}
+.split-total-bar {
+    background: #f8fafc;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    margin: 16px 0;
+    text-align: right;
+    font-size: 16px;
+}
+.split-total-value {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+/* ---------- MODAL CONFIRM (confirmModal) ---------- */
+#confirmModal .modal-content {
+    max-width: 350px;
+}
+#confirmMessage {
+    font-size: 16px;
+}
+
+/* ---------- MODAL QUẢN LÝ DANH MỤC (manageCategoryModal) ---------- */
+.manage-category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.manage-category-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+.manage-category-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ---------- MODAL DANH MỤC (categoryModal) ---------- */
+#categoryModal .modal-content {
+    max-width: 400px;
+}
+
+/* ---------- MODAL CHI TIẾT MÓN (itemDetailModal) ---------- */
+#itemDetailModal .modal-content {
+    max-width: 500px;
+}
+.item-detail-row {
+    display: flex;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+.item-detail-label {
+    width: 40%;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.item-detail-value {
+    width: 60%;
+    color: var(--text);
+}
+.recipe-text {
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+#itemDetailModal .modal-footer {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+}
+
+/* ---------- MODAL THÊM/SỬA MÓN (itemModal) ---------- */
+#itemModal .modal-large {
+    max-width: 700px;
+}
+.variant-card {
+    background: #f8fafc;
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+}
+.variant-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.ingredients-list-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 8px;
+    background: #f8fafc;
+    border-radius: var(--radius-sm);
+}
+.ingredients-formula {
+    margin-top: 12px;
+}
+.formula-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+.formula-row select, .formula-row input {
+    flex: 1;
+}
+
+/* ---------- MODAL NGUYÊN LIỆU (ingredientDetailModal) ---------- */
+.form-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+/* ---------- MODAL KHÁCH HÀNG (customerDetailModal) ---------- */
+#customerDetailModal .modal-large {
+    max-width: 600px;
+}
+.debt-summary-simple {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: white;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 20px;
+}
+.debt-total {
+    font-size: 24px;
+    font-weight: 700;
+}
+.history-list-simple {
+    max-height: 480px;
+    overflow-y: auto;
+    margin-bottom: 20px;
+}
+.tx-item {
+    background: var(--surface);
+    border-left: 4px solid var(--primary);
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+}
+.tx-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+.tx-amount {
+    font-size: 18px;
+    font-weight: 700;
+}
+.tx-amount.positive {
+    color: var(--danger);
+}
+.tx-amount.negative {
+    color: var(--success);
+}
+.tx-balance {
+    font-size: 12px;
+    font-weight: 500;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border);
+}
+.btn-pay-simple, .btn-close-simple {
+    width: 100%;
+    padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    border: none;
+    margin-bottom: 12px;
+    cursor: pointer;
+}
+.btn-pay-simple {
+    background: var(--success);
+    color: white;
+}
+.btn-close-simple {
+    background: #f1f5f9;
+    color: var(--text-secondary);
+}
+
+/* ---------- MODAL CHỌN KHÁCH (customerSelectorModal) ---------- */
+.customer-selector-list {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.customer-select-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+}
+.customer-select-avatar {
+    width: 44px;
+    height: 44px;
+    background: #eef2ff;
+    border-radius: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--primary);
+}
+.customer-select-name {
+    font-weight: 600;
+}
+.customer-select-debt {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 20px;
+}
+.debt-negative {
+    background: #fee2e2;
+    color: var(--danger);
+}
+.debt-positive {
+    background: #dcfce7;
+    color: var(--success);
+}
+.debt-zero {
+    color: var(--text-secondary);
+}
+#customerSelectorCreateBtn {
+    width: calc(100% - 24px);
+    margin: 16px 12px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 40px;
+    padding: 14px;
+    font-weight: 600;
+}
+
+/* ---------- MODAL GHI NỢ (debtCustomerModal, debtPaymentModal) ---------- */
+.debt-customer-selector {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* ---------- MODAL NHẬP CHI PHÍ (costModal) – đã có trong manager.css, bổ sung nếu thiếu ---------- */
+/* (các style cho popup chi phí đã có trong manager.css, giữ nguyên) */
+
+/* ---------- TOAST ---------- */
+.toast-container {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bottom-h) + 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    pointer-events: none;
+    z-index: 300;
+}
+.toast {
+    background: #1e293b;
+    color: white;
+    border-radius: 40px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: var(--shadow-sm);
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.warning { background: var(--warning); }
+
+.payment-method-btn.grab {
+    background: #00b14f;
+    color: white;
+}

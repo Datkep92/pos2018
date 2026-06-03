@@ -1,0 +1,296 @@
+/* =======================================================
+   BASE – RESET, BIẾN, LAYOUT CHUNG
+   ======================================================= */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Colors */
+    --bg: #f6f8fb;
+    --surface: #ffffff;
+    --text: #111827;
+    --text-secondary: #6b7280;
+    --border: #e5e7eb;
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --success: #16a34a;
+    --warning: #f59e0b;
+    --danger: #dc2626;
+    --info: #3b82f6;
+    
+    /* Border radius */
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    
+    /* Shadow */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.04);
+    
+    /* Sizing */
+    --hit: 44px;
+    --header-h: 56px;
+    --bottom-h: 70px;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: "Inter", -apple-system, "SF Pro Display", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.app {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+
+/* Header */
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--header-h);
+    background: #1e293b;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 120;
+    padding-top: env(safe-area-inset-top);
+}
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.logo-icon { font-size: 20px; }
+.logo-text {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.logout-btn {
+    min-height: 34px;
+    min-width: 34px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    cursor: pointer;
+}
+.time {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.1);
+    font-weight: 500;
+    font-size: 13px;
+}
+
+/* Main Tabs (desktop/tablet) */
+.main-tabs {
+    display: none;
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    gap: 8px;
+    overflow-x: auto;
+    z-index: 110;
+}
+.main-tab {
+    min-height: 36px;
+    border-radius: 999px;
+    padding: 0 16px;
+    background: #f1f5f9;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.main-tab.active {
+    background: var(--primary);
+    color: white;
+}
+
+/* Main Content */
+.main-content {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    bottom: var(--bottom-h);
+    overflow: hidden;
+    z-index: 1;
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    -webkit-overflow-scrolling: touch;
+}
+.tab-content.active {
+    display: block;
+}
+#managerView {
+    padding-top: calc(var(--header-h) + 16px);
+}
+
+/* Bottom Navigation (mobile) */
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--bottom-h);
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 120;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+.bottom-nav-item {
+    border: none;
+    background: transparent;
+    min-height: var(--bottom-h);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.1s;
+}
+.bottom-nav-item.active {
+    color: var(--primary);
+    background: transparent;
+}
+.bottom-icon {
+    font-size: 20px;
+}
+
+/* Modal nền (backdrop) */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+    justify-content: center;
+    align-items: center;
+}
+.modal-content {
+    width: 100%;
+    max-width: 720px;
+    background: var(--surface);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    margin: 16px;
+}
+.modal-header {
+    min-height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.modal-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+.modal-close {
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.modal-body {
+    max-height: calc(85vh - 56px);
+    overflow-y: auto;
+    padding: 20px;
+}
+.modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+/* Toast */
+.toast-container {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bottom-h) + 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    pointer-events: none;
+    z-index: 300;
+}
+.toast {
+    background: #1e293b;
+    color: white;
+    border-radius: 40px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: var(--shadow-sm);
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.warning { background: var(--warning); }

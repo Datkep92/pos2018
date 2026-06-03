@@ -1,0 +1,96 @@
+/* =======================================================
+   HISTORY (LỊCH SỬ)
+   ======================================================= */
+.history-date-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 60px;
+    padding: 4px 8px;
+    margin-bottom: 20px;
+}
+.date-display {
+    flex: 1;
+    text-align: center;
+    font-weight: 600;
+    font-size: 14px;
+    background: #f8fafc;
+    padding: 8px;
+    border-radius: 30px;
+}
+.history-filter-row {
+    margin-bottom: 16px;
+}
+.history-select {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+}
+.history-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.history-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid transparent;
+    border-radius: 16px;
+    padding: 14px;
+}
+.history-item.dinein { border-left-color: var(--primary); }
+.history-item.takeaway { border-left-color: var(--warning); }
+.history-item.debt_payment { border-left-color: var(--success); }
+.history-item.refund { border-left-color: var(--danger); background: #fef2f2; }
+.history-item.refunded { border-left-color: #94a3b8; background: #f8fafc; opacity: 0.9; }
+.history-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+.history-amount {
+    font-weight: 700;
+    color: var(--danger);
+}
+.history-amount.text-success { color: var(--success); }
+.history-info-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.history-type, .history-payment {
+    font-size: 12px;
+    padding: 4px 8px;
+    background: #f1f5f9;
+    border-radius: 30px;
+}
+.history-detail {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+.refund-reason {
+    background: #fef2f2;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+    font-size: 12px;
+}
+.btn-refund-small {
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: 30px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}

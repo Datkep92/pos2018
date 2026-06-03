@@ -1,0 +1,44 @@
+/* =======================================================
+   RESPONSIVE (iPad, Desktop)
+   ======================================================= */
+@media (min-width: 744px) and (max-width: 768px) and (orientation: portrait) {
+    :root { --header-h: 60px; --bottom-h: 74px; }
+    .tables-grid { grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .menu-items-grid { grid-template-columns: repeat(3, 1fr); }
+    .menu-grid-simple { grid-template-columns: repeat(3, 1fr); }
+    .ingredients-list { grid-template-columns: repeat(3, 1fr); }
+    .stats-grid { grid-template-columns: repeat(3, 1fr); }
+    .manager-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 900px) and (max-width: 1200px) and (orientation: landscape),
+       (min-width: 1201px) {
+    :root { --header-h: 62px; --bottom-h: 0px; }
+    .bottom-nav { display: none; }
+    .main-tabs { display: flex; }
+    .main-content { top: calc(var(--header-h) + 52px); bottom: 0; }
+    .tables-grid { grid-template-columns: repeat(4, 1fr); }
+    .menu-items-grid { grid-template-columns: repeat(4, 1fr); }
+    .menu-grid-simple { grid-template-columns: repeat(4, 1fr); }
+    .ingredients-list { grid-template-columns: repeat(4, 1fr); }
+    .stats-grid { grid-template-columns: repeat(4, 1fr); }
+    .manager-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (min-width: 1201px) {
+    .tables-grid { grid-template-columns: repeat(5, 1fr); }
+    .menu-items-grid { grid-template-columns: repeat(5, 1fr); }
+    .menu-grid-simple { grid-template-columns: repeat(5, 1fr); }
+    .ingredients-list { grid-template-columns: repeat(5, 1fr); }
+    .stats-grid { grid-template-columns: repeat(5, 1fr); }
+    .manager-grid { grid-template-columns: repeat(5, 1fr); }
+}
+
+@media (max-width: 640px) {
+    .order-main-layout {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .menu-grid-simple { grid-template-columns: repeat(3, 1fr); }
+    .temp-cart-items { max-height: 200px; }
+}
