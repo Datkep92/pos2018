@@ -2,7 +2,8 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=<style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <style>
 html,
 body{
     margin:0;
@@ -13,11 +14,15 @@ body{
 }
 
 body{
-    background:#fff;
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
     -webkit-text-size-adjust:100%;
+    background:#fff;
 }
 
-/* APP ROOT */
 .app{
     position:fixed;
     top:0;
@@ -25,47 +30,27 @@ body{
     right:0;
     bottom:0;
     overflow:hidden;
+    display:flex;
+    flex-direction:column;
 }
 
-/* CONTENT */
 .main-content{
+    flex:1;
     overflow:hidden;
-}
-
-/* TAB */
-.tab-content{
-    display:none;
-    height:100%;
-    overflow:hidden;
+    position:relative;
 }
 
 .tab-content.active{
-    display:block;
-}
-
-/* CHỈ CHO DANH SÁCH CUỘN */
-.tables-grid,
-.menu-items-grid,
-.ingredients-list,
-.history-list-container,
-.customer-list-container,
-.menu-grid-simple,
-.temp-cart-items,
-.modal-body{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
     overflow-y:auto;
     overflow-x:hidden;
     -webkit-overflow-scrolling:touch;
 }
 
-/* DANH MỤC NGANG */
-.menu-categories,
-.order-categories{
-    overflow-x:auto;
-    overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
-}
-
-/* MODAL */
 .modal{
     position:fixed;
     top:0;
@@ -74,14 +59,25 @@ body{
     bottom:0;
 }
 
-/* CHỈ GPU HACK CHO HEADER */
-.header,
-.bottom-nav{
+.modal-body,
+.tables-grid,
+.menu-items-grid,
+.ingredients-list,
+.history-list-container,
+.customer-list-container,
+.order-categories,
+.menu-grid-simple{
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+}
+
+.tables-grid,
+.menu-items-grid,
+.modal-content{
     -webkit-transform:translateZ(0);
     transform:translateZ(0);
 }
 
-/* TAP HIGHLIGHT */
 button,
 .float-btn,
 .bottom-nav-item,
@@ -90,33 +86,18 @@ button,
     -webkit-tap-highlight-color:transparent;
 }
 
-/* SAFE AREA IOS */
 .header{
-    padding-top:constant(safe-area-inset-top);
     padding-top:env(safe-area-inset-top);
 }
 
 .bottom-nav{
-    padding-bottom:constant(safe-area-inset-bottom);
     padding-bottom:env(safe-area-inset-bottom);
 }
 
-/* IOS INPUT FIX */
 input,
 textarea,
 select{
     font-size:16px;
-}
-
-/* IOS TOUCH FIX */
-*{
-    box-sizing:border-box;
-    -webkit-touch-callout:none;
-}
-
-img{
-    -webkit-user-drag:none;
-    user-select:none;
 }
 </style>
     <meta name="theme-color" content="#f97316">
