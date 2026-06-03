@@ -2,8 +2,7 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=<style>
 html,
 body{
     margin:0;
@@ -14,12 +13,6 @@ body{
 }
 
 body{
-    position:fixed;
-    top:0;
-    left:0;
-    right:0;
-    bottom:0;
-
     background:#fff;
     -webkit-text-size-adjust:100%;
 }
@@ -31,58 +24,26 @@ body{
     left:0;
     right:0;
     bottom:0;
-
     overflow:hidden;
-
-    display:-webkit-flex;
-    display:flex;
-
-    -webkit-flex-direction:column;
-    flex-direction:column;
 }
 
-/* HEADER + TABS KHÔNG CUỘN */
-.header,
-.main-tabs{
-    -webkit-flex:0 0 auto;
-    flex:0 0 auto;
-}
-
-/* VÙNG NỘI DUNG */
+/* CONTENT */
 .main-content{
-    -webkit-flex:1;
-    flex:1;
-
-    min-height:0;
     overflow:hidden;
-    position:relative;
 }
 
 /* TAB */
 .tab-content{
     display:none;
+    height:100%;
+    overflow:hidden;
 }
 
 .tab-content.active{
-    position:absolute;
-
-    top:0;
-    left:0;
-    right:0;
-    bottom:0;
-
-    overflow:hidden;
-
-    display:-webkit-flex;
-    display:flex;
-
-    -webkit-flex-direction:column;
-    flex-direction:column;
-
-    min-height:0;
+    display:block;
 }
 
-/* CHỈ NHỮNG DANH SÁCH ĐƯỢC CUỘN */
+/* CHỈ CHO DANH SÁCH CUỘN */
 .tables-grid,
 .menu-items-grid,
 .ingredients-list,
@@ -91,27 +52,17 @@ body{
 .menu-grid-simple,
 .temp-cart-items,
 .modal-body{
-
     overflow-y:auto;
-
+    overflow-x:hidden;
     -webkit-overflow-scrolling:touch;
-
-    -webkit-flex:1;
-    flex:1;
-
-    min-height:0;
 }
 
-/* SCROLL NGANG DANH MỤC */
+/* DANH MỤC NGANG */
 .menu-categories,
 .order-categories{
     overflow-x:auto;
     overflow-y:hidden;
-
     -webkit-overflow-scrolling:touch;
-
-    -webkit-flex:0 0 auto;
-    flex:0 0 auto;
 }
 
 /* MODAL */
@@ -123,14 +74,14 @@ body{
     bottom:0;
 }
 
-/* KHÔNG GPU HACK TOÀN BỘ */
+/* CHỈ GPU HACK CHO HEADER */
 .header,
 .bottom-nav{
     -webkit-transform:translateZ(0);
     transform:translateZ(0);
 }
 
-/* TAP */
+/* TAP HIGHLIGHT */
 button,
 .float-btn,
 .bottom-nav-item,
@@ -139,20 +90,33 @@ button,
     -webkit-tap-highlight-color:transparent;
 }
 
-/* SAFE AREA */
+/* SAFE AREA IOS */
 .header{
+    padding-top:constant(safe-area-inset-top);
     padding-top:env(safe-area-inset-top);
 }
 
 .bottom-nav{
+    padding-bottom:constant(safe-area-inset-bottom);
     padding-bottom:env(safe-area-inset-bottom);
 }
 
-/* IOS KHÔNG ZOOM INPUT */
+/* IOS INPUT FIX */
 input,
 textarea,
 select{
     font-size:16px;
+}
+
+/* IOS TOUCH FIX */
+*{
+    box-sizing:border-box;
+    -webkit-touch-callout:none;
+}
+
+img{
+    -webkit-user-drag:none;
+    user-select:none;
 }
 </style>
     <meta name="theme-color" content="#f97316">
