@@ -56,7 +56,6 @@ function attachReportDateControls() {
 }
 
 
-
 async function renderReport() {
     const container = document.getElementById('reportContent');
     if (!container) return;
@@ -80,6 +79,7 @@ async function renderReport() {
     let transferAmount = 0, transferCount = 0;
     let takeawayCount = 0, takeawayTotal = 0;
     let dineinCount = 0, dineinTotal = 0;
+    let grabCount = 0, grabTotal = 0;
     let debtPaymentCount = 0, debtPaymentTotal = 0;
 
     for (const tx of activeTransactions) {
@@ -99,6 +99,9 @@ async function renderReport() {
         } else if (tx.type === 'dinein') {
             dineinCount++;
             dineinTotal += amount;
+        } else if (tx.type === 'grab') {
+            grabCount++;
+            grabTotal += amount;
         } else if (tx.type === 'debt_payment') {
             debtPaymentCount++;
             debtPaymentTotal += amount;
@@ -131,7 +134,7 @@ async function renderReport() {
         }
     }
 
-    // 5. Top món bán chạy (chỉ tính từ activeTransactions)
+    // 5. Top món bán chạy (chỉ tính từ activeTransactions, không tính debt_payment)
     const itemSales = {};
     for (const tx of activeTransactions) {
         if (tx.type === 'debt_payment') continue;
@@ -150,7 +153,7 @@ async function renderReport() {
         .sort(function(a, b) { return b.qty - a.qty; })
         .slice(0, 10);
 
-    // 6. Render HTML (thêm dòng hiển thị hoàn tiền nếu có)
+    // 6. Render HTML (thêm dòng Grab)
     container.innerHTML = `
         <div class="report-date-bar">
             <button id="reportPrevDay" class="nav-btn">‹</button>
@@ -195,6 +198,7 @@ async function renderReport() {
             <div class="summary-title">📊 Chi tiết doanh thu</div>
             <div class="summary-row small"><span>🛵 Mang đi: ${takeawayCount} đơn</span><span>${formatMoney(takeawayTotal)}</span></div>
             <div class="summary-row small"><span>🍽️ Tại chỗ: ${dineinCount} đơn</span><span>${formatMoney(dineinTotal)}</span></div>
+            <div class="summary-row small"><span>🚕 Grab: ${grabCount} đơn</span><span>${formatMoney(grabTotal)}</span></div>
             <div class="summary-row small"><span>💸 Thu nợ: ${debtPaymentCount} giao dịch</span><span>${formatMoney(debtPaymentTotal)}</span></div>
         </div>
 
@@ -238,9 +242,15 @@ async function exportReportByDate() {
     const txs = await DB.getTransactionsByDate(dateStr);
     let takeawayTotal = 0, dineinTotal = 0, cashTotal = 0, transferTotal = 0;
     let cashCount = 0, transferCount = 0;
+    let grabTotal = 0, grabCount = 0;   // 👈 THÊM
+    
     for (const tx of txs) {
         if (tx.type === 'takeaway') takeawayTotal += tx.amount;
         else if (tx.type === 'dinein') dineinTotal += tx.amount;
+        else if (tx.type === 'grab') {   // 👈 THÊM
+            grabTotal += tx.amount;
+            grabCount++;
+        }
         if (tx.paymentMethod === 'cash') {
             cashTotal += tx.amount;
             cashCount++;
@@ -249,18 +259,15 @@ async function exportReportByDate() {
             transferCount++;
         }
     }
+    
     const content = `Báo cáo ngày ${dateStr}
-Mang đi: ${formatMoney(takeawayTotal)} (${txs.filter(t=>t.type==='takeaway').length} đơn)
-Tại chỗ: ${formatMoney(dineinTotal)} (${txs.filter(t=>t.type==='dinein').length} đơn)
-Tiền mặt: ${formatMoney(cashTotal)} (${cashCount} giao dịch)
-Chuyển khoản: ${formatMoney(transferTotal)} (${transferCount} giao dịch)
-Tổng: ${formatMoney(takeawayTotal + dineinTotal)}`;
-    const blob = new Blob([content], { type: 'text/plain' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `baocao_${dateStr}.txt`;
-    link.click();
-    showToast('Đã xuất báo cáo', 'success');
+🛵 Mang đi: ${formatMoney(takeawayTotal)} (${txs.filter(t=>t.type==='takeaway').length} đơn)
+🍽️ Tại chỗ: ${formatMoney(dineinTotal)} (${txs.filter(t=>t.type==='dinein').length} đơn)
+🚕 Grab: ${formatMoney(grabTotal)} (${grabCount} đơn)
+💰 Tiền mặt: ${formatMoney(cashTotal)} (${cashCount} giao dịch)
+💳 Chuyển khoản: ${formatMoney(transferTotal)} (${transferCount} giao dịch)
+Tổng doanh thu: ${formatMoney(takeawayTotal + dineinTotal + grabTotal)}`;
+    // ... phần còn lại giữ nguyên
 }
 
 window.initReport = initReport;

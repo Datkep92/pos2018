@@ -55,7 +55,7 @@ async function refundTransaction(transactionId, reason) {
     }
 
     // 1. Khôi phục nguyên liệu
-    if ((trans.type === 'dinein' || trans.type === 'takeaway') && trans.items && trans.items.length) {
+    if ((trans.type === 'dinein' || trans.type === 'takeaway' || trans.type === 'grab') && trans.items && trans.items.length) {
         if (typeof window.restoreIngredients === 'function') {
             await window.restoreIngredients(trans.items);
         } else {
@@ -184,20 +184,21 @@ async function renderHistoryByDate(dateObj) {
         filtered = await DB.getTransactionsByDate(dateStr, { type: filterValue });
     }
     
-    // Lọc theo select
     if (filterValue !== 'all') {
-        if (filterValue === 'cash') {
-            filtered = filtered.filter(h => h.paymentMethod === 'cash');
-        } else if (filterValue === 'transfer') {
-            filtered = filtered.filter(h => h.paymentMethod === 'transfer');
-        } else if (filterValue === 'paid') {
-            filtered = filtered.filter(h => h.type === 'dinein' || h.type === 'takeaway');
-        } else if (filterValue === 'debt') {
-            filtered = filtered.filter(h => h.type === 'debt_payment');
-        } else {
-            filtered = filtered.filter(h => h.type === filterValue);
-        }
+    if (filterValue === 'cash') {
+        filtered = filtered.filter(h => h.paymentMethod === 'cash');
+    } else if (filterValue === 'transfer') {
+        filtered = filtered.filter(h => h.paymentMethod === 'transfer');
+    } else if (filterValue === 'paid') {
+        filtered = filtered.filter(h => h.type === 'dinein' || h.type === 'takeaway' || h.type === 'grab');
+    } else if (filterValue === 'debt') {
+        filtered = filtered.filter(h => h.type === 'debt_payment');
+    } else if (filterValue === 'grab') {
+        filtered = filtered.filter(h => h.type === 'grab');
+    } else {
+        filtered = filtered.filter(h => h.type === filterValue);
     }
+}
     
     // Sắp xếp theo thời gian giảm dần (mới nhất trước)
     filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -245,11 +246,20 @@ function renderHistoryBatched(container, filtered, visibleCount) {
         var typeText = '';
         if (h.type === 'takeaway') typeText = '🛵 Mang đi';
         else if (h.type === 'dinein') typeText = '🍽️ Tại chỗ';
+        else if (h.type === 'grab') typeText = '🚕 Grab';
         else if (h.type === 'debt_payment') typeText = '💰 Thanh toán nợ';
         else if (h.type === 'refund') typeText = '🔄 Hoàn tiền';
         else typeText = '📝 Khác';
         
-        var paymentText = (h.paymentMethod === 'cash') ? '💰 Tiền mặt' : '💳 Chuyển khoản';
+        // Sửa paymentText: nếu là grab thì hiển thị Grab, không hiển thị tiền mặt/chuyển khoản
+        var paymentText = '';
+        if (h.type === 'grab') {
+            paymentText = '🚕 Grab';
+        } else if (h.paymentMethod === 'cash') {
+            paymentText = '💰 Tiền mặt';
+        } else {
+            paymentText = '💳 Chuyển khoản';
+        }
         
         // Tạo thông tin bàn/khách để hiển thị trên dòng đầu
         var tableInfo = '';
@@ -263,7 +273,7 @@ function renderHistoryBatched(container, filtered, visibleCount) {
             tableInfo = '👤 ' + escapeHtml(h.customer.name);
         }
         
-        // Dòng đầu: Giờ + bàn/khách + số tiền + badge (không có STT)
+        // Dòng đầu: Giờ + bàn/khách + số tiền + badge
         var headerHtml = '<div class="history-header-row">' +
             '<span class="history-time">' + dateStr + '</span>' +
             (tableInfo ? '<span class="history-table">' + tableInfo + '</span>' : '') +

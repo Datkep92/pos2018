@@ -101,32 +101,54 @@ async function renderCustomerDetail(customerId) {
     }
     
     // Sắp xếp theo thời gian tăng dần (cũ lên đầu) để tính số dư lũy kế
-    allTransactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+    let sortedAsc = [...allTransactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let balance = 0;
-    let historyHtml = '';
-    for (let tx of allTransactions) {
+    let txWithBalance = [];
+    for (let tx of sortedAsc) {
         if (tx.type === 'debt') {
             balance += tx.amount;
-            historyHtml += `
-                <div class="tx-item">
-                    <div class="tx-date">${new Date(tx.date).toLocaleString('vi-VN')}</div>
-                    <div class="tx-amount positive">- ${formatMoney(tx.amount)}</div>
-                    <div class="tx-note">${escapeHtml(tx.note)}</div>
-                    <div class="tx-balance">Nợ: ${formatMoney(balance)}</div>
-                </div>
-            `;
         } else {
             balance -= tx.amount;
-            historyHtml += `
-                <div class="tx-item">
-                    <div class="tx-date">${new Date(tx.date).toLocaleString('vi-VN')}</div>
-                    <div class="tx-amount negative">+ ${formatMoney(tx.amount)}</div>
-                    <div class="tx-note">${escapeHtml(tx.note)}</div>
-                    <div class="tx-balance">${balance > 0 ? `Nợ: ${formatMoney(balance)}` : (balance < 0 ? `Dư có: ${formatMoney(-balance)}` : 'Không nợ')}</div>
-                </div>
-            `;
         }
+        txWithBalance.push({
+            ...tx,
+            balance: balance
+        });
     }
+    // Đảo ngược để mới nhất lên đầu
+    txWithBalance.reverse();
+    
+    let historyHtml = '';
+    for (let tx of txWithBalance) {
+        const dateStr = new Date(tx.date).toLocaleString('vi-VN');
+        const amountClass = tx.type === 'debt' ? 'positive' : 'negative';
+        const amountSign = tx.type === 'debt' ? '- ' : '+ ';
+        const balanceValue = tx.balance;
+        let balanceText = '';
+        let balanceClass = '';
+        if (balanceValue > 0) {
+            balanceText = `Nợ: ${formatMoney(balanceValue)}`;
+            balanceClass = 'debt';
+        } else if (balanceValue < 0) {
+            balanceText = `Dư có: ${formatMoney(-balanceValue)}`;
+            balanceClass = 'credit';
+        } else {
+            balanceText = 'Không nợ';
+            balanceClass = 'no-debt';
+        }
+        
+        historyHtml += `
+            <div class="tx-item">
+                <div class="tx-header">
+                    <span class="tx-date">${dateStr}</span>
+                    <span class="tx-amount ${amountClass}">${amountSign}${formatMoney(tx.amount)}</span>
+                </div>
+                <div class="tx-note">${escapeHtml(tx.note)}</div>
+                <div class="tx-balance ${balanceClass}">${balanceText}</div>
+            </div>
+        `;
+    }
+    
     if (allTransactions.length === 0) {
         historyHtml = '<div class="empty-state">Chưa có giao dịch</div>';
     }
@@ -139,10 +161,10 @@ async function renderCustomerDetail(customerId) {
             <div class="debt-total">${balanceText}</div>
             <div class="debt-label">Tổng kết</div>
         </div>
+        <button class="btn-pay-simple" onclick="openPaymentForCustomer('${c.id}')">💸 Thanh toán</button>
         <div class="history-list-simple">
             ${historyHtml}
         </div>
-        <button class="btn-pay-simple" onclick="openPaymentForCustomer('${c.id}')">💸 Thanh toán</button>
         <button class="btn-close-simple" onclick="closeModal('customerDetailModal')">🔙 Đóng</button>
     `;
     document.getElementById('customerDetailModal').style.display = 'flex';

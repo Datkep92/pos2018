@@ -782,6 +782,8 @@ async function initDatabase() {
     subscribeToCollection('cost_categories');
     subscribeToCollection('cost_transactions');
     subscribeToCollection('cost_transactions_admin');
+    subscribeToCollection('admin_cost_categories');  // 👈 THÊM DÒNG NÀY
+
 
 
 
@@ -873,7 +875,7 @@ function initLocalDB() {
     if (dbReadyPromise) return dbReadyPromise;
     
     dbReadyPromise = new Promise((resolve, reject) => {
-        const DB_VERSION = 8; // tăng lên 8 để chắc chắn
+        const DB_VERSION = 9; // tăng lên 8 để chắc chắn
         
         function doOpen(version) {
             const request = indexedDB.open(STORE_NAME, version);
@@ -902,10 +904,11 @@ function initLocalDB() {
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 const stores = [
-    'tables', 'customers', 'menu', 'menu_categories',
-    'ingredients', 'transactions', 'reports', 'sync_queue', 'staffs',
-    'cost_categories', 'cost_transactions', 'cost_transactions_admin'
-];
+            'tables', 'customers', 'menu', 'menu_categories',
+            'ingredients', 'transactions', 'reports', 'sync_queue', 'staffs',
+            'cost_categories', 'cost_transactions', 'cost_transactions_admin',
+            'admin_cost_categories'  // 👈 THÊM DÒNG NÀY
+        ];
                 for (let i = 0; i < stores.length; i++) {
                     const storeName = stores[i];
                     if (!db.objectStoreNames.contains(storeName)) {

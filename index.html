@@ -102,7 +102,16 @@ select{
 </style>
     <meta name="theme-color" content="#f97316">
     <title>POS Cafe - Quản lý bán hàng</title>
-    <link rel="stylesheet" href="style.css?v=1.0.0">
+    <link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/tables.css">
+<link rel="stylesheet" href="css/menu.css">
+<link rel="stylesheet" href="css/ingredients.css">
+<link rel="stylesheet" href="css/customers.css">
+<link rel="stylesheet" href="css/history.css">
+<link rel="stylesheet" href="css/report.css">
+<link rel="stylesheet" href="css/manager.css">
+<link rel="stylesheet" href="css/responsive.css">
   <link rel="apple-touch-icon" href="https://datkep92.github.io/milano/IMG_6068.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Milano POS">
@@ -132,7 +141,7 @@ select{
             <div class="main-tab" data-tab="customers">👥 KH</div>
             <div class="main-tab" data-tab="history">📜 Sử</div>
             <div class="main-tab" data-tab="report">📊 BC</div>
-            <div class="main-tab" data-tab="manager">📊 Tổng quan</div>
+            <div class="main-tab" data-tab="manager">📊 Admin</div>
             <div class="main-tab" data-tab="settings">⚙️ Setup</div>
         </div>
 
@@ -158,6 +167,11 @@ select{
                         <span class="float-icon">🍽️</span>
                         <span class="float-label">Bàn mới</span>
                     </div>
+                    <!-- Trong .float-buttons -->
+<div class="float-btn float-grab" id="floatGrabBtn">
+    <span class="float-icon">🚕</span>
+    <span class="float-label">Grab</span>
+</div>
                 </div>
             </div>
 
@@ -216,6 +230,7 @@ select{
             <option value="all">📋 Tất cả</option>
             <option value="takeaway">🛵 Mang đi</option>
             <option value="dinein">🍽️ Tại chỗ</option>
+            <option value="grab">🚕 Grab</option>
             <option value="cash">💰 Tiền mặt</option>
             <option value="transfer">💳 Chuyển khoản</option>
             <option value="paid">✅ Thanh toán</option>
@@ -272,42 +287,20 @@ select{
                     </div>
                 </div>
             </div>
-            <!-- TAB CHI PHÍ -->
-<div id="costView" class="tab-content">
-   <div class="cost-header">
-    <!-- Bộ lọc mới -->
+
+<!-- TAB Admin (MANAGER) -->
+<div id="managerView" class="tab-content">
     <div class="nav-group full-width">
-        <button id="periodPrevBtn" class="nav-btn">◀</button>
-        <select id="viewModeSelect" class="mode-select">
+        <button id="managerPeriodPrevBtn" class="nav-btn">◀</button>
+        <select id="managerViewModeSelect" class="mode-select">
             <option value="period">Kỳ 20 → 19</option>
             <option value="month">Tháng</option>
             <option value="day">Ngày</option>
         </select>
-        <div id="periodDisplay" class="period-display"></div>
-        <button id="periodNextBtn" class="nav-btn">▶</button>
-    </div>
-    <button class="btn-add-cost" id="openCostModalBtn">+ Thêm chi phí</button>
-</div>
-    <div class="cost-summary">
-        <span>💰 Tổng tiền: <strong id="costTotalAmount">0đ</strong></span>
-        <span>📦 Số giao dịch: <strong id="costTotalCount">0</strong></span>
-    </div>
-    <div id="costListContainer" class="cost-list-container"></div>
-</div>
-<!-- TAB TỔNG QUAN (MANAGER) -->
-<div id="managerView" class="tab-content" style="padding-top: 136px;">
-    <div class="nav-group full-width">
-        <button id="periodPrevBtn" class="nav-btn">◀</button>
-        <select id="viewModeSelect" class="mode-select">
-            <option value="period">Kỳ 20 → 19</option>
-            <option value="month">Tháng</option>
-            <option value="day">Ngày</option>
-        </select>
-        <div id="periodDisplay" class="period-display"></div>
-        <button id="periodNextBtn" class="nav-btn">▶</button>
+        <button id="managerPeriodNextBtn" class="nav-btn">▶</button>
     </div>
 
-    <!-- CARD THỐNG KÊ TỔNG HỢP -->
+    <!-- CARD THỐNG KÊ TỔNG HỢP (KPI) -->
     <div class="card">
         <div class="manager-grid">
             <div class="manager-box" id="revenueBox" style="cursor: pointer;">
@@ -363,6 +356,28 @@ select{
         </div>
     </div>
 
+    <!-- Thống kê đồ uống theo bộ lọc -->
+    <div class="card">
+        <div class="card-header toggle-header" style="cursor: pointer;">
+            <h2>📊 Thống kê đồ uống</h2>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="card-body" id="managerDrinkStats">
+            <div class="empty-state">Đang tải...</div>
+        </div>
+    </div>
+
+    <!-- Cảnh báo tồn kho thấp -->
+    <div class="card">
+        <div class="card-header toggle-header" style="cursor: pointer;">
+            <h2>⚠️ Cảnh báo tồn kho thấp</h2>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="card-body" id="managerLowStockAlert">
+            <div class="empty-state">Đang tải...</div>
+        </div>
+    </div>
+
     <!-- Chi phí nhân viên (collapsible) -->
     <div class="card collapsible">
         <div class="card-header toggle-header" style="cursor: pointer;">
@@ -390,8 +405,7 @@ select{
         <div class="card-body" id="managerDebtList"></div>
     </div>
 </div>
-        </div>
-
+    </div>
         <!-- ========== BOTTOM NAV (MOBILE) ========== -->
         <div class="bottom-nav">
             <div class="bottom-nav-item active" data-tab="tables"><span class="bottom-icon">🍽️</span><span>Bàn</span></div>
@@ -400,7 +414,7 @@ select{
             <div class="bottom-nav-item" data-tab="customers"><span class="bottom-icon">👥</span><span>KH</span></div>
             <div class="bottom-nav-item" data-tab="history"><span class="bottom-icon">📜</span><span>Sử</span></div>
             <div class="bottom-nav-item" data-tab="report"><span class="bottom-icon">📊</span><span>BC</span></div>
-            <div class="bottom-nav-item" data-tab="manager"><span class="bottom-icon">📊</span><span>Tổng quan</span></div>
+            <div class="bottom-nav-item" data-tab="manager"><span class="bottom-icon">📊</span><span>Admin</span></div>
             <div class="bottom-nav-item" data-tab="settings"><span class="bottom-icon">⚙️</span><span>Setup</span></div>
         </div>
     </div>
@@ -786,15 +800,15 @@ select{
             <button class="close-btn" data-close="costModal">✕</button>
         </div>
         <div class="modal-body" style="padding: 16px;">
-            <!-- Ô nhập tìm kiếm / tạo mới -->
-            <div class="input-dropdown-wrapper" style="position: relative;">
-                <input type="text" id="expenseNameInput" placeholder="Thêm chi phí mới..." autocomplete="off" class="form-input">
+            <!-- Ô tìm kiếm / thêm mới -->
+            <div class="input-dropdown-wrapper">
+                <input type="text" id="expenseNameInput" placeholder="Tìm hoặc thêm danh mục..." autocomplete="off" class="form-input">
             </div>
 
-            <!-- Danh sách danh mục gần đây (có thể sửa/xóa) -->
-            <div class="recent-wrap" id="recentExpenseWrap">
-                <div style="margin-bottom: 8px; font-size: 12px; color: var(--muted);">📦 Danh mục gần đây</div>
-                <div id="recentCategoriesList"></div>
+            <!-- Danh sách danh mục dạng grid -->
+            <div class="recent-wrap">
+                <div style="margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">📦 Danh mục gần đây</div>
+                <div id="recentCategoriesList" class="categories-grid"></div>
             </div>
 
             <!-- Nhập tiền nhanh -->
@@ -806,29 +820,79 @@ select{
                 <button class="quick-money-btn" data-amount="60000">60k</button>
             </div>
 
-            <!-- Hàng nhập số tiền và nút Lưu -->
+            <!-- Hàng nhập số tiền & nút Lưu -->
             <div class="expense-action-row">
-                <input type="number" id="expenseAmount" class="form-input" placeholder="Nhập số tiền..." step="1000" value="0">
-                <button class="primary-btn" id="saveExpenseBtn">💾 Lưu</button>
+                <input type="number" id="expenseAmount" class="form-input expense-amount" placeholder="Số tiền" step="1000" value="0">
+                <button class="primary-btn expense-save-btn" id="saveExpenseBtn">💾 Lưu chi phí</button>
             </div>
 
-            <!-- Ẩn ô số lượng (có thể dùng sau) -->
+            <!-- Ẩn ô số lượng -->
             <input type="number" id="expenseQty" style="display:none;" value="1">
 
-            <!-- Khu vực hiển thị chi phí hôm nay (trong popup) -->
+            <!-- Khu vực hiển thị chi phí hôm nay & lịch sử tháng -->
             <div id="expenseHistoryBox">
-                <div class="popup-history-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="popup-history-title" style="display:flex;justify-content:space-between;align-items:center;">
                     <span>📋 Chi phí hôm nay</span>
-                    <span id="todayCostTotal" style="font-size: 16px; font-weight: 700; color: var(--danger);">Tổng: 0đ</span>
+                    <span id="todayCostTotal" style="font-size:16px;font-weight:700;color:var(--danger);">Tổng: 0đ</span>
                 </div>
                 <div id="todayCostList" class="today-cost-list">
                     <div class="empty-text">📭 Chưa có dữ liệu chi phí</div>
+                </div>
+                <div id="monthCostHistoryBox" style="margin-top:16px;">
+                    <div class="popup-history-title">📜 Lịch sử tháng này</div>
+                    <div id="monthCostCategoryList" class="month-cost-grid">
+                        <div class="empty-text">📭 Chưa có dữ liệu tháng này</div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
-
+<!-- MODAL NHẬP CHI PHÍ QUẢN LÝ -->
+<div class="modal" id="adminCostModal">
+    <div class="modal-content" style="max-width: 550px; border-radius: 28px;">
+        <div class="popup-header">
+            <h2 id="adminExpensePopupTitle">Thêm Chi Phí Quản Lý</h2>
+            <button class="close-btn" data-close="adminCostModal">✕</button>
+        </div>
+        <div class="modal-body" style="padding: 16px;">
+            <div class="input-dropdown-wrapper">
+                <input type="text" id="adminExpenseNameInput" placeholder="Tìm hoặc thêm danh mục..." autocomplete="off" class="form-input">
+            </div>
+            <div class="recent-wrap">
+                <div style="margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">📦 Danh mục gần đây</div>
+                <div id="adminRecentCategoriesList" class="categories-grid"></div>
+            </div>
+            <div class="quick-title">💰 Nhập tiền nhanh</div>
+            <div class="quick-money">
+                <button class="quick-money-btn" data-amount="35000">35k</button>
+                <button class="quick-money-btn" data-amount="45000">45k</button>
+                <button class="quick-money-btn" data-amount="50000">50k</button>
+                <button class="quick-money-btn" data-amount="60000">60k</button>
+            </div>
+            <div class="expense-action-row">
+                <input type="number" id="adminExpenseAmount" class="form-input expense-amount" placeholder="Số tiền" step="1000" value="0">
+                <button class="primary-btn expense-save-btn" id="saveAdminExpenseBtn">💾 Lưu chi phí quản lý</button>
+            </div>
+            <input type="number" id="adminExpenseQty" style="display:none;" value="1">
+            <div id="adminExpenseHistoryBox">
+                <div class="popup-history-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>📋 Chi phí quản lý hôm nay</span>
+                    <span id="adminTodayCostTotal" style="font-size:16px;font-weight:700;color:var(--danger);">Tổng: 0đ</span>
+                </div>
+                <div id="adminTodayCostList" class="today-cost-list">
+                    <div class="empty-text">📭 Chưa có dữ liệu chi phí quản lý</div>
+                </div>
+                <div id="adminMonthCostHistoryBox" style="margin-top:16px;">
+                    <div class="popup-history-title">📜 Lịch sử tháng này</div>
+                    <div id="adminMonthCostCategoryList" class="month-cost-grid">
+                        <div class="empty-text">📭 Chưa có dữ liệu</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- MODAL LỊCH SỬ CHI PHÍ THEO DANH MỤC -->
 <div class="modal" id="costHistoryModal">
     <div class="modal-content" style="max-width:550px;">
@@ -841,7 +905,18 @@ select{
 </div>
     <!-- TOAST CONTAINER -->
     <div class="toast-container" id="toastContainer"></div>
-
+<!-- MODAL LỊCH SỬ DOANH THU / THỰC NHẬN / CHUYỂN KHOẢN -->
+<div class="modal" id="historyDetailModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <span class="modal-title" id="historyDetailTitle">📋 Lịch sử</span>
+            <span class="modal-close" onclick="closeModal('historyDetailModal')">&times;</span>
+        </div>
+        <div class="modal-body" id="historyDetailContent">
+            <div class="empty-state">Đang tải...</div>
+        </div>
+    </div>
+</div>
    <!-- Load Firebase trước, không dùng defer/async -->
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
@@ -858,7 +933,6 @@ select{
     <script src="history.js"></script>
     <script src="script.js"></script>
     <script src="manager.js"></script>
-    <script src="cost.js"></script>
     
 
     <script>

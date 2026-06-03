@@ -546,34 +546,27 @@ function renderOrderMenuByCategory(categoryId, searchTerm) {
         return;
     }
     container.innerHTML = items.map(item => {
-        if (item.hasVariants && item.variants && item.variants.length) {
-            const variants = item.variants;
-            const firstVariant = variants[0];
-            const otherVariants = variants.slice(1); // các size còn lại (từ 2 đến hết)
-            // Nút cho size đầu tiên được gắn vào chính tên món
-            const itemNameHtml = `<div class="menu-item-name" onclick="addToTempOrderWithVariant('${item.id}', '${firstVariant.name}', ${firstVariant.price})">${escapeHtml(item.name)}</div>`;
-            // Các nút cho size còn lại (chỉ hiển thị nếu có)
-            let otherButtonsHtml = '';
-            if (otherVariants.length > 0) {
-                otherButtonsHtml = `<div class="variant-buttons">` + 
-                    otherVariants.map(v => `<button class="variant-order-btn" onclick="addToTempOrderWithVariant('${item.id}', '${v.name}', ${v.price})">${v.name}</button>`).join('') +
-                    `</div>`;
-            }
-            return `
-                <div class="menu-item-card-variant">
+    if (item.hasVariants && item.variants && item.variants.length) {
+        const variants = item.variants;
+        const firstVariant = variants[0];
+        const otherVariants = variants.slice(1);
+        const itemNameHtml = `<div class="menu-item-name" onclick="addToTempOrderWithVariant('${item.id}', '${firstVariant.name}', ${firstVariant.price})">${escapeHtml(item.name)}</div>`;
+        let otherButtonsHtml = '';
+        if (otherVariants.length > 0) {
+            otherButtonsHtml = `<div class="variant-buttons">` + 
+                otherVariants.map(v => `<button class="variant-order-btn" onclick="addToTempOrderWithVariant('${item.id}', '${v.name}', ${v.price})">${v.name}</button>`).join('') +
+                `</div>`;
+        }
+        return `<div class="menu-item-card-variant" data-category-id="${item.categoryId}">
                     ${itemNameHtml}
                     ${otherButtonsHtml}
-                </div>
-            `;
-        } else {
-            // Món không size
-            return `
-                <div class="menu-item-simple" onclick="addToTempOrder('${item.name}', ${item.price || 0})">
+                </div>`;
+    } else {
+        return `<div class="menu-item-simple" data-category-id="${item.categoryId}" onclick="addToTempOrder('${item.name}', ${item.price || 0})">
                     ${escapeHtml(item.name)}
-                </div>
-            `;
-        }
-    }).join('');
+                </div>`;
+    }
+}).join('');
 }
 
 function filterOrderMenuByCategory(categoryId) {
