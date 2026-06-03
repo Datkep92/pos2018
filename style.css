@@ -123,19 +123,13 @@ body {
 .tab-content {
     display: none;
     height: 100%;
-    overflow: hidden;
+    overflow: auto;
     padding: 10px;
-
-    display: -webkit-flex;
-    display: flex;
-
-    -webkit-flex-direction: column;
-    flex-direction: column;
-
-    min-height: 0;
 }
 
-
+.tab-content.active {
+    display: block;
+}
 
 .bottom-nav {
     position: fixed;
@@ -230,29 +224,10 @@ body {
 
 .btn-add-ingredient { background: var(--ok); color: #fff; }
 .btn-warning { background: var(--warn); color: #fff; }
-.tables-header {
-    -webkit-flex: 0 0 auto;
-    flex: 0 0 auto;
-}
 
-.tables-container {
-    -webkit-flex: 1;
-    flex: 1;
-
-    min-height: 0;
-    overflow: hidden;
-}
-
+.tables-container,
 .tables-grid {
     height: 100%;
-
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-
-    display: grid;
-    gap: 10px;
-    grid-template-columns: repeat(2,minmax(0,1fr));
-    align-content: start;
 }
 
 .tables-grid {
@@ -408,22 +383,7 @@ body {
         bottom: 24px;
     }
 }
-.menu-manager {
-    height: 100%;
 
-    display: -webkit-flex;
-    display: flex;
-
-    -webkit-flex-direction: column;
-    flex-direction: column;
-
-    min-height: 0;
-}
-.menu-actions-top,
-.menu-categories {
-    -webkit-flex: 0 0 auto;
-    flex: 0 0 auto;
-}
 .menu-actions-top {
     display: -webkit-flex;
     display: flex;
@@ -492,22 +452,9 @@ body {
     margin-bottom: 8px;
 }
 
-.ingredients-header {
-    -webkit-flex: 0 0 auto;
-    flex: 0 0 auto;
-}
-
 .ingredients-list {
-    -webkit-flex: 1;
-    flex: 1;
-
-    min-height: 0;
-
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-
     display: grid;
-    grid-template-columns: repeat(2,minmax(0,1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
 }
 
@@ -1285,19 +1232,13 @@ textarea {
     }
 }
 
+/* FIX MENU MANAGER GRID */
 .menu-items-grid {
-    -webkit-flex: 1;
-    flex: 1;
-
-    min-height: 0;
-
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-
     display: grid;
-    grid-template-columns: repeat(2,1fr);
+    grid-template-columns: repeat(2, 1fr);
     grid-gap: 12px;
     padding: 12px;
+    -webkit-overflow-scrolling: touch;
 }
 .menu-item-card {
     background: var(--surface);
@@ -2250,63 +2191,4 @@ textarea {
 }
 .history-item.refund .history-amount {
     color: #f97316;
-}
-
-#customersView {
-    display: -webkit-flex;
-    display: flex;
-
-    -webkit-flex-direction: column;
-    flex-direction: column;
-
-    min-height: 0;
-}
-
-.customer-search-bar,
-.debt-summary {
-    -webkit-flex: 0 0 auto;
-    flex: 0 0 auto;
-}
-
-.customer-list-container {
-    -webkit-flex: 1;
-    flex: 1;
-
-    min-height: 0;
-
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-}
-
-#historyView {
-    display: -webkit-flex;
-    display: flex;
-
-    -webkit-flex-direction: column;
-    flex-direction: column;
-
-    min-height: 0;
-}
-
-.history-date-row,
-.history-filter-row {
-    -webkit-flex: 0 0 auto;
-    flex: 0 0 auto;
-}
-
-.history-list-container {
-    -webkit-flex: 1;
-    flex: 1;
-
-    min-height: 0;
-
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-}
-
-.float-buttons{
-    position:fixed;
-    right:16px;
-    bottom:calc(var(--bottom-h) + 16px);
-    z-index:9999;
 }
