@@ -2192,3 +2192,12 @@ textarea {
 .history-item.refund .history-amount {
     color: #f97316;
 }
+
+/* Cố định nút thêm bàn */
+.tables-header {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+    padding: 8px 0;
+}
