@@ -1,574 +1,156 @@
-// ========== QUẢN LÝ KHÁCH HÀNG & CÔNG NỢ (ĐỒNG BỘ FIREBASE) ==========
-let customerSearchDebounceTimer;
-let mainSearchDebounceTimer;
-// ========== HÀM TÍNH SỐ DƯ HIỆN TẠI (NỢ NẾU DƯƠNG, DƯ CÓ NẾU ÂM) ==========
-function getCustomerBalance(customer) {
-    const totalDebt = (customer.debtHistory || []).reduce((sum, d) => sum + (d.amount || 0), 0);
-    const totalPayment = (customer.paymentHistory || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-    return totalDebt - totalPayment;
-}
-async function quickAddCustomer() {
-    const name = document.getElementById('customerSearchInput').value.trim();
-    if (!name) {
-        showToast('Vui lòng nhập tên khách hàng vào ô tìm kiếm!', 'warning');
-        return;
-    }
-    // Kiểm tra trùng tên (không phân biệt hoa thường)
-    const existing = window.customers ? window.customers.find(c => c.name.toLowerCase() === name.toLowerCase()) : null;
-    if (existing) {
-        showToast(`Khách "${name}" đã tồn tại.`, 'error');
-        return;
-    }
-    await addCustomer(name, '', '');
-    document.getElementById('customerSearchInput').value = '';
-    searchCustomerList();
-    showToast(`✅ Đã thêm khách "${name}"`, 'success');
-}
+// customers.js - Khách hàng, công nợ, chọn khách
+// Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 
-// Gắn sự kiện khi DOM sẵn sàng (đặt trong file script.js hoặc ở đây)
-if (document.getElementById('quickAddCustomerBtn')) {
-    document.getElementById('quickAddCustomerBtn').onclick = quickAddCustomer;
-}
-
-
-// ========== THANH TOÁN NỢ (CÓ THỂ TRẢ DƯ) ==========
-async function payCustomerDebt(customerId, amount, method, note = '') {
-    let customer = window.customers.find(c => c.id === customerId);
-    if (!customer) return;
-    customer = JSON.parse(JSON.stringify(customer));
-    
-    const currentBalance = getCustomerBalance(customer);
-    let finalNote = note || `Thanh toán ${formatMoney(amount)} bằng ${method === 'cash' ? 'tiền mặt' : 'chuyển khoản'}`;
-    
-    customer.paymentHistory = customer.paymentHistory || [];
-    customer.paymentHistory.unshift({
-        id: Date.now(),
-        date: new Date().toISOString(),
-        amount: amount,
-        method: method,
-        note: finalNote
+// ========== KHÁCH HÀNG ==========
+function renderCustomerList() {
+    DB.getAll('customers').then(function(custs) {
+        customers = custs;
+        var keyword = document.getElementById('customerSearchInput') ? document.getElementById('customerSearchInput').value.toLowerCase() : '';
+        var filtered = keyword ? customers.filter(function(c) { return c.name.toLowerCase().indexOf(keyword) !== -1 || (c.phone && c.phone.indexOf(keyword) !== -1); }) : customers;
+        var totalDebt = 0;
+        for (var i = 0; i < filtered.length; i++) totalDebt += (filtered[i].totalDebt || 0);
+        document.getElementById('totalDebtAmount').innerText = formatMoney(totalDebt);
+        var container = document.getElementById('customerList');
+        if (!container) return;
+        if (!filtered.length) { container.innerHTML = '<div class="empty-state">📭 Không có khách hàng</div>'; return; }
+        var html = '';
+        for (var i = 0; i < filtered.length; i++) {
+            var c = filtered[i];
+            html += '<div class="customer-card" onclick="showCustomerDetail(\'' + c.id + '\')"><div class="customer-avatar">' + c.name.charAt(0).toUpperCase() + '</div><div class="customer-info"><div class="customer-name">' + escapeHtml(c.name) + '</div><div class="customer-phone">📞 ' + (c.phone || '') + '</div></div><div class="customer-debt">' + ((c.totalDebt || 0) > 0 ? formatMoney(c.totalDebt) : '✅') + '</div></div>';
+        }
+        container.innerHTML = html;
     });
-    
-    customer.totalDebt = getCustomerBalance(customer);
-    
-    await DB.update('customers', customerId, customer);
-    window.customers = await DB.getAll('customers');
-    
-    if (typeof addHistory === 'function') {
-        await addHistory({
-            type: 'debt_payment',
-            amount: amount,
-            paymentMethod: method,
-            customer: { id: customer.id, name: customer.name },
-            note: finalNote
-        });
-    }
-    
-    showToast(`✅ Đã thanh toán ${formatMoney(amount)} cho khách ${customer.name}`, 'success');
-    renderCustomerList();
-    renderDebtList();
-    if (document.getElementById('customerDetailModal').style.display === 'flex') {
-        renderCustomerDetail(customerId);
-    }
 }
 
-// ========== HIỂN THỊ CHI TIẾT KHÁCH (LỊCH SỬ MINH BẠCH) ==========
-async function renderCustomerDetail(customerId) {
-    const c = window.customers.find(c => c.id === customerId);
+function quickAddCustomer() {
+    var name = prompt('👤 Nhập tên khách hàng:');
+    if (!name) return;
+    for (var i = 0; i < customers.length; i++) {
+        if (customers[i].name.toLowerCase() === name.toLowerCase()) { showToast('Khách đã tồn tại!', 'warning'); return; }
+    }
+    addCustomer(name, '').then(function() {
+        if (document.getElementById('customerSearchInput')) document.getElementById('customerSearchInput').value = '';
+        renderCustomerList();
+        showToast('✅ Đã thêm khách ' + name, 'success');
+    });
+}
+
+function addCustomer(name, phone) {
+    var newId = Date.now().toString() + Math.random().toString(36).substr(2, 6);
+    var newCustomer = { id: newId, name: name.trim(), phone: phone || '', address: '', totalDebt: 0, totalSpent: 0, createdAt: new Date().toISOString(), debtHistory: [], paymentHistory: [] };
+    return DB.create('customers', newCustomer).then(function() {
+        customers.push(newCustomer);
+        return newCustomer;
+    });
+}
+
+function showCustomerDetail(customerId) {
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return;
-    
-    // Gom tất cả giao dịch
-    let allTransactions = [];
+    var historyHtml = '';
+    var all = [];
     if (c.debtHistory) {
-        c.debtHistory.forEach(d => {
-            allTransactions.push({
-                type: 'debt',
-                date: d.date,
-                amount: d.amount,
-                note: d.note
-            });
-        });
+        for (var i = 0; i < c.debtHistory.length; i++) all.push({ type: 'debt', date: c.debtHistory[i].date, amount: c.debtHistory[i].amount, note: c.debtHistory[i].note });
     }
     if (c.paymentHistory) {
-        c.paymentHistory.forEach(p => {
-            allTransactions.push({
-                type: 'payment',
-                date: p.date,
-                amount: p.amount,
-                note: p.note
-            });
-        });
+        for (var i = 0; i < c.paymentHistory.length; i++) all.push({ type: 'payment', date: c.paymentHistory[i].date, amount: c.paymentHistory[i].amount, note: c.paymentHistory[i].note });
     }
-    
-    // Sắp xếp theo thời gian tăng dần (cũ lên đầu) để tính số dư lũy kế
-    let sortedAsc = [...allTransactions].sort((a, b) => new Date(a.date) - new Date(b.date));
-    let balance = 0;
-    let txWithBalance = [];
-    for (let tx of sortedAsc) {
-        if (tx.type === 'debt') {
-            balance += tx.amount;
-        } else {
-            balance -= tx.amount;
-        }
-        txWithBalance.push({
-            ...tx,
-            balance: balance
-        });
+    all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
+    for (var i = 0; i < all.length; i++) {
+        var h = all[i];
+        var amountClass = h.type === 'debt' ? 'var(--danger)' : 'var(--success)';
+        var sign = h.type === 'debt' ? '-' : '+';
+        historyHtml += '<div class="cart-item"><span>' + new Date(h.date).toLocaleString('vi-VN') + '</span><span style="color:' + amountClass + '">' + sign + formatMoney(h.amount) + '</span></div><div style="font-size:11px; margin-bottom:8px;">📝 ' + escapeHtml(h.note || '') + '</div>';
     }
-    // Đảo ngược để mới nhất lên đầu
-    txWithBalance.reverse();
-    
-    let historyHtml = '';
-    for (let tx of txWithBalance) {
-        const dateStr = new Date(tx.date).toLocaleString('vi-VN');
-        const amountClass = tx.type === 'debt' ? 'positive' : 'negative';
-        const amountSign = tx.type === 'debt' ? '- ' : '+ ';
-        const balanceValue = tx.balance;
-        let balanceText = '';
-        let balanceClass = '';
-        if (balanceValue > 0) {
-            balanceText = `Nợ: ${formatMoney(balanceValue)}`;
-            balanceClass = 'debt';
-        } else if (balanceValue < 0) {
-            balanceText = `Dư có: ${formatMoney(-balanceValue)}`;
-            balanceClass = 'credit';
-        } else {
-            balanceText = 'Không nợ';
-            balanceClass = 'no-debt';
-        }
-        
-        historyHtml += `
-            <div class="tx-item">
-                <div class="tx-header">
-                    <span class="tx-date">${dateStr}</span>
-                    <span class="tx-amount ${amountClass}">${amountSign}${formatMoney(tx.amount)}</span>
-                </div>
-                <div class="tx-note">${escapeHtml(tx.note)}</div>
-                <div class="tx-balance ${balanceClass}">${balanceText}</div>
-            </div>
-        `;
-    }
-    
-    if (allTransactions.length === 0) {
-        historyHtml = '<div class="empty-state">Chưa có giao dịch</div>';
-    }
-    
-    const currentBalance = getCustomerBalance(c);
-    const balanceText = currentBalance > 0 ? `Nợ ${formatMoney(currentBalance)}` : (currentBalance < 0 ? `Dư có ${formatMoney(-currentBalance)}` : 'Không nợ');
-    const container = document.getElementById('customerDetailContent');
-    container.innerHTML = `
-        <div class="debt-summary-simple">
-            <div class="debt-total">${balanceText}</div>
-            <div class="debt-label">Tổng kết</div>
-        </div>
-        <button class="btn-pay-simple" onclick="openPaymentForCustomer('${c.id}')">💸 Thanh toán</button>
-        <div class="history-list-simple">
-            ${historyHtml}
-        </div>
-        <button class="btn-close-simple" onclick="closeModal('customerDetailModal')">🔙 Đóng</button>
-    `;
+    var content = document.getElementById('customerDetailContent');
+    if (!content) return;
+    // Lưu customerId vào data attribute để realtime có thể cập nhật lại
+    content.setAttribute('data-customer-id', customerId);
+    content.innerHTML = '<div class="debt-summary" style="margin-bottom:16px;"><span>💰 Công nợ</span><span style="color:#ef4444; font-size:20px;">' + formatMoney(c.totalDebt || 0) + '</span></div>' + ((c.totalDebt || 0) > 0 ? '<button class="btn-save" onclick="openDebtPayment(\'' + c.id + '\', ' + (c.totalDebt || 0) + ')" style="margin-bottom:16px;">💸 Thanh toán nợ</button>' : '') + '<div class="cost-history-title">📜 Lịch sử</div>' + (historyHtml || '<div class="empty-state">Chưa có giao dịch</div>');
     document.getElementById('customerDetailModal').style.display = 'flex';
 }
 
-// ========== MỞ POPUP NHẬP SỐ TIỀN THANH TOÁN ==========
-function openPaymentForCustomer(customerId) {
-    const c = window.customers.find(c => c.id === customerId);
-    if (!c) return;
-    const currentBalance = getCustomerBalance(c);
-    const message = currentBalance > 0 ? `Nợ ${formatMoney(currentBalance)}` : (currentBalance < 0 ? `Dư có ${formatMoney(-currentBalance)}` : 'Không nợ');
-    const amount = prompt(`Nhập số tiền thanh toán cho ${c.name} (hiện tại: ${message}):`, currentBalance > 0 ? currentBalance : 0);
-    if (!amount) return;
-    const val = parseInt(amount);
-    if (isNaN(val) || val <= 0) {
-        showToast('Số tiền không hợp lệ', 'warning');
-        return;
-    }
-    payCustomerDebt(customerId, val, 'cash');
-}
-
-function renderCustomerList() {
-    const customers = window.customers || [];
-    const container = document.getElementById('customerListContainer');
-    if (!container) return;
-    const customerSearchInput = document.getElementById('customerSearchInput');
-    const keyword = customerSearchInput && customerSearchInput.value ? customerSearchInput.value.toLowerCase() : '';
-    let filtered = customers;
-if (keyword) filtered = customers.filter(c => c.name.toLowerCase().includes(keyword) || (c.phone && c.phone.includes(keyword)));    const totalNet = filtered.reduce((s, c) => s + (c.totalDebt || 0), 0);
-    const totalDebtEl = document.getElementById('totalDebtAmount');
-    if (totalDebtEl) totalDebtEl.innerText = totalNet > 0 ? formatMoney(totalNet) : (totalNet < 0 ? `💚 Dư ${formatMoney(-totalNet)}` : '0đ');
-    if (filtered.length === 0) {
-        container.innerHTML = '<div class="empty-state">📭 Không tìm thấy khách hàng</div>';
-        return;
-    }
-    const fragment = document.createDocumentFragment();
-    filtered.forEach(c => {
-        const balance = c.totalDebt || 0;
-        let debtDisplay = '', debtClass = '';
-        if (balance > 0) {
-            debtDisplay = formatMoney(balance);
-            debtClass = 'has-debt';
-        } else if (balance < 0) {
-            debtDisplay = `💚 Dư ${formatMoney(-balance)}`;
-            debtClass = 'has-credit';
-        } else {
-            debtDisplay = '✅ Không nợ';
-            debtClass = 'no-debt';
-        }
-        const div = document.createElement('div');
-        div.className = 'customer-card';
-        div.setAttribute('onclick', `renderCustomerDetail('${c.id}')`);
-        div.innerHTML = `
-            <div class="customer-avatar">${c.name.charAt(0).toUpperCase()}</div>
-            <div class="customer-info">
-                <div class="customer-name">${escapeHtml(c.name)}</div>
-                <div class="customer-contact">📞 ${c.phone || ''}</div>
-            </div>
-            <div class="customer-debt ${debtClass}">${debtDisplay}</div>
-        `;
-        fragment.appendChild(div);
-    });
-    container.innerHTML = '';
-    container.appendChild(fragment);
-}
-
-async function initCustomers() {
-    window.customers = await DB.getAll('customers') || [];
-    let needUpdate = false;
-    for (let i = 0; i < window.customers.length; i++) {
-        const c = window.customers[i];
-        const correctBalance = getCustomerBalance(c);
-        if (c.totalDebt !== correctBalance) {
-            c.totalDebt = correctBalance;
-            await DB.update('customers', c.id, { totalDebt: correctBalance });
-            needUpdate = true;
-            if (i % 10 === 9) await new Promise(resolve => setTimeout(resolve, 0));
+function openDebtPayment(customerId, currentDebt) {
+    for (var i = 0; i < customers.length; i++) {
+        if (customers[i].id === customerId) {
+            document.getElementById('debtPaymentInfo').innerHTML = '💰 Khách: ' + customers[i].name + '<br>💢 Nợ: ' + formatMoney(currentDebt);
+            break;
         }
     }
-    if (needUpdate) window.customers = await DB.getAll('customers');
-    renderCustomerList();
-    renderDebtList();
-    console.log('✅ Đã tải customers:', window.customers.length);
+    document.getElementById('debtPaymentAmount').value = currentDebt;
+    document.getElementById('debtPaymentModal').style.display = 'flex';
+    pendingDebtCustomerId = customerId;
 }
 
-// Thêm khách hàng mới
-async function addCustomer(name, phone, address) {
-    const newId = Date.now().toString() + Math.random().toString(36).substr(2, 6);
-    const newCustomer = {
-        id: newId,
-        name: name.trim(),
-        phone: phone || '',
-        address: address || '',
-        totalDebt: 0,
-        totalSpent: 0,    // chỉ tính khi khách thanh toán (trả nợ hoặc trả trực tiếp)
-        createdAt: new Date().toISOString(),
-        debtHistory: [],
-        paymentHistory: []
-    };
-    await DB.create('customers', newCustomer);
-    window.customers = await DB.getAll('customers');
-    renderCustomerList();
-    renderDebtList();
-    showToast(`Đã thêm khách ${name}`, 'success');
-    return newCustomer;
-}
-
-// Cập nhật công nợ (thanh toán hoặc ghi nợ)
-async function updateCustomerDebt(customerId, amount, type, note) {
-    let customer = window.customers.find(c => c.id === customerId);
+function confirmDebtPayment() {
+    var amount = parseInt(document.getElementById('debtPaymentAmount').value) || 0;
+    if (amount <= 0) { showToast('Số tiền không hợp lệ!', 'warning'); return; }
+    var customer = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === pendingDebtCustomerId) { customer = customers[i]; break; } }
     if (!customer) return;
-    
-    // Sao chép để tránh tham chiếu
-    customer = JSON.parse(JSON.stringify(customer));
-    
-    if (type === 'pay_debt') {
-        // Thanh toán nợ: giảm totalDebt, tăng totalSpent
-        customer.totalDebt = Math.max(0, (customer.totalDebt || 0) - amount);
-        customer.totalSpent = (customer.totalSpent || 0) + amount;
-        customer.paymentHistory = customer.paymentHistory || [];
-        customer.paymentHistory.unshift({
-            id: Date.now(),
-            date: new Date().toISOString(),
-            amount: amount,
-            method: 'cash',    // có thể truyền method từ ngoài
-            note: note
-        });
-    } else if (type === 'add_debt') {
-        // Ghi nợ thêm: chỉ tăng totalDebt, không tăng totalSpent
-        customer.totalDebt = (customer.totalDebt || 0) + amount;
-        // KHÔNG cộng totalSpent ở đây
-        customer.debtHistory = customer.debtHistory || [];
-        customer.debtHistory.unshift({
-            id: Date.now(),
-            date: new Date().toISOString(),
-            amount: amount,
-            paidAmount: 0,
-            remainingAmount: amount,
-            note: note,
-            status: 'unpaid',
-            payments: []
-        });
-    }
-    
-    await DB.update('customers', customerId, customer);
-    window.customers = await DB.getAll('customers');
-    renderCustomerList();
-    renderDebtList();
-    
-    // Nếu đang ở sub-tab nợ, cập nhật lại danh sách nợ trong tab đó
-    const activeSubTab = document.querySelector('.sub-tab.active');
-    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
-        if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
-    }
-}
-
-
-
-function renderDebtList() {
-    const customers = window.customers || [];
-    const container = document.getElementById('debtListContainer');
-    if (!container) return;
-    const debtCustomers = customers.filter(c => (c.totalDebt || 0) > 0);
-    if (debtCustomers.length === 0) {
-        container.innerHTML = '<div class="empty-state">✅ Không có khách nợ</div>';
-        return;
-    }
-    container.innerHTML = debtCustomers.map(c => `
-        <div class="debt-card" onclick="renderCustomerDetail('${c.id}')">
-            <div class="debt-card-header"><div>👤 ${escapeHtml(c.name)}</div><div>${formatMoney(c.totalDebt)}</div></div>
-            <div class="debt-card-phone">📞 ${c.phone || 'Chưa có'}</div>
-            <div class="debt-card-actions"><button class="btn-pay-debt-small" onclick="event.stopPropagation(); openPaymentForCustomer('${c.id}')">💸 Thanh toán nợ</button></div>
-        </div>
-    `).join('');
-}
-
-
-
-
-async function addCustomerDebt(customerId, amount, note) {
-    let customer = window.customers.find(c => c.id === customerId);
-    if (!customer) return;
-    customer = JSON.parse(JSON.stringify(customer));
-    
-    let remainingDebt = amount;
-    let credit = customer.credit || 0;
-    let usedCredit = 0;
-    
-    if (credit > 0) {
-        usedCredit = Math.min(credit, remainingDebt);
-        credit -= usedCredit;
-        remainingDebt -= usedCredit;
-        note += ` (đã cấn trừ ${formatMoney(usedCredit)} từ số dư có)`;
-        if (credit > 0) {
-            customer.credit = credit;
-        } else {
-            delete customer.credit;
-        }
-        showToast(`🔄 Đã cấn trừ ${formatMoney(usedCredit)} từ số dư có của khách`, 'info');
-    }
-    
-    if (remainingDebt > 0) {
-        customer.totalDebt = (customer.totalDebt || 0) + remainingDebt;
-        customer.debtHistory = customer.debtHistory || [];
-        customer.debtHistory.unshift({
-            id: Date.now(),
-            date: new Date().toISOString(),
-            amount: remainingDebt,
-            paidAmount: 0,
-            remainingAmount: remainingDebt,
-            note: note,
-            status: 'unpaid',
-            payments: []
-        });
-    } else {
-        showToast(`✅ Đã cấn trừ hết nợ từ số dư có. Không phát sinh nợ mới.`, 'success');
-    }
-    
-    await DB.update('customers', customerId, customer);
-    window.customers = await DB.getAll('customers');
-    renderCustomerList();
-    renderDebtList();
-    const activeSubTab = document.querySelector('.sub-tab.active');
-    if (activeSubTab && activeSubTab.getAttribute('data-subtab') === 'debt') {
-        if (typeof renderDebtListForTab === 'function') await renderDebtListForTab();
-    }
-}
-
-// Modal thêm/sửa khách
-function openAddCustomerModal() {
-    document.getElementById('customerFormTitle').innerText = '➕ Thêm khách hàng';
-    document.getElementById('customerFormId').value = '';
-    document.getElementById('customerFormName').value = '';
-    document.getElementById('customerFormPhone').value = '';
-    document.getElementById('customerFormAddress').value = '';
-    document.getElementById('customerFormModal').style.display = 'flex';
-}
-
-function editCustomer(id) {
-    const c = window.customers.find(c => c.id === id);
-    if (!c) return;
-    document.getElementById('customerFormTitle').innerText = '✏️ Sửa khách hàng';
-    document.getElementById('customerFormId').value = c.id;
-    document.getElementById('customerFormName').value = c.name;
-    document.getElementById('customerFormPhone').value = c.phone || '';
-    document.getElementById('customerFormAddress').value = c.address || '';
-    document.getElementById('customerFormModal').style.display = 'flex';
-}
-
-async function saveCustomerForm() {
-    const id = document.getElementById('customerFormId').value;
-    const name = document.getElementById('customerFormName').value.trim();
-    const phone = document.getElementById('customerFormPhone').value;
-    const address = document.getElementById('customerFormAddress').value;
-    if (!name) { showToast('Vui lòng nhập tên khách hàng!', 'warning'); return; }
-    // Không bắt buộc phone và address nữa
-    
-    if (id) {
-        const c = window.customers.find(c => c.id === id);
-        if (c) {
-            c.name = name;
-            c.phone = phone;
-            c.address = address;
-            await DB.update('customers', id, c);
-            window.customers = await DB.getAll('customers');
-            renderCustomerList();
-            renderDebtList();
-            showToast('Đã cập nhật', 'success');
-        }
-    } else {
-        await addCustomer(name, phone, address);
-    }
-    closeModal('customerFormModal');
-}
-
-async function deleteCustomer(id) {
-    if (confirm('Xóa khách hàng này?')) {
-        await DB.remove('customers', id);
-        window.customers = await DB.getAll('customers');
+    var payment = Math.min(amount, customer.totalDebt || 0);
+    customer.totalDebt = (customer.totalDebt || 0) - payment;
+    customer.paymentHistory = customer.paymentHistory || [];
+    customer.paymentHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: payment, method: 'cash', note: 'Thanh toán nợ ' + formatMoney(payment) });
+    DB.update('customers', customer.id, { totalDebt: customer.totalDebt, paymentHistory: customer.paymentHistory }).then(function() {
+        return addHistory({ type: 'debt_payment', amount: payment, paymentMethod: 'cash', customer: { id: customer.id, name: customer.name }, note: 'Thanh toán nợ' });
+    }).then(function() {
+        return DB.getAll('customers');
+    }).then(function(newCusts) {
+        customers = newCusts;
+        showToast('✅ Đã thanh toán ' + formatMoney(payment), 'success');
+        closeModal('debtPaymentModal');
         renderCustomerList();
-        renderDebtList();
-        showToast('Đã xóa', 'success');
-    }
+        showCustomerDetail(customer.id);
+    });
 }
 
+function addCustomerDebt(customerId, amount, note) {
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) return Promise.resolve();
+    c.totalDebt = (c.totalDebt || 0) + amount;
+    c.debtHistory = c.debtHistory || [];
+    c.debtHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: amount, note: note, status: 'unpaid' });
+    return DB.update('customers', customerId, { totalDebt: c.totalDebt, debtHistory: c.debtHistory }).then(function() {
+        return DB.getAll('customers').then(function(newCusts) { customers = newCusts; });
+    });
+}
 
-// ========== CHỌN KHÁCH (VỚI INPUT TÌM KIẾM VÀ TẠO MỚI) ==========
-let pendingCustomerCallback = null;
-
+// ========== CHỌN KHÁCH ==========
 function showCustomerSelector(callback) {
     pendingCustomerCallback = callback;
-    const container = document.getElementById('customerSelectorList');
-    const searchInput = document.getElementById('customerSelectorSearch');
-    if (!container) return;
-    
-    // Reset ô tìm kiếm
-    if (searchInput) {
-        searchInput.value = '';
-        searchInput.focus();
-    }
-    
-    // Hiển thị danh sách khách hàng ban đầu
     renderCustomerSelectorList('');
-    
-    // Tạo nút "Tạo khách mới" nếu chưa tồn tại
-    let actionBtn = document.getElementById('customerSelectorCreateBtn');
-    if (!actionBtn) {
-        actionBtn = document.createElement('button');
-        actionBtn.id = 'customerSelectorCreateBtn';
-        actionBtn.className = 'btn-create-customer';
-        actionBtn.innerText = '💾 Lưu (tạo khách mới)';
-        actionBtn.onclick = () => createCustomerFromInput();
-        const modalBody = document.querySelector('#customerSelectorModal .modal-body');
-        if (modalBody && !modalBody.querySelector('#customerSelectorCreateBtn')) {
-            modalBody.appendChild(actionBtn);
-        }
-    } else {
-        actionBtn.style.display = 'block';
-    }
-    
+    var searchInput = document.getElementById('customerSelectorSearch');
+    if (searchInput) searchInput.value = '';
     document.getElementById('customerSelectorModal').style.display = 'flex';
+    if (searchInput) {
+        searchInput.oninput = function() { renderCustomerSelectorList(this.value); };
+    }
 }
 
 function renderCustomerSelectorList(searchTerm) {
-    const container = document.getElementById('customerSelectorList');
-    if (!container) return;
-    let customers = window.customers || [];
+    var filtered = customers;
     if (searchTerm) {
-        const lowerTerm = searchTerm.toLowerCase();
-        customers = customers.filter(c => 
-            c.name.toLowerCase().includes(lowerTerm) || 
-            (c.phone && c.phone.includes(searchTerm))
-        );
+        var lower = searchTerm.toLowerCase();
+        filtered = customers.filter(function(c) { return c.name.toLowerCase().indexOf(lower) !== -1 || (c.phone && c.phone.indexOf(searchTerm) !== -1); });
     }
-    if (customers.length === 0) {
-        container.innerHTML = `<div class="empty-state">📭 Không tìm thấy khách.<br>Nhập tên ở trên và bấm "Lưu" để tạo mới.</div>`;
-        return;
+    var container = document.getElementById('customerSelectorList');
+    if (!container) return;
+    if (filtered.length === 0) { container.innerHTML = '<div class="empty-state">📭 Không tìm thấy khách</div>'; return; }
+    var html = '';
+    for (var i = 0; i < filtered.length; i++) {
+        var c = filtered[i];
+        var debtText = (c.totalDebt || 0) > 0 ? ' - Nợ: ' + formatMoney(c.totalDebt) : '';
+        html += '<div class="customer-select-item" onclick="selectCustomer(\'' + c.id + '\')"><div class="customer-avatar" style="width:36px;height:36px;">' + c.name.charAt(0).toUpperCase() + '</div><div><div style="font-weight:600;">' + escapeHtml(c.name) + '</div><div style="font-size:11px;">' + (c.phone || '') + debtText + '</div></div></div>';
     }
-    container.innerHTML = customers.map(c => {
-        const balance = c.totalDebt || 0;
-        let debtText = '';
-        let debtClass = '';
-        if (balance > 0) {
-            debtText = `🔴 Nợ ${formatMoney(balance)}`;
-            debtClass = 'debt-negative';
-        } else if (balance < 0) {
-            debtText = `💚 Dư ${formatMoney(-balance)}`;
-            debtClass = 'debt-positive';
-        } else {
-            debtText = '✅ Không nợ';
-            debtClass = 'debt-zero';
-        }
-        return `
-            <div class="customer-select-item" onclick="selectCustomer('${c.id}')">
-                <div class="customer-select-avatar">${c.name.charAt(0).toUpperCase()}</div>
-                <div class="customer-select-info">
-                    <div class="customer-select-name">${escapeHtml(c.name)}</div>
-                    <div class="customer-select-debt ${debtClass}">${debtText}</div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function filterCustomerSelector() {
-    if (customerSearchDebounceTimer) clearTimeout(customerSearchDebounceTimer);
-    customerSearchDebounceTimer = setTimeout(() => {
-        const searchInput = document.getElementById('customerSelectorSearch');
-        if (searchInput) renderCustomerSelectorList(searchInput.value);
-    }, 150);
-}
-
-async function createCustomerFromInput() {
-    const searchInput = document.getElementById('customerSelectorSearch');
-    let name = searchInput ? searchInput.value.trim() : '';
-    if (!name) {
-        showToast('Vui lòng nhập tên khách hàng!', 'warning');
-        return;
-    }
-    
-    // Kiểm tra trùng tên (không phân biệt hoa thường)
-    const existing = window.customers ? window.customers.find(c => c.name.toLowerCase() === name.toLowerCase()) : null;
-    if (existing) {
-        // Nếu trùng, hỏi có muốn chọn khách đó không
-        if (confirm(`Khách "${existing.name}" đã tồn tại. Bạn có muốn chọn khách này không?`)) {
-            selectCustomer(existing.id);
-        }
-        return;
-    }
-    
-    // Tạo khách mới
-    if (typeof addCustomer === 'function') {
-        const newCustomer = await addCustomer(name, '', '');
-        if (newCustomer && pendingCustomerCallback) {
-            pendingCustomerCallback(newCustomer);
-            pendingCustomerCallback = null;
-        }
-        closeModal('customerSelectorModal');
-        showToast(`✅ Đã tạo khách hàng "${name}"`, 'success');
-    }
+    container.innerHTML = html;
 }
 
 function selectCustomer(customerId) {
-    const customer = window.customers ? window.customers.find(c => c.id === customerId) : null;
+    var customer = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { customer = customers[i]; break; } }
     if (customer && pendingCustomerCallback) {
         pendingCustomerCallback(customer);
         pendingCustomerCallback = null;
@@ -576,44 +158,31 @@ function selectCustomer(customerId) {
     closeModal('customerSelectorModal');
 }
 
-function openAddCustomerModalFromSelector() {
-    closeModal('customerSelectorModal');
-    openAddCustomerModal();
-}
-
-function searchCustomerList() {
-    if (mainSearchDebounceTimer) clearTimeout(mainSearchDebounceTimer);
-    mainSearchDebounceTimer = setTimeout(() => {
+function createCustomerFromInput() {
+    var name = document.getElementById('customerSelectorSearch').value.trim();
+    if (!name) { showToast('Nhập tên khách hàng!', 'warning'); return; }
+    for (var i = 0; i < customers.length; i++) {
+        if (customers[i].name.toLowerCase() === name.toLowerCase()) {
+            if (confirm('Khách "' + name + '" đã tồn tại. Chọn khách này?')) {
+                selectCustomer(customers[i].id);
+            }
+            return;
+        }
+    }
+    addCustomer(name, '').then(function(newC) {
+        if (newC && pendingCustomerCallback) {
+            pendingCustomerCallback(newC);
+            pendingCustomerCallback = null;
+        }
+        closeModal('customerSelectorModal');
+        showToast('✅ Đã tạo khách ' + name, 'success');
         renderCustomerList();
-    }, 200);
-}
-
-// Hàm thoát HTML để tránh XSS
-function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
     });
 }
-window.quickAddCustomer = quickAddCustomer;
-// Export toàn cục
-window.initCustomers = initCustomers;
-window.renderCustomerList = renderCustomerList;
-window.renderDebtList = renderDebtList;
-window.renderCustomerDetail = renderCustomerDetail;
-window.openAddCustomerModal = openAddCustomerModal;
-window.editCustomer = editCustomer;
-window.saveCustomerForm = saveCustomerForm;
-window.deleteCustomer = deleteCustomer;
-window.addCustomerDebt = addCustomerDebt;
-window.updateCustomerDebt = updateCustomerDebt;
-window.payCustomerDebt = payCustomerDebt;
-window.openPaymentForCustomer = openPaymentForCustomer;
-window.showCustomerSelector = showCustomerSelector;
+
+// Export global
+window.showCustomerDetail = showCustomerDetail;
+window.openDebtPayment = openDebtPayment;
+window.confirmDebtPayment = confirmDebtPayment;
 window.selectCustomer = selectCustomer;
-window.openAddCustomerModalFromSelector = openAddCustomerModalFromSelector;
-window.filterCustomerSelector = filterCustomerSelector;
-window.searchCustomerList = searchCustomerList;
+window.quickAddCustomer = quickAddCustomer;

@@ -1,276 +1,114 @@
-// ========== BÁO CÁO DOANH THU & THỐNG KÊ NÂNG CAO (CÓ LỊCH NGÀY) ==========
+// report.js - Báo cáo doanh thu, chi phí theo ngày
+// Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 
-let currentReportDate = new Date();
-let cachedTransactions = null, cachedReportTables = null, cachedCustomers = null;
-let lastCacheTime = 0;
-let cachedDateKey = '';
-const CACHE_TTL = 5000;
-let reportDateDebounceTimer;
-
-async function getReportData(selectedDateStr) {
-    const now = Date.now();
-    if (cachedDateKey === selectedDateStr && cachedTransactions && cachedReportTables && cachedCustomers && (now - lastCacheTime) < CACHE_TTL) {
-        return { transactions: cachedTransactions, tables: cachedReportTables, customers: cachedCustomers };
-    }
-    const [transactions, tables, customers] = await Promise.all([
-        DB.getTransactionsByDate(selectedDateStr),
-        DB.getAll('tables'),
-        DB.getAll('customers')
-    ]);
-    cachedTransactions = transactions;
-    cachedReportTables = tables;
-    cachedCustomers = customers;
-    cachedDateKey = selectedDateStr;
-    lastCacheTime = now;
-    return { transactions, tables, customers };
-}
-
-function resetReportCache() {
-    cachedTransactions = null;
-    cachedReportTables = null;
-    cachedCustomers = null;
-    cachedDateKey = '';
-    lastCacheTime = 0;
-}
-window.resetReportCache = resetReportCache;
-
-async function changeReportDate(delta) {
-    if (reportDateDebounceTimer) clearTimeout(reportDateDebounceTimer);
-    reportDateDebounceTimer = setTimeout(async () => {
-        const newDate = new Date(currentReportDate);
-        newDate.setDate(newDate.getDate() + delta);
-        currentReportDate = newDate;
-        await renderReport();
-    }, 80);
-}
-async function initReport() {
-    await renderReport();
-    attachReportDateControls();
-}
-
-function attachReportDateControls() {
-    const prevBtn = document.getElementById('reportPrevDay');
-    const nextBtn = document.getElementById('reportNextDay');
-    if (prevBtn) prevBtn.onclick = () => changeReportDate(-1);
-    if (nextBtn) nextBtn.onclick = () => changeReportDate(1);
-}
-
-
-async function renderReport() {
-    const container = document.getElementById('reportContent');
-    if (!container) return;
-
-    const selectedDateStr = currentReportDate.toISOString().slice(0, 10);
-    const { transactions, tables, customers } = await getReportData(selectedDateStr);
-  
-    // === LỌC GIAO DỊCH HỢP LỆ (CHƯA BỊ HỦY) ===
-    const activeTransactions = transactions.filter(tx => tx.refunded !== true && tx.type !== 'refund');
-    const refundTransactions = transactions.filter(tx => tx.type === 'refund' || tx.refunded === true);
-    const totalRefundAmount = refundTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+// ========== BÁO CÁO ==========
+function renderReport(dateObj) {
+    var dateStr = dateObj.toISOString().slice(0, 10);
+    document.getElementById('reportDate').innerText = formatDateDisplay(dateStr);
     
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const isToday = (selectedDateStr === todayStr);
-    const dateTitle = formatDateDisplay(selectedDateStr);
-    const dateDisplay = isToday ? `Hôm nay - ${dateTitle}` : dateTitle;
-
-    // 1. Đã thanh toán (chỉ tính activeTransactions)
-    let paidOrders = 0, paidRevenue = 0;
-    let cashAmount = 0, cashCount = 0;
-    let transferAmount = 0, transferCount = 0;
-    let takeawayCount = 0, takeawayTotal = 0;
-    let dineinCount = 0, dineinTotal = 0;
-    let grabCount = 0, grabTotal = 0;
-    let debtPaymentCount = 0, debtPaymentTotal = 0;
-
-    for (const tx of activeTransactions) {
-        const amount = tx.amount;
-        paidOrders++;
-        paidRevenue += amount;
-        if (tx.paymentMethod === 'cash') {
-            cashAmount += amount;
-            cashCount++;
-        } else if (tx.paymentMethod === 'transfer') {
-            transferAmount += amount;
-            transferCount++;
+    Promise.all([
+        DB.getTransactionsByDate(dateStr),
+        DB.getAll('cost_transactions'),
+        DB.get('daily_balances', dateStr)
+    ]).then(function(results) {
+        var transactions = results[0].filter(function(t) { return !t.refunded; });
+        var allCosts = results[1] || [];
+        var dailyBalance = results[2] || { cashKept: 0, cashReceived: 0 };
+        
+        // Gán giá trị đã lưu vào ô input tiền mặt thực nhận
+        var actualCashInput = document.getElementById('actualCashInput');
+        if (actualCashInput) {
+            actualCashInput.value = dailyBalance.cashReceived || 0;
         }
-        if (tx.type === 'takeaway') {
-            takeawayCount++;
-            takeawayTotal += amount;
-        } else if (tx.type === 'dinein') {
-            dineinCount++;
-            dineinTotal += amount;
-        } else if (tx.type === 'grab') {
-            grabCount++;
-            grabTotal += amount;
-        } else if (tx.type === 'debt_payment') {
-            debtPaymentCount++;
-            debtPaymentTotal += amount;
+        
+        // Tính doanh thu
+        var cashTotal = 0, transferTotal = 0, debtPaymentTotal = 0, grabTotal = 0;
+        var dineinTotal = 0, takeawayTotal = 0;
+        var dineinCount = 0, takeawayCount = 0, grabCount = 0;
+        
+        for (var i = 0; i < transactions.length; i++) {
+            var tx = transactions[i];
+            if (tx.paymentMethod === 'cash') cashTotal += tx.amount;
+            else if (tx.paymentMethod === 'transfer') transferTotal += tx.amount;
+            else if (tx.paymentMethod === 'debt') debtPaymentTotal += tx.amount;
+            else if (tx.paymentMethod === 'grab') grabTotal += tx.amount;
+            
+            if (tx.type === 'dinein') { dineinTotal += tx.amount; dineinCount++; }
+            else if (tx.type === 'takeaway') { takeawayTotal += tx.amount; takeawayCount++; }
+            else if (tx.type === 'grab') { grabTotal += tx.amount; grabCount++; }
         }
-    }
-
-    // 2. Chưa thanh toán (bàn đang phục vụ) - không đổi
-    const pendingTables = tables.filter(t => t.status === 'occupied' && t.items && t.items.length > 0 && (t.total || 0) > 0);
-    const pendingCount = pendingTables.length;
-    const pendingAmount = pendingTables.reduce((sum, t) => sum + (t.total || 0), 0);
-
-    // 3. Khách nợ hôm nay - không đổi
-    let debtTodayCount = 0, debtTodayAmount = 0;
-    for (const cust of customers) {
-        const debtHistory = cust.debtHistory || [];
-        const todayDebts = debtHistory.filter(d => d.date && d.date.slice(0, 10) === selectedDateStr);
-        if (todayDebts.length > 0) {
-            debtTodayCount++;
-            debtTodayAmount += todayDebts.reduce((s, d) => s + (d.amount || 0), 0);
-        }
-    }
-
-    // 4. Tổng nợ toàn bộ - không đổi
-    let totalDebtCustomers = 0, totalDebtAmount = 0;
-    for (const cust of customers) {
-        const debt = cust.totalDebt || 0;
-        if (debt > 0) {
-            totalDebtCustomers++;
-            totalDebtAmount += debt;
-        }
-    }
-
-    // 5. Top món bán chạy (chỉ tính từ activeTransactions, không tính debt_payment)
-    const itemSales = {};
-    for (const tx of activeTransactions) {
-        if (tx.type === 'debt_payment') continue;
-        const items = tx.items || [];
-        for (const item of items) {
-            const name = item.name;
-            const qty = item.qty || 0;
-            const price = item.price || 0;
-            if (!itemSales[name]) itemSales[name] = { qty: 0, revenue: 0 };
-            itemSales[name].qty += qty;
-            itemSales[name].revenue += price * qty;
-        }
-    }
-    var topItems = Object.entries(itemSales)
-        .map(function(pair) { return { name: pair[0], qty: pair[1].qty, revenue: pair[1].revenue }; })
-        .sort(function(a, b) { return b.qty - a.qty; })
-        .slice(0, 10);
-
-    // 6. Render HTML (thêm dòng Grab)
-    container.innerHTML = `
-        <div class="report-date-bar">
-            <button id="reportPrevDay" class="nav-btn">‹</button>
-            <div class="report-date-display">📅 ${dateDisplay}</div>
-            <button id="reportNextDay" class="nav-btn">›</button>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon">⏳</div>
-                <div class="stat-info">
-                    <div class="stat-value">${pendingCount} Bàn chưa TT</div>
-                    <div class="stat-amount">${formatMoney(pendingAmount)}</div>
+        
+        var totalRevenue = cashTotal + transferTotal + debtPaymentTotal + grabTotal;
+        
+        var dailyCosts = allCosts.filter(function(c) { return c.dateKey === dateStr && !c.deleted; });
+        var totalCost = dailyCosts.reduce(function(s, c) { return s + c.amount; }, 0);
+        var netRevenue = totalRevenue - totalCost;
+        
+        // Lấy dư hôm trước
+        var prevDate = new Date(dateObj);
+        prevDate.setDate(prevDate.getDate() - 1);
+        var prevDateStr = prevDate.toISOString().slice(0, 10);
+        
+        DB.get('daily_balances', prevDateStr).then(function(prevBalanceData) {
+            var cashKeptPrev = (prevBalanceData && prevBalanceData.cashKept) || 0;
+            var cashKeptToday = dailyBalance.cashKept || 0;
+            
+            var actualCashReceived = cashTotal + cashKeptPrev - cashKeptToday;
+            
+            var html = `
+                <div class="stat-card">
+                    <div class="stat-row"><span>💰 Tổng doanh thu</span><span class="stat-value primary">${formatMoney(totalRevenue)}</span></div>
+                    <div class="stat-row"><span>🍽️ Tại chỗ (${dineinCount} đơn)</span><span>${formatMoney(dineinTotal)}</span></div>
+                    <div class="stat-row"><span>🛵 Mang đi (${takeawayCount} đơn)</span><span>${formatMoney(takeawayTotal)}</span></div>
+                    <div class="stat-row"><span>🚕 Grab (${grabCount} đơn)</span><span>${formatMoney(grabTotal)}</span></div>
                 </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">✅</div>
-                <div class="stat-info">
-                    <div class="stat-value">${paidOrders} Đã thanh toán</div>
-                    <div class="stat-amount">${formatMoney(paidRevenue)}</div>
+                <div class="stat-card">
+                    <div class="stat-row"><span>💰 Tiền mặt</span><span class="stat-value success">${formatMoney(cashTotal)}</span></div>
+                    <div class="stat-row"><span>💳 Chuyển khoản</span><span class="stat-value info">${formatMoney(transferTotal)}</span></div>
+                    <div class="stat-row"><span>💢 Thanh toán nợ</span><span>${formatMoney(debtPaymentTotal)}</span></div>
                 </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">💰</div>
-                <div class="stat-info">
-                    <div class="stat-label">Tiền mặt</div>
-                    <div class="stat-value">${cashCount} giao dịch</div>
-                    <div class="stat-amount">${formatMoney(cashAmount)}</div>
+                <div class="stat-card">
+                    <div class="stat-row cost-summary-row" onclick="showCostDetails('${dateStr}')">
+                        <span>📊 Tổng chi phí</span>
+                        <span class="stat-value warning">${formatMoney(totalCost)}</span>
+                    </div>
+                    <div class="stat-row"><span>📉 Doanh thu ròng</span><span class="stat-value ${netRevenue >= 0 ? 'success' : 'danger'}">${formatMoney(netRevenue)}</span></div>
                 </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">💳</div>
-                <div class="stat-info">
-                    <div class="stat-label">Chuyển khoản</div>
-                    <div class="stat-value">${transferCount} giao dịch</div>
-                    <div class="stat-amount">${formatMoney(transferAmount)}</div>
+                <div class="stat-card">
+                    <div class="stat-row"><span>🏦 Dư cuối ngày hôm trước</span><span>${formatMoney(cashKeptPrev)}</span></div>
+                    <div class="stat-row"><span>🏧 Số dư cuối ngày (để lại quán)</span><span>${formatMoney(cashKeptToday)}</span></div>
                 </div>
-            </div>
-        </div>
-
-        <div class="summary-card">
-            <div class="summary-title">📊 Chi tiết doanh thu</div>
-            <div class="summary-row small"><span>🛵 Mang đi: ${takeawayCount} đơn</span><span>${formatMoney(takeawayTotal)}</span></div>
-            <div class="summary-row small"><span>🍽️ Tại chỗ: ${dineinCount} đơn</span><span>${formatMoney(dineinTotal)}</span></div>
-            <div class="summary-row small"><span>🚕 Grab: ${grabCount} đơn</span><span>${formatMoney(grabTotal)}</span></div>
-            <div class="summary-row small"><span>💸 Thu nợ: ${debtPaymentCount} giao dịch</span><span>${formatMoney(debtPaymentTotal)}</span></div>
-        </div>
-
-        ${totalRefundAmount > 0 ? `
-        <div class="summary-card" style="background:#fee2e2;">
-            <div class="summary-title">🔄 Hoàn tiền trong ngày</div>
-            <div class="summary-row"><span>Tổng hoàn trả</span><span class="summary-highlight" style="color:#dc2626;">- ${formatMoney(totalRefundAmount)}</span></div>
-            <div class="summary-row small">(Các giao dịch đã hủy)</div>
-        </div>
-        ` : ''}
-
-        <div class="summary-card">
-            <div class="summary-title">💢 Khách nợ</div>
-            <div class="summary-row"><span>Nợ phát sinh trong ngày</span><span class="summary-highlight">${debtTodayCount} khách - ${formatMoney(debtTodayAmount)}</span></div>
-            <div class="summary-row"><span>Tổng nợ toàn bộ (tới nay)</span><span class="summary-highlight">${totalDebtCustomers} khách - ${formatMoney(totalDebtAmount)}</span></div>
-        </div>
-
-        <div class="history-title">🔥 Top món bán chạy (ngày ${dateTitle})</div>
-        <div class="history-list">
-            ${topItems.length === 0 ? '<div class="empty-state">Chưa có dữ liệu</div>' : topItems.map((item, idx) => `
-                <div class="history-item" style="display: flex; justify-content: space-between; align-items: center;">
-                    <div><strong>${idx+1}. ${escapeHtml(item.name)}</strong></div>
-                    <div>📦 ${item.qty} món &nbsp;💰 ${formatMoney(item.revenue)}</div>
-                </div>
-            `).join('')}
-        </div>
-
-        <button class="export-btn" onclick="exportReportByDate()">📎 Xuất báo cáo (ngày đang xem)</button>
-    `;
-
-    attachReportDateControls();
+            `;
+            document.getElementById('reportStats').innerHTML = html;
+        });
+    });
 }
 
-function formatDateDisplay(dateStr) {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+function showCostDetails(dateStr) {
+    DB.getAll('cost_transactions').then(function(allCosts) {
+        // Lọc tất cả chi phí trong ngày (không phân biệt loại)
+        var filtered = allCosts.filter(function(c) {
+            return c.dateKey === dateStr && !c.deleted;
+        });
+        var container = document.getElementById('costDetailList');
+        if (!container) return;
+        
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="empty-state">📭 Không có chi phí nào trong ngày</div>';
+        } else {
+            var html = '';
+            for (var i = 0; i < filtered.length; i++) {
+                var c = filtered[i];
+                html += '<div class="cost-detail-item">' +
+                            '<span>' + escapeHtml(c.categoryName) + '</span>' +
+                            '<span>' + formatMoney(c.amount) + '</span>' +
+                        '</div>';
+            }
+            container.innerHTML = html;
+        }
+        // Hiển thị modal chi tiết chi phí
+        document.getElementById('costDetailModal').style.display = 'flex';
+    });
 }
 
-async function exportReportByDate() {
-    const dateStr = currentReportDate.toISOString().slice(0, 10);
-    const txs = await DB.getTransactionsByDate(dateStr);
-    let takeawayTotal = 0, dineinTotal = 0, cashTotal = 0, transferTotal = 0;
-    let cashCount = 0, transferCount = 0;
-    let grabTotal = 0, grabCount = 0;   // 👈 THÊM
-    
-    for (const tx of txs) {
-        if (tx.type === 'takeaway') takeawayTotal += tx.amount;
-        else if (tx.type === 'dinein') dineinTotal += tx.amount;
-        else if (tx.type === 'grab') {   // 👈 THÊM
-            grabTotal += tx.amount;
-            grabCount++;
-        }
-        if (tx.paymentMethod === 'cash') {
-            cashTotal += tx.amount;
-            cashCount++;
-        } else if (tx.paymentMethod === 'transfer') {
-            transferTotal += tx.amount;
-            transferCount++;
-        }
-    }
-    
-    const content = `Báo cáo ngày ${dateStr}
-🛵 Mang đi: ${formatMoney(takeawayTotal)} (${txs.filter(t=>t.type==='takeaway').length} đơn)
-🍽️ Tại chỗ: ${formatMoney(dineinTotal)} (${txs.filter(t=>t.type==='dinein').length} đơn)
-🚕 Grab: ${formatMoney(grabTotal)} (${grabCount} đơn)
-💰 Tiền mặt: ${formatMoney(cashTotal)} (${cashCount} giao dịch)
-💳 Chuyển khoản: ${formatMoney(transferTotal)} (${transferCount} giao dịch)
-Tổng doanh thu: ${formatMoney(takeawayTotal + dineinTotal + grabTotal)}`;
-    // ... phần còn lại giữ nguyên
-}
-
-window.initReport = initReport;
-window.renderReport = renderReport;
-window.changeReportDate = changeReportDate;
-window.exportReportByDate = exportReportByDate;
+function changeReportDate(delta) { var nd = new Date(currentReportDate); nd.setDate(nd.getDate() + delta); currentReportDate = nd; renderReport(currentReportDate); }
