@@ -450,22 +450,61 @@ function mergeTables(sourceId, targetId) {
 // ========== XÓA BÀN ==========
 function showDeleteTableConfirm(tableId) {
     pendingDeleteTableId = tableId;
-    document.getElementById('deleteTableModal').style.display = 'flex';
+    // Kiểm tra khóa bàn
+    DB.get('tables', String(tableId)).then(function(table) {
+        if (!table) return;
+        if (isTableLocked(table)) {
+            // Bàn bị khóa: yêu cầu mật khẩu
+            closeModal('deleteTableModal');
+            requirePassword('xóa bàn (bàn đang bị khóa)', function() {
+                document.getElementById('deleteTableModal').style.display = 'flex';
+            });
+        } else {
+            document.getElementById('deleteTableModal').style.display = 'flex';
+        }
+    });
 }
 
 function confirmDeleteTable() {
     if (!pendingDeleteTableId) return;
     DB.get('tables', String(pendingDeleteTableId)).then(function(table) {
         if (!table) return;
-        if (table.items && table.items.length) {
-            restoreIngredients(table.items);
-        }
-        DB.remove('tables', String(pendingDeleteTableId)).then(function() {
-            // Realtime subscription sẽ tự động cập nhật tables
-            if (currentTableDetailId === pendingDeleteTableId) closeModal('tableDetailModal');
-            showToast('🗑️ Đã xóa bàn ' + table.name, 'success');
+        // Kiểm tra lại khóa bàn trước khi xóa (phòng trường hợp đã mở modal lâu)
+        if (isTableLocked(table)) {
             closeModal('deleteTableModal');
-            pendingDeleteTableId = null;
-        });
+            requirePassword('xóa bàn (bàn đang bị khóa)', function() {
+                // Sau khi nhập đúng mật khẩu, thực hiện xóa
+                doDeleteTable(table);
+            });
+            return;
+        }
+        doDeleteTable(table);
     });
 }
+
+function doDeleteTable(table) {
+    var itemsSnapshot = table.items ? JSON.parse(JSON.stringify(table.items)) : [];
+    if (table.items && table.items.length) {
+        restoreIngredients(table.items);
+    }
+    DB.remove('tables', String(pendingDeleteTableId)).then(function() {
+        // Log xóa bàn vào Firebase delete_logs
+        var details = {
+            tableId: table.id,
+            tableName: table.name,
+            items: itemsSnapshot,
+            customerName: table.customerName || null
+        };
+        logDelete('delete_table', details);
+        
+        // Realtime subscription sẽ tự động cập nhật tables
+        if (currentTableDetailId === pendingDeleteTableId) closeModal('tableDetailModal');
+        showToast('🗑️ Đã xóa bàn ' + table.name, 'success');
+        closeModal('deleteTableModal');
+        pendingDeleteTableId = null;
+    });
+}
+
+// Export global
+window.showDeleteTableConfirm = showDeleteTableConfirm;
+window.confirmDeleteTable = confirmDeleteTable;

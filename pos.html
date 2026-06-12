@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#f97316">
+    <title>POS Cafe - Bán hàng</title>
+    <link rel="stylesheet" href="css/pos-base.css">
+    
+</head>
+<body>
+    <!-- ========== MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ ========== -->
+    <div class="auth-overlay" id="authOverlay">
+        <div class="auth-container">
+            <!-- FORM ĐĂNG NHẬP -->
+            <div class="auth-form" id="loginForm">
+                <div class="auth-logo">☕</div>
+                <h2 class="auth-title">POS CAFE</h2>
+                <p class="auth-subtitle">Đăng nhập để tiếp tục</p>
+                
+                <div class="auth-field">
+                    <label>Mã POS</label>
+                    <input type="text" id="loginShopCode" class="form-input" placeholder="Nhập mã POS (VD: cafe01)" autocomplete="off">
+                </div>
+                <div class="auth-field">
+                    <label>Tên đăng nhập</label>
+                    <input type="text" id="loginUsername" class="form-input" placeholder="Tên đăng nhập" autocomplete="off">
+                </div>
+                <div class="auth-field">
+                    <label>Mật khẩu</label>
+                    <input type="password" id="loginPassword" class="form-input" placeholder="Mật khẩu">
+                </div>
+                
+                <div class="auth-error" id="loginError"></div>
+                
+                <button class="auth-btn" id="loginBtn" onclick="handleLogin()">Đăng nhập</button>
+                
+                <div class="auth-switch">
+                    Chưa có POS? <span onclick="showRegisterForm()">Đăng ký ngay</span>
+                </div>
+            </div>
+            
+            <!-- FORM ĐĂNG KÝ -->
+            <div class="auth-form" id="registerForm" style="display:none;">
+                <div class="auth-logo">☕</div>
+                <h2 class="auth-title">Đăng ký POS mới</h2>
+                <p class="auth-subtitle">Tạo cửa hàng mới</p>
+                
+                <div class="auth-field">
+                    <label>Tên quán / cửa hàng</label>
+                    <input type="text" id="regShopName" class="form-input" placeholder="VD: Cafe Milano">
+                </div>
+                <div class="auth-field">
+                    <label>Mã POS (dùng để đăng nhập)</label>
+                    <input type="text" id="regShopCode" class="form-input" placeholder="VD: cafe01 (ít nhất 3 ký tự)">
+                </div>
+                <div class="auth-field">
+                    <label>Tên đăng nhập Admin</label>
+                    <input type="text" id="regAdminUser" class="form-input" placeholder="Tên đăng nhập">
+                </div>
+                <div class="auth-field">
+                    <label>Mật khẩu</label>
+                    <input type="password" id="regAdminPass" class="form-input" placeholder="Mật khẩu (ít nhất 4 ký tự)">
+                </div>
+                <div class="auth-field">
+                    <label>Xác nhận mật khẩu</label>
+                    <input type="password" id="regConfirmPass" class="form-input" placeholder="Nhập lại mật khẩu">
+                </div>
+                
+                <div class="auth-error" id="registerError"></div>
+                
+                <button class="auth-btn" id="registerBtn" onclick="handleRegister()">Đăng ký</button>
+                
+                <div class="auth-switch">
+                    Đã có tài khoản? <span onclick="showLoginForm()">Đăng nhập</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app">
+        <!-- Header notification bar -->
+        <div class="header-notification-bar" id="headerNotificationBar" style="display:none;">
+            <div class="header-notification-text" id="headerNotificationText"></div>
+            <span class="header-notification-close" id="headerNotificationClose" onclick="dismissHeaderNotification()">✕</span>
+        </div>
+
+        <!-- POS TABS: 3 tab chính + 1 tab cài đặt -->
+        <div class="main-tabs">
+            <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
+            <div class="tab-btn" data-tab="customers">👥 Khách</div>
+            <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
+            <div class="tab-btn" data-tab="settings">⚙️</div>
+        </div>
+
+        <div class="main-content">
+            <!-- TAB BÀN -->
+            <div id="tablesView" class="tab-content active">
+                <!-- Banner thông báo lịch âm -->
+                <div class="lunar-notification-banner" id="lunarNotificationBanner" style="display:none;">
+                    <div class="lunar-notification-content">
+                        <span class="lunar-notification-icon">🏮</span>
+                        <span class="lunar-notification-text" id="lunarNotificationText"></span>
+                    </div>
+                    <button class="lunar-notification-btn" id="lunarNotificationBtn" onclick="dismissLunarNotification()">✅ Đã mua</button>
+                </div>
+                <div class="tables-grid" id="tablesGrid"></div>
+            </div>
+
+            <!-- TAB KHÁCH -->
+            <div id="customersView" class="tab-content">
+                <div class="customer-header">
+                    <div class="debt-summary"><span>💰 Tổng công nợ</span><span id="totalDebtAmount">0đ</span></div>
+                    <div class="customer-search-bar">
+                        <input type="text" id="customerSearchInput" placeholder="🔍 Tìm theo tên hoặc SĐT..." class="search-input">
+                        <button class="btn-add-customer" id="quickAddCustomerBtn">+ Thêm</button>
+                    </div>
+                </div>
+                <div class="customer-list" id="customerList"></div>
+            </div>
+
+            <!-- TAB LỊCH SỬ -->
+            <div id="historyView" class="tab-content">
+                <div class="history-controls">
+                    <button class="nav-btn" id="prevDayBtn">◀</button>
+                    <div class="date-display">📅 <span id="historyDate">--/--/----</span></div>
+                    <button class="nav-btn" id="nextDayBtn">▶</button>
+                    <select id="historyFilter" class="filter-select">
+                        <option value="all">📋 Tất cả</option>
+                        <option value="dinein">🍽️ Tại chỗ</option>
+                        <option value="takeaway">🛵 Mang đi</option>
+                        <option value="grab">🚕 Grab</option>
+                        <option value="cash">💰 Tiền mặt</option>
+                        <option value="transfer">💳 Chuyển khoản</option>
+                        <option value="debt_payment">💢 Thanh toán nợ</option>
+                        <option value="credit">💰 Tiền dư</option>
+                        <option value="cancelled">❌ Đã hủy</option>
+                    </select>
+                </div>
+                <div class="history-view-toggle" id="historyViewToggle">
+                    <span class="hvt-btn active" data-view="1" onclick="setHistoryView(1)">📋 1 hàng</span>
+                    <span class="hvt-btn" data-view="2" onclick="setHistoryView(2)">🍽️📦 2 hàng</span>
+                    <span class="hvt-btn" data-view="3" onclick="setHistoryView(3)">💰💳 2 hàng</span>
+                </div>
+                <div class="history-list" id="historyList"></div>
+            </div>
+
+            <!-- TAB CÀI ĐẶT -->
+            <div id="settingsView" class="tab-content">
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3 class="settings-title">⚙️ Cài đặt ứng dụng</h3>
+                        
+                        <div class="settings-info">
+                            <div class="settings-info-row">
+                                <span>Phiên bản hiện tại:</span>
+                                <span class="settings-version" id="settingsCurrentVersion">--</span>
+                            </div>
+                            <div class="settings-info-row">
+                                <span>Trạng thái:</span>
+                                <span id="settingsUpdateStatus">Đang kiểm tra...</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-field">
+                            <label class="settings-label">🔑 GitHub Token</label>
+                            <div class="settings-input-group">
+                                <input type="password" id="settingsGithubToken" class="form-input"
+                                    placeholder="Nhập GitHub personal access token">
+                                <button class="settings-toggle-btn" id="settingsToggleToken"
+                                    onclick="toggleTokenVisibility()">👁️</button>
+                            </div>
+                            <div class="settings-hint">
+                                Token dùng để gọi GitHub API kiểm tra phiên bản mới.
+                                <a href="https://github.com/settings/tokens" target="_blank"
+                                   style="color:#f97316;text-decoration:underline;">Tạo token tại đây</a>
+                                (chỉ cần quyền <code>public_repo</code>)
+                            </div>
+                        </div>
+
+                        <div class="settings-actions">
+                            <button class="settings-btn settings-btn-primary" onclick="saveGitHubToken()">
+                                💾 Lưu token
+                            </button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearGitHubToken()">
+                                🗑️ Xóa token
+                            </button>
+                            <button class="settings-btn settings-btn-primary" onclick="checkUpdateNow()">
+                                🔄 Kiểm tra cập nhật
+                            </button>
+                        </div>
+
+                        <div class="settings-field" style="margin-top:16px;">
+                            <label class="settings-label">📋 Phiên bản đang bỏ qua</label>
+                            <div class="settings-info-row">
+                                <span id="settingsSkippedVersion">Không có</span>
+                            </div>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearSkipVersion()"
+                                    style="margin-top:8px;font-size:13px;">
+                                🔄 Bỏ bỏ qua (kiểm tra lại)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- PHẦN THÔNG TIN QUÁN -->
+                    <div class="settings-section">
+                        <h3 class="settings-title">🏪 Thông tin quán</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Tên quán</label>
+                            <input type="text" id="shopInfoName" class="form-input" placeholder="VD: POS Cafe">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Địa chỉ</label>
+                            <input type="text" id="shopInfoAddress" class="form-input" placeholder="VD: 123 Nguyễn Huệ, Q1">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Số điện thoại</label>
+                            <input type="text" id="shopInfoPhone" class="form-input" placeholder="VD: 0901234567">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Mã QR thanh toán</label>
+                            <input type="text" id="shopInfoQR" class="form-input" placeholder="VD: https://qr.vn/pay/123456 hoặc nội dung QR">
+                            <div class="settings-hint">Nhập link hoặc nội dung mã QR để in trên hóa đơn</div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveShopInfo()">💾 Lưu thông tin</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearShopInfo()">🗑️ Xóa</button>
+                        </div>
+                        <div id="shopInfoStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN CÀI ĐẶT MÁY IN -->
+                    <div class="settings-section">
+                        <h3 class="settings-title">🖨️ Cài đặt máy in</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Máy in Sunmi (AIDL)</label>
+                            <div class="settings-hint" style="margin-bottom:8px;">
+                                Sử dụng dịch vụ in Sunmi tích hợp trên máy POS Ocha.
+                                Phương thức: <strong>Sunmi AIDL (woyou.aidlservice.jiuiv5)</strong>
+                            </div>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                <button class="settings-btn settings-btn-secondary" onclick="testSunmiService()" style="font-size:12px;padding:6px 10px;">🔌 Kiểm tra máy in</button>
+                                <button class="settings-btn settings-btn-primary" onclick="testPrint()" style="font-size:12px;padding:6px 10px;">🖨️ In thử</button>
+                            </div>
+                            <div id="printerScanResult" style="margin-top:8px;max-height:200px;overflow-y:auto;"></div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3 class="settings-title">📖 Hướng dẫn cập nhật</h3>
+                        <div class="settings-guide">
+                            <p><strong>Cách cập nhật ứng dụng:</strong></p>
+                            <ol>
+                                <li>Tạo GitHub token tại <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a></li>
+                                <li>Chọn quyền <code>public_repo</code></li>
+                                <li>Copy token và dán vào ô trên, nhấn <strong>Lưu token</strong></li>
+                                <li>Nhấn <strong>Kiểm tra cập nhật</strong> để kiểm tra ngay</li>
+                                <li>App sẽ tự động kiểm tra bản mới mỗi khi khởi động</li>
+                            </ol>
+                            <p style="margin-top:8px;font-size:12px;color:#888;">
+                                ⚡ App dùng GitHub API để kiểm tra phiên bản mới nhất từ release.
+                                Khi có bản mới, app sẽ tự động tải ZIP, giải nén và cài đặt APK.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DRAFT BUBBLE CONTAINER -->
+        <div class="draft-bubble-container" id="draftBubbleContainer"></div>
+    </div>
+
+    <!-- MODAL TẠO ĐƠN - 3 CỘT -->
+    <div class="modal" id="orderModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                
+                <div class="modal-header-actions" id="orderHeaderActions"></div>
+                <span class="modal-close" onclick="closeModal('orderModal')">&times;</span>
+            </div>
+            <div class="modal-body order-modal-body">
+                <div class="order-three-columns">
+                    <!-- CỘT 1: DANH MỤC -->
+                    <div class="order-categories-column" id="orderCategoriesColumn"></div>
+                    
+                    <!-- CỘT 2: MENU -->
+                    <div class="order-menu-column">
+                        <div class="menu-grid" id="menuGrid"></div>
+                    </div>
+                    
+                    <!-- CỘT 3: GIỎ HÀNG -->
+                    <div class="order-cart-column">
+                        <div class="cart-header">🛒 Giỏ hàng</div>
+                        <div class="cart-items-list" id="cartItemsList"></div>
+                        <div class="cart-total-section">
+                            <div class="total-row">
+                                <span>Tổng cộng:</span>
+                                <span id="cartTotalAmount">0đ</span>
+                            </div>
+                            <div class="cart-action-buttons" id="cartFooterActions"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CHI TIẾT BÀN -->
+    <div class="modal" id="tableDetailModal">
+        <div class="modal-content">
+            <div class="modal-header"><span class="modal-title" id="detailTableName">🪑 Bàn</span><span class="modal-close" onclick="closeModal('tableDetailModal')">&times;</span></div>
+            <div class="modal-body">
+                <div class="cart-items" id="detailItems"></div>
+                <div class="cart-total" id="detailSummary"></div>
+                <div class="cart-actions" id="detailActions"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CHỌN KHÁCH (ghi nợ) -->
+    <div class="modal" id="customerSelectorModal">
+        <div class="modal-content"><div class="modal-header cus-sel-header"><input type="text" id="customerSelectorSearch" class="form-input cus-sel-search" placeholder="🔍 Tìm khách..."><button class="btn-create-customer cus-sel-create-btn" id="createCustomerFromSelectorBtn">➕ Tạo</button><span class="modal-close" onclick="closeModal('customerSelectorModal')">&times;</span></div>
+        <div class="modal-body cus-sel-body"><div id="customerSelectorList" class="customer-selector-list"></div></div></div>
+    </div>
+
+    <!-- MODAL CHIA HÓA ĐƠN -->
+    <div class="modal" id="splitBillModal">
+        <div class="modal-content"><div class="modal-header"><span class="modal-title">🧾 Chia hóa đơn</span><span class="modal-close" onclick="closeModal('splitBillModal')">&times;</span></div>
+        <div class="modal-body"><div id="splitItemsList" class="split-items-list"></div><div class="split-total">Tổng phần chia: <span id="splitTotalAmount">0đ</span></div>
+        <div class="form-actions"><button class="btn-save" id="confirmSplitBtn">✅ Thanh toán phần đã chọn</button><button class="btn-cancel" onclick="closeModal('splitBillModal')">Hủy</button></div></div></div>
+    </div>
+
+    <!-- MODAL CHUYỂN MÓN -->
+    <div class="modal" id="transferItemsModal">
+        <div class="modal-content"><div class="modal-header"><span class="modal-title">🔄 Chuyển món sang bàn khác</span><span class="modal-close" onclick="closeModal('transferItemsModal')">&times;</span></div>
+        <div class="modal-body"><div id="transferItemsList" class="transfer-items-list"></div><input type="text" id="transferTargetTable" class="form-input" placeholder="Tên bàn đích (VD: Bàn 05)" style="margin-top:12px;">
+        <div class="form-actions"><button class="btn-save" id="confirmTransferBtn">✅ Chuyển món</button><button class="btn-cancel" onclick="closeModal('transferItemsModal')">Hủy</button></div></div></div>
+    </div>
+
+    <!-- MODAL GỘP BÀN -->
+    <div class="modal" id="mergeTableModal">
+        <div class="modal-content"><div class="modal-header"><span class="modal-title">🔗 Chọn bàn để gộp</span><span class="modal-close" onclick="closeModal('mergeTableModal')">&times;</span></div>
+        <div class="modal-body"><div id="mergeTablesList" class="merge-tables-list"></div><div class="form-actions"><button class="btn-cancel" onclick="closeModal('mergeTableModal')">Hủy</button></div></div></div>
+    </div>
+
+    <!-- MODAL XÓA BÀN -->
+    <div class="modal" id="deleteTableModal">
+        <div class="modal-content" style="max-width:300px;"><div class="modal-header"><span class="modal-title">⚠️ Xác nhận xóa bàn</span><span class="modal-close" onclick="closeModal('deleteTableModal')">&times;</span></div>
+        <div class="modal-body"><p>Bạn có chắc muốn xóa bàn này? Toàn bộ món sẽ bị hủy.</p><div class="form-actions"><button class="btn-save" id="confirmDeleteTableBtn" style="background:#dc2626;">Xóa</button><button class="btn-cancel" onclick="closeModal('deleteTableModal')">Hủy</button></div></div></div>
+    </div>
+
+    <!-- MODAL CHI TIẾT KHÁCH -->
+    <div class="modal" id="customerDetailModal">
+        <div class="modal-content cus-detail-modal"><div class="modal-header"><span class="modal-title" id="customerDetailTitle">👤 Chi tiết khách</span><span class="cus-header-balance" id="customerDetailBalance"></span><span class="modal-close" onclick="closeModal('customerDetailModal')">&times;</span></div>
+        <div class="modal-body" id="customerDetailContent"></div></div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- MODAL CHI TIẾT GIAO DỊCH -->
+    <div class="modal" id="transactionDetailModal">
+        <div class="modal-content">
+            <div class="modal-body" id="transactionDetailBody"></div>
+            <div class="modal-header">
+                <div class="header-left">
+                    <div class="modal-title">🧾 Chi tiết giao dịch</div>
+                    <div class="header-date" id="txDetailDate"></div>
+                </div>
+                <span class="modal-close" onclick="closeModal('transactionDetailModal')">&times;</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL XÁC NHẬN ĐƠN NHÁP -->
+    <div class="modal" id="draftConfirmModal">
+        <div class="modal-content" style="max-width: 380px;">
+            <div class="modal-header">
+                <span class="modal-title">📋 Xác nhận đơn nháp</span>
+                <span class="modal-close" onclick="closeModal('draftConfirmModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="draftConfirmContent"></div>
+        </div>
+    </div>
+
+    <!-- Toast giao dịch gần đây -->
+    <div id="recentToast" class="recent-toast">
+        <div class="recent-toast-header">🍽️ BÀN GẦN ĐÂY</div>
+        <div id="recentToastList" class="recent-toast-list"></div>
+    </div>
+
+    <!-- SCRIPTS - CHỈ LOAD NHỮNG GÌ POS CẦN -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    
+    <!-- DB CHUNG -->
+    <script src="db.js"></script>
+    <!-- Auth CHUNG -->
+    <script src="auth.js"></script>
+    
+    <!-- POS-APP RÚT GỌN (thay thế app.js) -->
+    <script src="pos-app.js"></script>
+    <!-- REALTIME RÚT GỌN (thay thế realtime.js) -->
+    <script src="realtime-pos.js"></script>
+    
+    <!-- INGREDIENTS - kiểm tra tồn kho, trừ nguyên liệu (cần cho order.js, tables.js) -->
+    <script src="ingredients.js"></script>
+    
+    <!-- CORE MODULES DÙNG CHUNG -->
+    <script src="order.js"></script>
+    <script src="tables.js"></script>
+    <script src="split-transfer-merge.js"></script>
+    <script src="customers.js"></script>
+    <script src="history.js"></script>
+    <script src="print.js"></script>
+    <script src="draft-orders.js"></script>
+    
+    <!-- Telegram notification integration -->
+    <script src="telegram.js"></script>
+    
+    <!-- Lunar calendar + Notification (giữ để có thông báo) -->
+    <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/dist/lunar.min.js"></script>
+    <script src="notifications.js"></script>
+    
+    <!-- HEADER DƯỚI ĐÁY -->
+    <div class="header">
+        <div class="logo"><span class="logo-icon">☕</span><span class="logo-text">POS CAFE</span></div>
+        <div class="header-center">
+            <span class="header-date" id="headerDate">--</span>
+        </div>
+        <div class="header-right">
+            <span class="staff-name">👤 Nhân viên</span>
+            <span class="time" id="currentTime">--:--</span>
+        </div>
+    </div>
+</body>
+</html>

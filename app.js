@@ -28,14 +28,33 @@ var cachedTables = [];
 var tablesCacheTime = 0;
 var CACHE_TTL = 2000;
 var renderScheduled = false;
+// Biến cho module mới
+var inventoryTransactions = [];
+var managerCashPickups = [];
 
 document.addEventListener('DOMContentLoaded', function() {
+    // FIX: Đăng ký callback realtime TRƯỚC khi DB.init() gọi subscribeToCollection
+    // để không bỏ lỡ event nào
+    initRealtime();
+    
     DB.init().then(function() {
+        // Khởi tạo auth - kiểm tra session, hiển thị màn hình login nếu cần
+        if (typeof initAuth === 'function') {
+            initAuth();
+        }
         return loadData();
+    }).then(function() {
+        // Tải các đơn nháp từ IndexedDB
+        return loadDraftOrders();
     }).then(function() {
         initEventListeners();
         renderCurrentTime();
-        setInterval(renderCurrentTime, 1000);
+        // Khởi tạo module thông báo
+        if (typeof initNotifications === 'function') {
+            initNotifications();
+        }
+        // OPTIMIZE: Cập nhật đồng hồ mỗi 30s thay vì mỗi 1s (Android 6 lag)
+        setInterval(renderCurrentTime, 30000);
         showToast('POS sẵn sàng', 'success');
     });
 });
@@ -47,24 +66,36 @@ function loadData() {
         DB.getAll('ingredients'),
         DB.getAll('customers'),
         DB.getAll('cost_categories'),
-        DB.getAll('cost_transactions')
+        DB.getAll('cost_transactions'),
+        DB.getAll('inventory_transactions'),
+        DB.getAll('manager_cash_pickups')
     ]).then(function(results) {
         menuItems = results[0] || [];
+        // Sắp xếp menuItems theo sortOrder để kéo thả hoạt động đúng
+        menuItems.sort(function(a, b) {
+            var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
+            var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
+            return orderA - orderB;
+        });
         menuCategories = results[1] || [];
         ingredients = results[2] || [];
         customers = results[3] || [];
         costCategories = results[4] || [];
         costTransactions = results[5] || [];
+        inventoryTransactions = results[6] || [];
+        managerCashPickups = results[7] || [];
         window.menuItems = menuItems;
         window.ingredients = ingredients;
         window.customers = customers;
-        return renderTables();
+        window.inventoryTransactions = inventoryTransactions;
+        window.managerCashPickups = managerCashPickups;
+        renderTables();
         updateRecentToast();
     }).then(function() {
         renderCustomerList();
         renderHistoryByDate(currentHistoryDate);
         renderReport(currentReportDate);
-        initRealtime();
+        // FIX: Không cần gọi initRealtime() ở đây nữa vì đã gọi trước DB.init()
     });
 }
 
@@ -99,8 +130,10 @@ function renderRecentTransactions() {
             }
             
             var locationInfo = '';
-            if (tx.tableName) locationInfo = '🍽️ ' + tx.tableName;
-            else if (tx.type === 'takeaway') locationInfo = '🛵 Mang đi';
+            if (tx.tableName) {
+                var displayLabel = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
+                locationInfo = '🍽️ ' + displayLabel;
+            } else if (tx.type === 'takeaway') locationInfo = '🛵 Mang đi';
             else if (tx.type === 'grab') locationInfo = '🚕 Grab';
             else locationInfo = '🍽️ Tại chỗ';
             
@@ -129,14 +162,17 @@ function initEventListeners() {
     var createOrderBtn = document.getElementById('createOrderBtn');
     if (createOrderBtn) createOrderBtn.onclick = openCreateOrderModal;
 
-    var staffCostFloatBtn = document.getElementById('staffCostFloatBtn');
-    if (staffCostFloatBtn) staffCostFloatBtn.onclick = function() {
-        if (typeof openStaffCostModal === 'function') {
-            openStaffCostModal();
-        } else {
-            showToast('Chức năng chi phí nhân viên chưa sẵn sàng', 'warning');
-        }
-    };
+    // Nút chi phí thống nhất (thay thế staffCostFloatBtn)
+    var expenseFloatBtn = document.getElementById('expenseFloatBtn');
+    if (expenseFloatBtn) {
+        expenseFloatBtn.onclick = function() {
+            if (typeof openExpenseModal === 'function') {
+                openExpenseModal();
+            } else {
+                showToast('Chức năng chi phí chưa sẵn sàng', 'warning');
+            }
+        };
+    }
 
     var prevDayBtn = document.getElementById('prevDayBtn');
     if (prevDayBtn) prevDayBtn.onclick = function() { changeHistoryDate(-1); };
@@ -156,34 +192,26 @@ function initEventListeners() {
     var quickAddCustomerBtn = document.getElementById('quickAddCustomerBtn');
     if (quickAddCustomerBtn) quickAddCustomerBtn.onclick = quickAddCustomer;
 
-    var saveCostBtn = document.getElementById('saveCostBtn');
-    if (saveCostBtn) saveCostBtn.onclick = saveExpense;
+    // Lọc khách hàng realtime khi gõ ô tìm kiếm
+    var customerSearchInput = document.getElementById('customerSearchInput');
+    if (customerSearchInput) {
+        customerSearchInput.oninput = function() {
+            renderCustomerList();
+        };
+        // Cho phép Enter để thêm nhanh nếu không tìm thấy
+        customerSearchInput.onkeydown = function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                quickAddCustomer();
+            }
+        };
+    }
 
     var createCustomerBtn = document.getElementById('createCustomerFromSelectorBtn');
     if (createCustomerBtn) createCustomerBtn.onclick = createCustomerFromInput;
 
-    var confirmDebtBtn = document.getElementById('confirmDebtPaymentBtn');
-    if (confirmDebtBtn) confirmDebtBtn.onclick = confirmDebtPayment;
-
-    var paymentCash = document.getElementById('paymentCashBtn');
-    if (paymentCash) paymentCash.onclick = function() {
-        if (pendingPaymentTableId) paymentAtTable(pendingPaymentTableId, 'cash');
-        closeModal('paymentMethodModal');
-    };
-
-    var paymentTransfer = document.getElementById('paymentTransferBtn');
-    if (paymentTransfer) paymentTransfer.onclick = function() {
-        if (pendingPaymentTableId) paymentAtTable(pendingPaymentTableId, 'transfer');
-        closeModal('paymentMethodModal');
-    };
-
-    var paymentDebt = document.getElementById('paymentDebtBtn');
-    if (paymentDebt) paymentDebt.onclick = function() {
-        if (pendingPaymentTableId) {
-            closeModal('paymentMethodModal');
-            debtAtTable(pendingPaymentTableId);
-        }
-    };
+    // Các nút thanh toán cũ (paymentMethodModal) đã được thay thế bằng quickPayModal
+    // Thanh toán được xử lý trực tiếp từ showTableDetail() và quickPayConfirm()
 
     // Modal chia hóa đơn, chuyển món, xóa bàn
     var confirmSplit = document.getElementById('confirmSplitBtn');
@@ -194,21 +222,9 @@ function initEventListeners() {
 
     var confirmDelete = document.getElementById('confirmDeleteTableBtn');
     if (confirmDelete) confirmDelete.onclick = confirmDeleteTable;
-
-    // Gắn sự kiện cho các nút số tiền nhanh trong modal chi phí
-    var quickMoneyBtns = document.querySelectorAll('.quick-money-btn');
-    for (var i = 0; i < quickMoneyBtns.length; i++) {
-        quickMoneyBtns[i].onclick = function(e) {
-            e.stopPropagation();
-            var amount = this.getAttribute('data-amount');
-            if (amount) {
-                var costAmountInput = document.getElementById('costAmount');
-                if (costAmountInput) costAmountInput.value = amount;
-            }
-        };
-    }
 }
 
+// FIX: Khi chuyển tab, render lại data từ memoryCache để hiển thị data mới nhất
 function switchTab(tabId) {
     currentTab = tabId;
     var tabs = document.querySelectorAll('.tab-btn');
@@ -221,14 +237,112 @@ function switchTab(tabId) {
         if (contents[i].id === tabId + 'View') contents[i].classList.add('active');
         else contents[i].classList.remove('active');
     }
+    
+    // Chỉ hiển thị draft bubbles và recent toast trên tab Bàn
+    var draftContainer = document.getElementById('draftBubbleContainer');
+    var recentToast = document.getElementById('recentToast');
+    if (tabId === 'tables') {
+        if (draftContainer) draftContainer.style.display = '';
+        if (recentToast) recentToast.style.display = '';
+        renderTables();
+        // Bắt đầu timer cập nhật thời gian bàn tự động
+        if (typeof startTableTimer === 'function') {
+            startTableTimer();
+        }
+    } else {
+        // Dừng timer cập nhật thời gian bàn khi rời tab
+        if (typeof stopTableTimer === 'function') {
+            stopTableTimer();
+        }
+        // Ẩn draft bubbles và recent toast khi không ở tab Bàn
+        if (draftContainer) draftContainer.style.display = 'none';
+        if (recentToast) recentToast.style.display = 'none';
+        
+        if (tabId === 'history') {
+            renderHistoryByDate(currentHistoryDate);
+        } else if (tabId === 'report') {
+            renderReport(currentReportDate);
+        } else if (tabId === 'customers') {
+            renderCustomerList();
+        } else if (tabId === 'manager') {
+            if (typeof managerApplyFilter === 'function') managerApplyFilter();
+        } else if (tabId === 'staff') {
+            if (typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin()) {
+                if (typeof DB.getStaffs === 'function') {
+                    DB.getStaffs().then(function(staffs) {
+                        if (typeof renderStaffList === 'function') renderStaffList(staffs);
+                    });
+                }
+            }
+        } else if (tabId === 'inventory') {
+            if (typeof renderInventoryMenu === 'function') renderInventoryMenu();
+            if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
+            if (typeof renderInventoryCategoryFilter === 'function') renderInventoryCategoryFilter();
+        }
+    }
 }
 
-function formatMoney(amount) { return (amount || 0).toLocaleString('vi-VN') + 'đ'; }
-function showToast(message, type) { var toast = document.createElement('div'); toast.className = 'toast ' + type; toast.innerText = message; document.getElementById('toastContainer').appendChild(toast); setTimeout(function() { toast.remove(); }, 2500); }
+// OPTIMIZE: Cache formatMoney với LRU đơn giản - giới hạn 1000 entry để tránh memory leak
+var _moneyCache = {};
+var _moneyCacheKeys = [];
+var _MONEY_CACHE_MAX = 1000;
+function formatMoney(amount) {
+    var val = amount || 0;
+    var key = String(val);
+    if (_moneyCache[key] !== undefined) return _moneyCache[key];
+    var result = val.toLocaleString('vi-VN') + 'đ';
+    // LRU: nếu cache quá lớn, xóa entry cũ nhất
+    if (_moneyCacheKeys.length >= _MONEY_CACHE_MAX) {
+        var oldestKey = _moneyCacheKeys.shift();
+        delete _moneyCache[oldestKey];
+    }
+    _moneyCache[key] = result;
+    _moneyCacheKeys.push(key);
+    return result;
+}
+// Toast counter để tạo ID duy nhất
+var _toastCounter = 0;
+// Map lưu các toast đang hiển thị (id -> { element, timer })
+var _toastMap = {};
+
+function showToast(message, type, duration) {
+    if (duration === undefined) duration = 2500;
+    var toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.innerText = message;
+    document.getElementById('toastContainer').appendChild(toast);
+    var id = 'toast_' + (++_toastCounter);
+    toast.setAttribute('data-toast-id', id);
+    if (duration > 0) {
+        var timer = setTimeout(function() { toast.remove(); delete _toastMap[id]; }, duration);
+        _toastMap[id] = { element: toast, timer: timer };
+    } else {
+        _toastMap[id] = { element: toast, timer: null };
+    }
+    return id;
+}
+
+function hideToast(id) {
+    var entry = _toastMap[id];
+    if (entry) {
+        if (entry.timer) clearTimeout(entry.timer);
+        if (entry.element && entry.element.parentNode) entry.element.remove();
+        delete _toastMap[id];
+    }
+}
 function closeModal(modalId) { var m = document.getElementById(modalId); if (m) m.style.display = 'none'; }
 function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&'; if (m === '<') return '<'; if (m === '>') return '>'; return m; }); }
 function formatDateDisplay(dateStr) { var d = new Date(dateStr); return d.getDate() + '/' + (d.getMonth() + 1) + '/' + d.getFullYear(); }
-function renderCurrentTime() { var now = new Date(); var timeEl = document.getElementById('currentTime'); if (timeEl) timeEl.innerText = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }); }
+function renderCurrentTime() {
+    var now = new Date();
+    var timeEl = document.getElementById('currentTime');
+    if (timeEl) timeEl.innerText = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    var dateEl = document.getElementById('headerDate');
+    if (dateEl) {
+        var dayNames = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+        dateEl.innerText = dayNames[now.getDay()] + ', ' + now.toLocaleDateString('vi-VN');
+    }
+}
 
 // Ghi đè hàm closeModal để bỏ chặn cuộn
 var originalCloseModal = window.closeModal;
@@ -243,6 +357,15 @@ window.closeModal = function(modalId) {
     }
     document.body.classList.remove('modal-open');
     if (originalCloseModal) originalCloseModal(modalId);
+    
+    // Khi đóng orderModal: nếu đang ở chế độ tạo đơn mới (ko thêm vào bàn, ko edit draft)
+    // thì clear tempOrder để lần mở sau ko bị giữ lại items cũ
+    if (modalId === 'orderModal') {
+        if (typeof currentAddToTableId !== 'undefined' && !currentAddToTableId && typeof currentDraftId !== 'undefined' && !currentDraftId) {
+            tempOrder = [];
+            if (typeof _resetCartDomCache === 'function') _resetCartDomCache();
+        }
+    }
 };
 
 // Hàm mở modal mới (chặn cuộn body)
@@ -253,20 +376,7 @@ function openBottomSheet(modalId) {
     document.body.classList.add('modal-open');
 }
 
-// Tự động thêm class modal-open khi bất kỳ modal nào hiển thị
-var observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(mutation) {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-            var modal = mutation.target;
-            if (modal.style.display === 'flex') {
-                document.body.classList.add('modal-open');
-            }
-        }
-    });
-});
-document.querySelectorAll('.modal').forEach(function(modal) {
-    observer.observe(modal, { attributes: true });
-});
+// OPTIMIZE: Loại bỏ MutationObserver - gây lag trên Android 6, không cần thiết vì openBottomSheet đã xử lý
 // Đóng modal khi click ra ngoài vùng .modal-content
 document.querySelectorAll('.modal').forEach(function(modal) {
     modal.addEventListener('click', function(e) {
@@ -276,116 +386,4 @@ document.querySelectorAll('.modal').forEach(function(modal) {
     });
 });
 
-// Preview realtime khi nhập số tiền mặt thực nhận
-var actualCashInput = document.getElementById('actualCashInput');
-if (actualCashInput) {
-    actualCashInput.addEventListener('input', function(e) {
-        var val = parseInt(e.target.value) || 0;
-        previewCashKept(val);
-    });
-} else {
-    console.warn('Không tìm thấy input #actualCashInput, preview realtime bị vô hiệu');
-}
-
-function previewCashKept(enteredActualCash) {
-    var dateStr = currentReportDate.toISOString().slice(0, 10);
-    Promise.all([
-        DB.getTransactionsByDate(dateStr),
-        DB.get('daily_balances', dateStr)
-    ]).then(function(results) {
-        var transactions = results[0].filter(function(t) { return !t.refunded; });
-        var dailyBalance = results[1] || { cashKept: 0 };
-        var cashTotal = 0;
-        for (var i = 0; i < transactions.length; i++) {
-            if (transactions[i].paymentMethod === 'cash') cashTotal += transactions[i].amount;
-        }
-        var prevDate = new Date(currentReportDate);
-        prevDate.setDate(prevDate.getDate() - 1);
-        var prevDateStr = prevDate.toISOString().slice(0, 10);
-        DB.get('daily_balances', prevDateStr).then(function(prevBalance) {
-            var cashKeptPrev = (prevBalance && prevBalance.cashKept) || 0;
-            var cashKeptPreview = cashTotal + cashKeptPrev - enteredActualCash;
-            if (cashKeptPreview < 0) cashKeptPreview = 0;
-            var lastStatCard = document.querySelector('#reportStats .stat-card:last-child');
-            if (lastStatCard) {
-                var targetRow = lastStatCard.querySelector('.stat-row:last-child');
-                if (targetRow) {
-                    var valueSpan = targetRow.querySelector('span:last-child');
-                    if (valueSpan) {
-                        valueSpan.innerHTML = formatMoney(cashKeptPreview);
-                        valueSpan.style.color = '#f97316';
-                        valueSpan.style.fontWeight = 'bold';
-                        var noteSpan = targetRow.querySelector('.preview-note');
-                        if (!noteSpan) {
-                            noteSpan = document.createElement('small');
-                            noteSpan.className = 'preview-note';
-                            noteSpan.style.marginLeft = '8px';
-                            noteSpan.style.fontSize = '10px';
-                            noteSpan.style.color = '#f97316';
-                            noteSpan.innerText = '(chưa lưu)';
-                            targetRow.appendChild(noteSpan);
-                        } else {
-                            noteSpan.style.display = 'inline';
-                        }
-                    }
-                }
-            }
-        });
-    });
-}
-
-// Nút gửi báo cáo: nhập tiền mặt thực nhận -> lưu và tự tính số dư cuối ngày
-var submitActualCashBtn = document.getElementById('submitActualCashBtn');
-if (submitActualCashBtn) {
-    submitActualCashBtn.onclick = function() {
-        var actualCashReceived = parseInt(document.getElementById('actualCashInput').value) || 0;
-        if (actualCashReceived <= 0) {
-            showToast('Vui lòng nhập số tiền mặt thực nhận lớn hơn 0!', 'warning');
-            return;
-        }
-        
-        var dateStr = currentReportDate.toISOString().slice(0, 10);
-        
-        Promise.all([
-            DB.getTransactionsByDate(dateStr),
-            DB.get('daily_balances', dateStr)
-        ]).then(function(results) {
-            var transactions = results[0].filter(function(t) { return !t.refunded; });
-            var dailyBalance = results[1] || { cashKept: 0 };
-            
-            var cashTotal = 0;
-            for (var i = 0; i < transactions.length; i++) {
-                if (transactions[i].paymentMethod === 'cash') cashTotal += transactions[i].amount;
-            }
-            
-            var prevDate = new Date(currentReportDate);
-            prevDate.setDate(prevDate.getDate() - 1);
-            var prevDateStr = prevDate.toISOString().slice(0, 10);
-            
-            DB.get('daily_balances', prevDateStr).then(function(prevBalance) {
-                var cashKeptPrev = (prevBalance && prevBalance.cashKept) || 0;
-                var cashKeptToday = cashTotal + cashKeptPrev - actualCashReceived;
-                if (cashKeptToday < 0) cashKeptToday = 0;
-                
-                var data = {
-                    id: dateStr,
-                    cashKept: cashKeptToday,
-                    cashReceived: actualCashReceived
-                };
-                DB.create('daily_balances', data, dateStr).then(function() {
-                    showToast('Đã lưu báo cáo: tiền mặt thực nhận = ' + formatMoney(actualCashReceived), 'success');
-                    var noteSpan = document.querySelector('#reportStats .stat-card:last-child .preview-note');
-                    if (noteSpan) noteSpan.style.display = 'none';
-                    var valueSpan = document.querySelector('#reportStats .stat-card:last-child .stat-row:last-child span:last-child');
-                    if (valueSpan) {
-                        valueSpan.style.color = '';
-                        valueSpan.style.fontWeight = '';
-                        valueSpan.innerHTML = formatMoney(cashKeptToday);
-                    }
-                    renderReport(currentReportDate);
-                });
-            });
-        });
-    };
-}
 
