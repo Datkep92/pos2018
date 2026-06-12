@@ -26,6 +26,7 @@ var cachedTables = [];
 var tablesCacheTime = 0;
 var CACHE_TTL = 2000;
 var renderScheduled = false;
+var shopInfo = null; // Thông tin quán
 
 document.addEventListener('DOMContentLoaded', function() {
     // Khởi tạo realtime TRƯỚC DB.init()
@@ -92,7 +93,8 @@ function loadData() {
     return Promise.all([
         DB.getAll('menu'),
         DB.getAll('menu_categories'),
-        DB.getAll('customers')
+        DB.getAll('customers'),
+        DB.getAll('shop_info')
     ]).then(function(results) {
         menuItems = results[0] || [];
         // Sắp xếp menuItems theo sortOrder để kéo thả hoạt động đúng
@@ -103,6 +105,14 @@ function loadData() {
         });
         menuCategories = results[1] || [];
         customers = results[2] || [];
+        // Load shop info
+        var shopInfoList = results[3] || [];
+        if (shopInfoList.length > 0) {
+            shopInfo = shopInfoList[0];
+        } else {
+            shopInfo = null;
+        }
+        window.shopInfo = shopInfo;
         window.menuItems = menuItems;
         window.customers = customers;
         window.ingredients = ingredients;
@@ -403,169 +413,4 @@ function hideToast(id) {
     }
 }
 
-// ========== SETTINGS / AUTO-UPDATE UI ==========
-
-/**
- * Khởi tạo settings tab - load token, version, skip status
- */
-function initSettingsTab() {
-    // Hiển thị phiên bản
-    var versionEl = document.getElementById('settingsCurrentVersion');
-    if (versionEl && window.Android) {
-        var vName = Android.getCurrentVersionName();
-        var vCode = Android.getCurrentVersionCode();
-        versionEl.textContent = 'v' + vName + ' (code ' + vCode + ')';
-    } else if (versionEl) {
-        versionEl.textContent = 'v1.0 (chỉ trên Android)';
-    }
-
-    // Load token đã lưu
-    if (window.Android) {
-        var token = Android.getGitHubToken();
-        var tokenInput = document.getElementById('settingsGithubToken');
-        if (tokenInput && token) {
-            tokenInput.value = token;
-        }
-        // Load skip version
-        var skipped = Android.getSkipVersion();
-        var skipEl = document.getElementById('settingsSkippedVersion');
-        if (skipEl) {
-            skipEl.textContent = skipped ? 'v' + skipped : 'Không có';
-        }
-    }
-
-    // Cập nhật trạng thái
-    updateSettingsStatus();
-}
-
-/**
- * Cập nhật trạng thái kiểm tra
- */
-function updateSettingsStatus() {
-    var statusEl = document.getElementById('settingsUpdateStatus');
-    if (!statusEl) return;
-    if (window.Android) {
-        var token = Android.getGitHubToken();
-        if (token) {
-            statusEl.textContent = '✅ Đã cấu hình GitHub token';
-            statusEl.style.color = '#16a34a';
-        } else {
-            statusEl.textContent = '⏸️ Chưa có GitHub token - vào https://github.com/settings/tokens để tạo';
-            statusEl.style.color = '#ca8a04';
-        }
-    } else {
-        statusEl.textContent = '❌ Chỉ hoạt động trên ứng dụng Android';
-        statusEl.style.color = '#dc2626';
-    }
-}
-
-/**
- * Lưu GitHub token
- */
-function saveGitHubToken() {
-    if (!window.Android) {
-        showToast('❌ Chỉ hoạt động trên ứng dụng Android', 'error', 3000);
-        return;
-    }
-    var input = document.getElementById('settingsGithubToken');
-    if (!input) return;
-    var token = input.value.trim();
-    if (!token) {
-        showToast('⚠️ Vui lòng nhập GitHub token', 'warning', 2000);
-        return;
-    }
-    Android.setGitHubToken(token);
-    showToast('✅ Đã lưu GitHub token', 'success', 2000);
-    updateSettingsStatus();
-}
-
-/**
- * Xóa GitHub token
- */
-function clearGitHubToken() {
-    if (!window.Android) {
-        showToast('❌ Chỉ hoạt động trên ứng dụng Android', 'error', 3000);
-        return;
-    }
-    if (confirm('Xóa GitHub token?')) {
-        Android.clearGitHubToken();
-        document.getElementById('settingsGithubToken').value = '';
-        showToast('🗑️ Đã xóa GitHub token', 'success', 2000);
-        updateSettingsStatus();
-    }
-}
-
-/**
- * Kiểm tra cập nhật ngay lập tức
- */
-function checkUpdateNow() {
-    if (!window.Android) {
-        showToast('❌ Chỉ hoạt động trên ứng dụng Android', 'error', 3000);
-        return;
-    }
-    showToast('🔄 Đang kiểm tra cập nhật...', 'info', 3000);
-    Android.checkForUpdateFromJS();
-}
-
-/**
- * Bỏ bỏ qua phiên bản (kiểm tra lại)
- */
-function clearSkipVersion() {
-    if (!window.Android) {
-        showToast('❌ Chỉ hoạt động trên ứng dụng Android', 'error', 3000);
-        return;
-    }
-    Android.clearSkipVersion();
-    document.getElementById('settingsSkippedVersion').textContent = 'Không có';
-    showToast('🔄 Đã xóa bỏ qua, sẽ kiểm tra lại', 'success', 2000);
-}
-
-/**
- * Lưu địa chỉ IP máy in từ Settings tab
- */
-function savePrinterIp() {
-    var input = document.getElementById('printerIpInput');
-    if (!input) return;
-    var ip = input.value.trim();
-    if (!ip) {
-        showToast('⚠️ Vui lòng nhập địa chỉ IP máy in', 'warning', 2000);
-        return;
-    }
-    setPrinterIP(ip);
-    showToast('✅ Đã lưu IP máy in: ' + ip, 'success', 2000);
-}
-
-/**
- * In thử hóa đơn test
- */
-function testPrint() {
-    var testData = {
-        shopName: 'POS CAFE',
-        tableName: 'In thử',
-        items: [
-            { name: 'Cà phê đen', quantity: 1, price: 25000 },
-            { name: 'Cà phê sữa', quantity: 2, price: 30000 }
-        ],
-        total: 85000,
-        paymentMethod: 'cash',
-        createdAt: new Date().toISOString()
-    };
-    showToast('🖨️ Đang in thử...', 'info', 2000);
-    printReceipt(testData);
-}
-
-/**
- * Hiện/ẩn token
- */
-function toggleTokenVisibility() {
-    var input = document.getElementById('settingsGithubToken');
-    var btn = document.getElementById('settingsToggleToken');
-    if (!input || !btn) return;
-    if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = '🙈';
-    } else {
-        input.type = 'password';
-        btn.textContent = '👁️';
-    }
-}
+// Settings code moved to settings.js

@@ -453,6 +453,17 @@ function showDeleteTableConfirm(tableId) {
     // Kiểm tra khóa bàn
     DB.get('tables', String(tableId)).then(function(table) {
         if (!table) return;
+        
+        // Kiểm tra đã chốt ngày chưa - nếu đã chốt thì yêu cầu mật khẩu
+        // Chống gian lận: nhân viên không thể xóa bàn sau khi đã chốt ngày
+        if (typeof isDayClosed === 'function' && isDayClosed()) {
+            closeModal('deleteTableModal');
+            requirePassword('xóa bàn (đã chốt ngày hôm nay)', function() {
+                document.getElementById('deleteTableModal').style.display = 'flex';
+            });
+            return;
+        }
+        
         if (isTableLocked(table)) {
             // Bàn bị khóa: yêu cầu mật khẩu
             closeModal('deleteTableModal');

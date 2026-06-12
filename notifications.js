@@ -38,6 +38,13 @@ function initNotifications() {
     // Tải thông báo header từ DB
     loadHeaderNotification();
     
+    // Đăng ký realtime subscription để tự động cập nhật khi admin gửi thông báo mới
+    if (typeof DB.subscribe === 'function') {
+        DB.subscribe('notifications', function() {
+            loadHeaderNotification();
+        });
+    }
+    
     // Kiểm tra toggle trạng thái
     var toggle = document.getElementById('notificationToggle');
     if (toggle) {

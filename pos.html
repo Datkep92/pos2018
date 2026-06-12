@@ -151,7 +151,12 @@
             <!-- TAB CÀI ĐẶT -->
             <div id="settingsView" class="tab-content">
                 <div class="settings-container">
+                    <!-- TIỀN MẶT TẠI POS -->
                     <div class="settings-section">
+                        <div id="quickCashContainer"></div>
+                    </div>
+
+                    <div class="settings-section" id="settingsAppSection">
                         <h3 class="settings-title">⚙️ Cài đặt ứng dụng</h3>
                         
                         <div class="settings-info">
@@ -206,7 +211,7 @@
                     </div>
 
                     <!-- PHẦN THÔNG TIN QUÁN -->
-                    <div class="settings-section">
+                    <div class="settings-section" id="settingsShopSection">
                         <h3 class="settings-title">🏪 Thông tin quán</h3>
                         <div class="settings-field">
                             <label class="settings-label">Tên quán</label>
@@ -232,40 +237,6 @@
                         <div id="shopInfoStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
                     </div>
 
-                    <!-- PHẦN CÀI ĐẶT MÁY IN -->
-                    <div class="settings-section">
-                        <h3 class="settings-title">🖨️ Cài đặt máy in</h3>
-                        <div class="settings-field">
-                            <label class="settings-label">Máy in Sunmi (AIDL)</label>
-                            <div class="settings-hint" style="margin-bottom:8px;">
-                                Sử dụng dịch vụ in Sunmi tích hợp trên máy POS Ocha.
-                                Phương thức: <strong>Sunmi AIDL (woyou.aidlservice.jiuiv5)</strong>
-                            </div>
-                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                                <button class="settings-btn settings-btn-secondary" onclick="testSunmiService()" style="font-size:12px;padding:6px 10px;">🔌 Kiểm tra máy in</button>
-                                <button class="settings-btn settings-btn-primary" onclick="testPrint()" style="font-size:12px;padding:6px 10px;">🖨️ In thử</button>
-                            </div>
-                            <div id="printerScanResult" style="margin-top:8px;max-height:200px;overflow-y:auto;"></div>
-                        </div>
-                    </div>
-
-                    <div class="settings-section">
-                        <h3 class="settings-title">📖 Hướng dẫn cập nhật</h3>
-                        <div class="settings-guide">
-                            <p><strong>Cách cập nhật ứng dụng:</strong></p>
-                            <ol>
-                                <li>Tạo GitHub token tại <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a></li>
-                                <li>Chọn quyền <code>public_repo</code></li>
-                                <li>Copy token và dán vào ô trên, nhấn <strong>Lưu token</strong></li>
-                                <li>Nhấn <strong>Kiểm tra cập nhật</strong> để kiểm tra ngay</li>
-                                <li>App sẽ tự động kiểm tra bản mới mỗi khi khởi động</li>
-                            </ol>
-                            <p style="margin-top:8px;font-size:12px;color:#888;">
-                                ⚡ App dùng GitHub API để kiểm tra phiên bản mới nhất từ release.
-                                Khi có bản mới, app sẽ tự động tải ZIP, giải nén và cài đặt APK.
-                            </p>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -425,6 +396,9 @@
     <!-- Lunar calendar + Notification (giữ để có thông báo) -->
     <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/dist/lunar.min.js"></script>
     <script src="notifications.js"></script>
+    
+    <!-- Settings + Đếm tiền nhanh -->
+    <script src="settings.js"></script>
     
     <!-- HEADER DƯỚI ĐÁY -->
     <div class="header">

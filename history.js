@@ -414,28 +414,50 @@ function showTransactionDetail(transactionId) {
         }
         
         // YÊU CẦU 1: Lấy thông tin thời gian hoạt động của bàn
-        if (tx.tableId) {
-            DB.get('tables', String(tx.tableId)).then(function(table) {
-                var tableTimeHtml = '';
-                if (table && table.startTime) {
-                    var startTime = new Date(table.startTime);
-                    var endTime = table.endTime ? new Date(table.endTime) : new Date(tx.createdAt || tx.date);
-                    var startStr = startTime.toLocaleString('vi-VN');
-                    var endStr = endTime.toLocaleString('vi-VN');
-                    
-                    // Tính thời gian hoạt động
-                    var elapsed = endTime.getTime() - startTime.getTime();
-                    var hours = Math.floor(elapsed / 3600000);
-                    var mins = Math.floor((elapsed % 3600000) / 60000);
-                    var durationStr = hours + 'h' + (mins > 0 ? mins + 'p' : '');
-                    
-                    tableTimeHtml =
-                        '<div class="detail-row"><span>🕐 Bàn mở lúc:</span><span>' + startStr + '</span></div>' +
-                        '<div class="detail-row"><span>🕐 Bàn đóng lúc:</span><span>' + endStr + '</span></div>' +
-                        '<div class="detail-row"><span>⏱ Thời gian hoạt động:</span><span>' + durationStr + '</span></div>';
-                }
+        // Ưu tiên dùng startTime/endTime từ transaction (đã lưu khi thanh toán)
+        if (tx.startTime || tx.endTime || tx.tableId) {
+            var tableTimeHtml = '';
+            
+            if (tx.startTime && tx.endTime) {
+                // Dùng dữ liệu từ transaction
+                var startTime = new Date(tx.startTime);
+                var endTime = new Date(tx.endTime);
+                var startStr = startTime.toLocaleString('vi-VN');
+                var endStr = endTime.toLocaleString('vi-VN');
+                var elapsed = endTime.getTime() - startTime.getTime();
+                var hours = Math.floor(elapsed / 3600000);
+                var mins = Math.floor((elapsed % 3600000) / 60000);
+                var durationStr = hours + 'h' + (mins > 0 ? mins + 'p' : '');
+                
+                tableTimeHtml =
+                    '<div class="detail-row"><span>🕐 Bàn mở lúc:</span><span>' + startStr + '</span></div>' +
+                    '<div class="detail-row"><span>🕐 Bàn đóng lúc:</span><span>' + endStr + '</span></div>' +
+                    '<div class="detail-row"><span>⏱ Thời gian hoạt động:</span><span>' + durationStr + '</span></div>';
                 renderDetail(tableTimeHtml);
-            });
+            } else if (tx.tableId) {
+                // Fallback: lấy từ table (cho các giao dịch cũ chưa có startTime/endTime)
+                DB.get('tables', String(tx.tableId)).then(function(table) {
+                    if (table && table.startTime) {
+                        var startTime = new Date(table.startTime);
+                        var endTime = table.endTime ? new Date(table.endTime) : new Date(tx.createdAt || tx.date);
+                        var startStr = startTime.toLocaleString('vi-VN');
+                        var endStr = endTime.toLocaleString('vi-VN');
+                        
+                        var elapsed = endTime.getTime() - startTime.getTime();
+                        var hours = Math.floor(elapsed / 3600000);
+                        var mins = Math.floor((elapsed % 3600000) / 60000);
+                        var durationStr = hours + 'h' + (mins > 0 ? mins + 'p' : '');
+                        
+                        tableTimeHtml =
+                            '<div class="detail-row"><span>🕐 Bàn mở lúc:</span><span>' + startStr + '</span></div>' +
+                            '<div class="detail-row"><span>🕐 Bàn đóng lúc:</span><span>' + endStr + '</span></div>' +
+                            '<div class="detail-row"><span>⏱ Thời gian hoạt động:</span><span>' + durationStr + '</span></div>';
+                    }
+                    renderDetail(tableTimeHtml);
+                });
+            } else {
+                renderDetail('');
+            }
         } else {
             renderDetail('');
         }
@@ -447,12 +469,15 @@ function printTransactionDetail(transactionId) {
         if (!tx) return;
         if (typeof printAfterPayment === 'function') {
             printAfterPayment({
-                type: tx.type || 'dinein',
+                orderType: tx.type || 'dinein',
                 amount: tx.amount || 0,
                 paymentMethod: tx.paymentMethod || 'cash',
                 items: tx.items || [],
                 tableName: tx.tableName || null,
                 customer: tx.customer || null,
+                tableTime: tx.tableTime || null,
+                startTime: tx.startTime || null,
+                endTime: tx.endTime || null,
                 createdAt: tx.createdAt || tx.date
             });
         }
@@ -567,6 +592,17 @@ function refundTransaction(transactionId) {
             return;
         }
         
+        // YÊU CẦU 3: Kiểm tra đã chốt ngày chưa - nếu đã chốt thì yêu cầu mật khẩu
+        // Chống gian lận: nhân viên không thể hoàn tác sau khi đã chốt ngày
+        if (typeof isDayClosed === 'function' && isDayClosed()) {
+            requirePassword('hoàn tác giao dịch (đã chốt ngày hôm nay)', function() {
+                // YÊU CẦU 2: Kiểm tra khóa giao dịch dựa trên thời điểm thanh toán
+                var locked = isTransactionLocked(trans);
+                return proceedRefund(trans, locked);
+            });
+            return;
+        }
+        
         // YÊU CẦU 2: Kiểm tra khóa giao dịch dựa trên thời điểm thanh toán
         // - Giao dịch bị khóa (thanh toán trong khung giờ khóa 17h-5h30, hoặc ngồi quá 5h) → yêu cầu mật khẩu
         // - Giao dịch không bị khóa → không cần mật khẩu
@@ -660,9 +696,11 @@ function addHistory(transaction) {
         tableId: transaction.tableId || null, // Lưu tableId để kiểm tra khoá khi hoàn tác
         note: transaction.note || '',
         refunded: false,
-        tableTime: transaction.tableTime || '' // Thời gian khách ngồi (vd: "2h15p")
+        tableTime: transaction.tableTime || '', // Thời gian khách ngồi (vd: "2h15p")
+        startTime: transaction.startTime || null, // Thời gian bắt đầu ngồi
+        endTime: transaction.endTime || null      // Thời gian kết thúc (thanh toán)
     };
-    return DB.create('transactions', newTrans).then(function() {
+    return DB.create('transactions', newTrans).then(function(result) {
         // KHÔNG gọi render trực tiếp nữa, để realtime subscription tự cập nhật
     });
 }

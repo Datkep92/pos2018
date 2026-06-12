@@ -109,6 +109,15 @@ function deleteTableItem(tableId, itemIndex) {
         var itemQty = removedItem.qty;
         var itemPrice = removedItem.price;
 
+        // Kiểm tra đã chốt ngày chưa - nếu đã chốt thì yêu cầu mật khẩu
+        // Chống gian lận: nhân viên không thể xóa món sau khi đã chốt ngày
+        if (typeof isDayClosed === 'function' && isDayClosed()) {
+            requirePassword('xóa món ' + itemName + ' (đã chốt ngày hôm nay)', function() {
+                doDeleteTableItem(table, itemIndex, removedItem);
+            });
+            return;
+        }
+
         // Kiểm tra khóa bàn: nếu bàn bị khóa, yêu cầu mật khẩu
         if (isTableLocked(table)) {
             requirePassword('xóa món ' + itemName + ' (bàn đang bị khóa)', function() {
@@ -286,19 +295,39 @@ function printTableBill(tableId) {
     DB.get('tables', String(tableId)).then(function(table) {
         if (!table) return;
         if (typeof printAfterPayment === 'function') {
+            var now = new Date();
             printAfterPayment({
-                type: 'dinein',
+                orderType: 'dinein',
                 amount: table.total,
                 paymentMethod: 'manual_print',
                 items: table.items,
                 tableName: table.name,
                 customer: table.customerName ? { name: table.customerName } : null,
-                createdAt: new Date().toISOString()
+                tableTime: table.startTime ? _calcTableTime(table.startTime) : null,
+                startTime: table.startTime ? new Date(table.startTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : null,
+                endTime: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+                createdAt: now.toISOString()
             });
         } else {
             showToast('Chức năng in chưa sẵn sàng', 'warning');
         }
     });
+}
+
+/**
+ * Tính thời gian khách ngồi từ startTime đến hiện tại
+ */
+function _calcTableTime(startTime) {
+    if (!startTime) return null;
+    var st = new Date(startTime);
+    var now = new Date();
+    var elapsed = now.getTime() - st.getTime();
+    var hours = Math.floor(elapsed / 3600000);
+    var mins = Math.floor((elapsed % 3600000) / 60000);
+    if (hours > 0) {
+        return hours + 'h' + (mins > 0 ? mins + 'p' : '');
+    }
+    return mins + 'p';
 }
 
 // tables.js - Phần sửa hàm openAddMenuForTable
@@ -385,6 +414,7 @@ function _processPaymentDirect(tableId, method) {
         var customerId = table.customerId;
         var customerName = table.customerName;
         var startTime = table.startTime;
+        var endTime = now.toISOString();
         
         // Tính thời gian khách ngồi (có thể tính song song)
         var tableTime = '';
@@ -450,7 +480,9 @@ function _processPaymentDirect(tableId, method) {
                     tableId: tableId,
                     note: creditUsed > 0 ? 'Đã dùng ' + formatMoney(creditUsed) + ' tiền dư' : '',
                     createdAt: now.toISOString(),
-                    tableTime: tableTime
+                    tableTime: tableTime,
+                    startTime: startTime,
+                    endTime: endTime
                 });
                 
                 var removePromise = DB.remove('tables', String(tableId));
@@ -668,13 +700,13 @@ function debtAtTable(tableId) {
         }
         showCustomerSelector(function(customer) {
             var now = new Date();
+            var endTime = now.toISOString();
             
             // Tính thời gian khách ngồi
             var tableTime = '';
             if (table.startTime) {
                 var startTime = new Date(table.startTime);
-                var endTime = now;
-                var elapsed = endTime.getTime() - startTime.getTime();
+                var elapsed = now.getTime() - startTime.getTime();
                 var hours = Math.floor(elapsed / 3600000);
                 var mins = Math.floor((elapsed % 3600000) / 60000);
                 if (hours > 0) {
@@ -746,7 +778,9 @@ function debtAtTable(tableId) {
                         tableId: tableId,
                         note: note,
                         createdAt: now.toISOString(),
-                        tableTime: tableTime
+                        tableTime: tableTime,
+                        startTime: table.startTime,
+                        endTime: endTime
                     });
                     
                     var removePromise = DB.remove('tables', String(tableId));
@@ -764,12 +798,15 @@ function debtAtTable(tableId) {
                         var printCheck = document.getElementById('printAfterPaymentCheck');
                         if (printCheck && printCheck.checked && typeof printAfterPayment === 'function') {
                             printAfterPayment({
-                                type: 'debt_payment',
+                                orderType: 'debt_payment',
                                 amount: debtAmount,
                                 paymentMethod: 'debt',
                                 items: table.items,
                                 tableName: table.name,
                                 customer: { id: customer.id, name: customer.name },
+                                tableTime: table.startTime ? _calcTableTime(table.startTime) : null,
+                                startTime: table.startTime ? new Date(table.startTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : null,
+                                endTime: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
                                 createdAt: now.toISOString()
                             });
                         }

@@ -410,12 +410,16 @@
 
     // FIX: Kiểm tra transaction trùng trong memory cache trước khi tạo
     function _isDuplicateTransaction(data) {
-        if (!data.tableId && !data.tableName) return false;
+        if (!data.tableId && !data.tableName) {
+            return false;
+        }
         var tableKey = data.tableId || data.tableName;
         var amt = Math.round(data.amount || 0);
         var method = data.paymentMethod || '';
         var txCache = memoryCache.transactions;
-        if (!txCache) return false;
+        if (!txCache) {
+            return false;
+        }
         for (var key in txCache) {
             if (!txCache.hasOwnProperty(key)) continue;
             var tx = txCache[key];
@@ -477,27 +481,29 @@
     }
 
     // Batch update sortOrder - ghi vào IndexedDB + Firebase 1 lần duy nhất, ko qua sync queue
-    function batchUpdateSortOrder(items) {
+    // @param {string} collection - Tên collection ('menu' hoặc 'menu_categories'), mặc định 'menu'
+    function batchUpdateSortOrder(items, collection) {
+        collection = collection || 'menu';
         return dbReady.then(function() {
             if (!localDB) throw new Error('DB not ready');
-            var tx = localDB.transaction(['menu'], 'readwrite');
-            var store = tx.objectStore('menu');
+            var tx = localDB.transaction([collection], 'readwrite');
+            var store = tx.objectStore(collection);
             var now = Date.now();
             
             for (var i = 0; i < items.length; i++) {
                 var item = items[i];
                 // Cập nhật memory cache - CHỈ sửa sortOrder, giữ nguyên các field khác
-                if (!memoryCache['menu']) memoryCache['menu'] = {};
-                if (memoryCache['menu'][item.id]) {
-                    memoryCache['menu'][item.id].sortOrder = item.sortOrder;
+                if (!memoryCache[collection]) memoryCache[collection] = {};
+                if (memoryCache[collection][item.id]) {
+                    memoryCache[collection][item.id].sortOrder = item.sortOrder;
                 }
                 // Ghi vào IndexedDB - CHỈ cập nhật sortOrder, ko ghi đè toàn bộ
                 // Dùng store.put với toàn bộ data cũ + sortOrder mới
-                var fullData = memoryCache['menu'][item.id];
+                var fullData = memoryCache[collection][item.id];
                 if (fullData) {
                     fullData.sortOrder = item.sortOrder;
                     fullData.updatedAt = now;
-                    store.put(normalizeIndexedFields('menu', fullData));
+                    store.put(normalizeIndexedFields(collection, fullData));
                 }
             }
             
@@ -506,15 +512,16 @@
                     // Sync 1 batch lên Firebase - CHỈ ghi đúng field sortOrder, ko tạo node lạ
                     if (isOnline && CURRENT_SHOP_ID) {
                         var updates = {};
+                        var firebasePath = (collection === 'menu_categories') ? 'menu_categories' : 'menu';
                         for (var i = 0; i < items.length; i++) {
-                            var key = CURRENT_SHOP_ID + '/menu/' + items[i].id + '/sortOrder';
+                            var key = CURRENT_SHOP_ID + '/' + firebasePath + '/' + items[i].id + '/sortOrder';
                             updates[key] = items[i].sortOrder;
                         }
                         db.ref().update(updates).catch(function(err) {
-                            console.error('Lỗi batch sync sortOrder:', err);
+                            console.error('Lỗi batch sync sortOrder cho ' + collection + ':', err);
                         });
                     }
-                    _notifyLocal('menu');
+                    _notifyLocal(collection);
                     resolve();
                 };
                 tx.onerror = function() { reject(tx.error); };
