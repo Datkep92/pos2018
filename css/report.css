@@ -1,89 +1,519 @@
-/* =======================================================
-   REPORT (BÁO CÁO)
-   ======================================================= */
-.report-date-bar {
+/* ============================================================
+   REPORT.CSS - Tab Báo Cáo (Report View)
+   POS Cafe - Hỗ trợ iPad/iPhone/Tablet ngang-dọc
+   ============================================================ */
+
+.report-controls {
     display: flex;
     align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    background: var(--surface);
+    padding: 8px 12px;
+    border-radius: 60px;
+    border: 1px solid var(--border);
+}
+
+.report-stats { display: flex; flex-direction: column; gap: 12px; }
+
+/* Layout: reportStats + reconciliationArea */
+.report-layout {
+    display: flex;
+    flex-direction: column;
     gap: 12px;
+}
+
+/* Nút toggle đối soát trên mobile */
+.recon-toggle-btn {
+    display: none;
+    width: 100%;
+    padding: 10px 16px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 60px;
-    padding: 6px 12px;
-    margin-bottom: 20px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    -webkit-appearance: none;
+    color: var(--text);
 }
-.report-date-display {
-    flex: 1;
-    text-align: center;
-    font-weight: 500;
-}
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-}
+.recon-toggle-btn:active { opacity: 0.7; }
+.recon-toggle-btn .toggle-icon { float: right; }
+
 .stat-card {
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 14px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.stat-icon {
-    width: 40px;
-    height: 40px;
-    background: #f8fafc;
-    border-radius: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-}
-.stat-label {
-    font-size: 11px;
-    color: var(--text-secondary);
-}
-.stat-value {
-    font-size: 13px;
-    font-weight: 500;
-}
-.stat-amount {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--primary);
-    margin-top: 2px;
-}
-.summary-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius);
     padding: 16px;
-    margin-bottom: 16px;
+    border: 1px solid var(--border);
 }
-.summary-title {
-    font-weight: 600;
-    margin-bottom: 12px;
-}
-.summary-row {
+
+.stat-row {
     display: flex;
     justify-content: space-between;
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
 }
-.summary-highlight {
-    font-weight: 600;
-    color: var(--primary);
+
+.stat-row:last-child { border-bottom: none; }
+.stat-value.primary { color: var(--primary); font-weight: 700; }
+.stat-value.success { color: var(--success); }
+
+/* Daily balance form */
+.daily-balance-form {
+    margin-top: 20px;
+    padding: 12px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
 }
-.export-btn {
-    width: 100%;
+
+.balance-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.balance-row label {
+    font-weight: 500;
+    font-size: 14px;
+    flex: 1;
+    min-width: 180px;
+}
+
+.balance-input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 40px;
+    font-size: 14px;
+    background: var(--surface);
+    min-width: 120px;
+    -webkit-appearance: none;
+}
+
+#actualCashInput {
+    font-weight: bold;
+    font-size: 18px;
+    color: #f97316;
+    background: #fff7ed;
+}
+
+.btn-submit-balance {
     background: var(--primary);
     color: white;
     border: none;
+    padding: 10px 20px;
     border-radius: 40px;
-    padding: 14px;
     font-weight: 600;
-    margin-top: 8px;
     cursor: pointer;
+    -webkit-appearance: none;
+}
+
+.btn-submit-balance:active {
+    transform: scale(0.96);
+    background: var(--primary-dark);
+}
+
+.balance-note {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* ===== ĐỐI SOÁT QUỸ (RECONCILIATION) ===== */
+.reconciliation-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid var(--border);
+    margin-top: 12px;
+}
+
+.recon-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--text);
+}
+
+.recon-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+}
+
+
+.recon-expense { color: var(--danger); }
+.recon-pickup-amount { font-weight: 600; }
+
+.recon-pickup-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    margin-left: 6px;
+    opacity: 0.7;
+}
+
+.recon-pickup-btn:hover { opacity: 1; }
+
+.recon-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+}
+
+.recon-formula {
+    background: var(--bg);
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.recon-formula-label {
+    font-weight: 700;
+    color: var(--text);
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.recon-formula-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.recon-formula-text span {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.recon-formula-text span b {
+    color: var(--text);
+    font-weight: 600;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+.recon-formula-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.recon-formula-result {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--primary);
+}
+
+.recon-formula-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    padding: 6px 8px;
+    background: var(--surface);
+    border-radius: 6px;
+    margin: 4px 0;
+}
+
+.recon-formula-op {
+    color: var(--primary);
+    font-weight: 700;
+    margin: 0 2px;
+}
+
+.recon-input-row {
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg);
+    border-radius: 8px;
+}
+
+.recon-input-row label {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: var(--text);
+}
+
+.recon-input-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.recon-input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 2px solid var(--border);
+    border-radius: 40px;
+    font-size: 16px;
+    font-weight: 700;
+    background: var(--surface);
+    min-width: 120px;
+    -webkit-appearance: none;
+    color: var(--text);
+}
+
+.recon-input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+
+.recon-save-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 40px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    -webkit-appearance: none;
+}
+
+.recon-save-btn:active { transform: scale(0.96); }
+.recon-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.recon-result {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--bg);
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    flex-wrap: nowrap !important;
+    flex-direction: row !important;
+    justify-content: flex-start !important;
+    width: 100%;
+}
+
+.recon-result.ok { border-left: 4px solid #10b981; }
+.recon-result.warning { border-left: 4px solid #f59e0b; }
+.recon-result.error { border-left: 4px solid #ef4444; }
+
+.recon-result-row {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px;
+    font-size: 13px;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+}
+
+.recon-result-row span:first-child {
+    color: var(--text-secondary);
+}
+
+.recon-positive { color: #10b981; font-weight: 700; }
+.recon-negative { color: #ef4444; font-weight: 700; }
+
+.recon-status {
+    font-weight: 700;
+    font-size: 13px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap !important;
+    margin-left: auto !important;
+    flex-shrink: 0 !important;
+}
+
+.recon-actions {
+    margin-top: 12px;
+    text-align: center;
+}
+
+.recon-close-btn {
+    background: var(--danger);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 40px;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+    width: 100%;
+    -webkit-appearance: none;
+}
+
+.recon-close-btn:active { transform: scale(0.96); }
+
+.recon-closed-badge {
+    padding: 10px;
+    background: var(--bg);
+    border-radius: 40px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+/* ===== RESPONSIVE - TỐI ƯU MOBILE/TABLET ===== */
+
+/* Mobile (< 600px) - Đối soát trên cùng, có nút toggle */
+@media (max-width: 600px) {
+    .report-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 40px;
+    }
+    .report-controls button {
+        font-size: 13px;
+        padding: 6px 12px;
+    }
+    .report-controls span {
+        font-size: 14px;
+    }
+    .stat-card { padding: 10px; }
+    .stat-row { font-size: 13px; padding: 6px 0; }
+    .recon-row { font-size: 13px; padding: 6px 0; }
+    .recon-formula { font-size: 11px; padding: 8px 10px; }
+    .recon-input-row { padding: 10px; }
+    .recon-input-row label { font-size: 13px; }
+    .recon-result { padding: 8px 10px; gap: 8px !important; }
+    .recon-result-row { font-size: 12px; }
+    .recon-status { font-size: 12px; padding: 2px 8px; }
+    .recon-title { font-size: 15px; }
+    .reconciliation-card { padding: 12px; }
+    
+    /* Nút toggle đối soát */
+    .recon-toggle-btn { display: block; }
+    
+    /* Mặc định ẩn #reconciliationArea trên mobile, toggle để hiện */
+    #reconciliationArea {
+        display: none;
+    }
+    #reconciliationArea.recon-visible {
+        display: block;
+    }
+    
+    /* === GỘP INPUT + LƯU + CHỐT TRÊN 1 DÒNG === */
+    .recon-input-group {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
+    }
+    .recon-input-group .recon-input {
+        flex: 1 1 auto !important;
+        min-width: 40px !important;
+        width: 0 !important;
+        font-size: 14px !important;
+        padding: 6px 8px !important;
+    }
+    .recon-input-group .recon-save-btn {
+        flex: 0 0 auto !important;
+        min-width: 36px !important;
+        width: auto !important;
+        font-size: 16px !important;
+        padding: 6px 10px !important;
+        text-align: center !important;
+    }
+    .recon-input-group .recon-close-btn {
+        flex: 0 0 auto !important;
+        min-width: 36px !important;
+        width: auto !important;
+        font-size: 16px !important;
+        padding: 6px 10px !important;
+        text-align: center !important;
+    }
+}
+
+/* Tablet dọc (601px - 900px) */
+@media (min-width: 601px) and (max-width: 900px) and (orientation: portrait) {
+    .report-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .report-stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    .stat-card { padding: 14px; }
+    .stat-row { font-size: 14px; }
+    .recon-row { font-size: 14px; }
+    .recon-input { font-size: 15px; }
+}
+
+/* Tablet ngang (768px - 1024px) - 2 cột cố định, không cuộn */
+@media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) {
+    /* Ẩn nút toggle trên tablet */
+    .recon-toggle-btn { display: none !important; }
+    
+    /* Viewport cố định, không cuộn */
+    /* FIX: Thêm .tab-content.active để không bị ghi đè bởi .tab-content { display:none } */
+    #reportView.tab-content.active {
+        height: calc(100vh - 70px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    .report-controls {
+        flex-shrink: 0;
+        margin-bottom: 8px;
+    }
+    .report-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        flex: 1;
+        overflow: hidden;
+    }
+    .report-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+    }
+    .stat-card { padding: 10px; }
+    .stat-row { font-size: 13px; padding: 5px 0; }
+    #reconciliationArea {
+        overflow-y: auto;
+    }
+}
+
+/* Desktop (>= 1025px) */
+@media (min-width: 1025px) {
+    /* Ẩn nút toggle trên desktop */
+    .recon-toggle-btn { display: none !important; }
+    
+    .report-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+    .report-stats {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .daily-balance-form { max-width: 600px; }
+    #reconciliationArea {
+        position: sticky;
+        top: 10px;
+    }
 }

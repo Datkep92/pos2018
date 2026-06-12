@@ -1,366 +1,217 @@
-/* =======================================================
-   CUSTOMERS (KHÁCH HÀNG)
-   ======================================================= */
-.customer-search-bar {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-}
+/* ============================================================
+   CUSTOMERS.CSS - Tab Khách (Customers View)
+   POS Cafe - Hỗ trợ iPad/iPhone/Tablet ngang-dọc
+   ============================================================ */
+
+.customer-header { margin-bottom: 16px; }
+
 .debt-summary {
-    background: #f8fafc;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    background: var(--surface);
+    border-radius: var(--radius);
     padding: 12px 16px;
     display: flex;
     justify-content: space-between;
     font-weight: 600;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+}
+
+.customer-search-bar {
+    display: flex;
+    gap: 10px;
     margin-bottom: 16px;
 }
-.customer-list-container {
+
+.search-input {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 14px;
+    background: var(--surface);
+    -webkit-appearance: none;
+}
+
+.btn-add-customer {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    padding: 0 18px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-appearance: none;
+    white-space: nowrap;
+}
+
+.customer-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
+
 .customer-card {
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 14px;
+    border-radius: var(--radius);
+    padding: 12px;
     display: flex;
     align-items: center;
     gap: 12px;
+    border: 1px solid var(--border);
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
 }
+
+.customer-card:active {
+    transform: scale(0.99);
+    background: #f8fafc;
+}
+
 .customer-avatar {
     width: 44px;
     height: 44px;
-    background: #eef2ff;
-    border-radius: 40px;
+    background: #fff7ed;
+    border-radius: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
     font-size: 18px;
     color: var(--primary);
-}
-.customer-info {
-    flex: 1;
-}
-.customer-name {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-.customer-contact {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-.customer-debt {
-    font-weight: 600;
-}
-.has-debt { color: var(--danger); }
-.has-credit { color: var(--success); }
-.no-debt { color: var(--text-secondary); }
-
-/* ========== CUSTOMERS SEARCH BAR ========== */
-.customer-search-bar {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
-    align-items: center;
-}
-.customer-search-bar input {
-    flex: 3;
-    min-height: 48px;
-    border: 1px solid var(--border);
-    border-radius: 48px;
-    padding: 0 16px;
-    font-size: 15px;
-    background: var(--surface);
-    transition: border 0.1s;
-}
-.customer-search-bar input:focus {
-    outline: none;
-    border-color: var(--primary);
-}
-.customer-search-bar .btn-add-customer {
-    flex: 1;
-    min-height: 48px;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 48px;
-    font-weight: 600;
-    font-size: 15px;
-    cursor: pointer;
-    transition: transform 0.1s, background 0.1s;
-}
-.customer-search-bar .btn-add-customer:active {
-    transform: scale(0.97);
-    background: var(--primary-dark);
-}
-
-/* Cải thiện hiển thị giao dịch trong modal chi tiết khách */
-.tx-item {
-    background: var(--surface);
-    border-left: 4px solid var(--primary);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 8px;
-}
-.tx-date-amount {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.tx-date {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-.tx-amount {
-    font-size: 16px;
-    font-weight: 700;
-}
-.tx-amount.positive {
-    color: var(--danger);
-}
-.tx-amount.negative {
-    color: var(--success);
-}
-.tx-note {
-    font-size: 13px;
-    color: var(--text);
-    margin-bottom: 8px;
-    line-height: 1.4;
-    word-break: break-word;
-}
-.tx-balance {
-    font-size: 12px;
-    font-weight: 600;
-    padding-top: 6px;
-    border-top: 1px dashed var(--border);
-    color: var(--primary-dark);
-}
-
-/* Customer search bar */
-.customer-search-bar {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-.customer-search-bar input {
-    flex: 1;
-    min-height: 44px;
-    border: 1px solid var(--border);
-    border-radius: 40px;
-    padding: 0 16px;
-    font-size: 14px;
-    background: var(--surface);
-}
-.customer-search-bar .btn-add-customer {
     flex-shrink: 0;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 40px;
-    padding: 0 20px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.1s;
-}
-.customer-search-bar .btn-add-customer:active {
-    transform: scale(0.96);
 }
 
-/* ========== MODAL CHI TIẾT KHÁCH HÀNG ========== */
-#customerDetailModal .modal-content {
-    max-width: 600px;
-    width: 90%;
+.customer-info { flex: 1; min-width: 0; }
+.customer-name { font-weight: 600; margin-bottom: 4px; }
+.customer-phone { font-size: 12px; color: var(--text-secondary); }
+.customer-debt { font-weight: 700; color: var(--danger); white-space: nowrap; }
+
+/* Responsive */
+@media (max-width: 480px) {
+    .customer-card { padding: 10px; gap: 10px; }
+    .customer-avatar { width: 38px; height: 38px; font-size: 16px; }
+    .customer-name { font-size: 13px; }
 }
-.debt-summary-simple {
-    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-    color: white;
-    border-radius: var(--radius-md);
-    padding: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 20px;
+
+/* Tablet dọc */
+@media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
+    .customer-card { padding: 14px; }
+    .customer-avatar { width: 48px; height: 48px; font-size: 20px; }
 }
-.debt-total {
-    font-size: 24px;
-    font-weight: 700;
+
+/* Tablet ngang */
+@media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) {
+    .customer-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .customer-card { padding: 14px; }
 }
-.debt-label {
-    font-size: 14px;
-    opacity: 0.9;
+
+/* Desktop */
+@media (min-width: 1025px) {
+    .customer-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .customer-card { padding: 16px; }
 }
-.history-list-simple {
-    max-height: 480px;
+
+/* ===== CUSTOMER SELECTOR (MODAL) ===== */
+.customer-selector-list {
+    max-height: 45vh;
     overflow-y: auto;
-    margin-bottom: 20px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-}
-.tx-item {
-    background: var(--surface);
-    border-left: 4px solid var(--primary);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    box-shadow: var(--shadow-sm);
-}
-.tx-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
     gap: 8px;
-}
-.tx-date {
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-.tx-amount {
-    font-size: 16px;
-    font-weight: 700;
-}
-.tx-amount.positive {
-    color: var(--danger);
-}
-.tx-amount.negative {
-    color: var(--success);
-}
-.tx-note {
-    font-size: 13px;
-    color: var(--text);
-    margin: 8px 0;
-    word-break: break-word;
-}
-.tx-balance {
-    font-size: 12px;
-    font-weight: 600;
-    padding-top: 8px;
-    margin-top: 8px;
-    border-top: 1px solid var(--border);
-}
-.tx-balance.debt {
-    color: var(--danger);
-}
-.tx-balance.no-debt {
-    color: var(--success);
-}
-.tx-balance.credit {
-    color: var(--primary);
+    -webkit-overflow-scrolling: touch;
 }
 
-/* ========== CHI TIẾT KHÁCH HÀNG ========== */
-.tx-item {
-    background: var(--surface);
-    border-left: 4px solid var(--primary);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 10px;
-    box-shadow: var(--shadow-sm);
-}
-.tx-header {
+.customer-select-item {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 8px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.1s;
 }
-.tx-date {
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 500;
+
+.customer-select-item:active {
+    background: #f1f5f9;
+    transform: scale(0.99);
 }
-.tx-amount {
-    font-size: 16px;
+
+.customer-select-item .customer-avatar {
+    width: 44px;
+    height: 44px;
+    background: #fff7ed;
+    border-radius: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 700;
-}
-.tx-amount.positive {
-    color: var(--danger);
-}
-.tx-amount.negative {
-    color: var(--success);
-}
-.tx-note {
-    font-size: 13px;
-    color: var(--text);
-    margin: 8px 0;
-    word-break: break-word;
-}
-.tx-balance {
-    font-size: 12px;
-    font-weight: 600;
-    padding-top: 8px;
-    margin-top: 8px;
-    border-top: 1px solid var(--border);
-}
-.tx-balance.debt {
-    color: var(--danger);
-}
-.tx-balance.no-debt {
-    color: var(--success);
-}
-.tx-balance.credit {
+    font-size: 18px;
     color: var(--primary);
+    flex-shrink: 0;
 }
-.btn-pay-simple {
-    width: 100%;
-    background: var(--success);
+
+.customer-select-item > div:last-child { flex: 1; }
+.customer-select-item > div:last-child > div:first-child { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+.customer-select-item > div:last-child > div:last-child { font-size: 11px; color: var(--text-secondary); }
+
+.btn-create-customer {
+    background: var(--primary);
     color: white;
     border: none;
-    border-radius: 40px;
     padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    margin-top: 4px;
+    -webkit-appearance: none;
+}
+
+.btn-create-customer:active {
+    background: var(--primary-dark);
+    transform: scale(0.98);
+}
+
+/* ===== CUSTOMER DETAIL MODAL ===== */
+#customerDetailModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+    background: var(--surface);
+    border-radius: 20px;
+    overflow: hidden;
+}
+#customerDetailModal .modal-body { padding: 16px; }
+#customerDetailModal .debt-summary {
+    background: #fff7ed;
+    padding: 12px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+}
+#customerDetailModal .btn-save {
+    background: var(--primary);
+    color: white;
+    padding: 10px;
+    border-radius: 40px;
+    width: 100%;
+    border: none;
     font-weight: 600;
     margin-bottom: 16px;
     cursor: pointer;
-    transition: transform 0.1s;
 }
-.btn-pay-simple:active {
-    transform: scale(0.98);
+#customerDetailModal .cart-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
 }
-.btn-close-simple {
-    width: 100%;
-    background: #f1f5f9;
-    color: var(--text-secondary);
-    border: none;
-    border-radius: 40px;
-    padding: 12px;
-    font-weight: 600;
-    margin-top: 8px;
-    cursor: pointer;
-    transition: transform 0.1s;
-}
-.btn-close-simple:active {
-    transform: scale(0.98);
-}
-.history-list-simple {
-    max-height: 480px;
-    overflow-y: auto;
-    margin: 16px 0;
-}
-
-/* Nút Hoàn thành (hủy) nằm sát lề phải */
-.history-info-row .history-action {
-    margin-left: auto;
-}
-.btn-refund-small {
-    background: var(--success);
-    color: white;
-    border: none;
-    border-radius: 30px;
-    padding: 4px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
+#customerDetailModal .cost-history-title {
+    font-weight: 700;
+    margin: 12px 0 8px;
 }

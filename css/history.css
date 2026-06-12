@@ -1,96 +1,481 @@
-/* =======================================================
-   HISTORY (LỊCH SỬ)
-   ======================================================= */
-.history-date-row {
+/* ============================================================
+   HISTORY.CSS - Tab Lịch Sử (History View)
+   POS Cafe - Hỗ trợ iPad/iPhone/Tablet ngang-dọc
+   ============================================================ */
+
+.history-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    background: var(--surface);
+    padding: 8px 12px;
+    border-radius: 60px;
+    border: 1px solid var(--border);
+}
+
+.date-display { flex: 1; text-align: center; font-weight: 500; }
+
+.filter-select {
+    padding: 8px 12px;
+    border-radius: 30px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 13px;
+    -webkit-appearance: none;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.history-item {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    cursor: pointer;
+    transition: background 0.1s;
+    margin-bottom: 10px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.history-item:active {
+    background: #f8fafc;
+    transform: scale(0.99);
+}
+
+.history-item.refunded {
+    border-left-color: #ef4444;
+    opacity: 0.9;
+}
+
+.history-line1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.history-time {
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 48px;
+}
+
+.history-location { color: var(--text); }
+
+.history-table-time {
+    font-size: 11px;
+    color: #f59e0b;
+    background: #fef3c7;
+    padding: 1px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.history-method {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #f1f5f9;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.history-line2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.history-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-refund {
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-appearance: none;
+}
+
+.history-expand {
+    font-size: 12px;
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.history-amount {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--success);
+}
+
+.refunded-amount {
+    color: var(--danger);
+    text-decoration: line-through;
+}
+
+.history-note {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .history-controls { padding: 6px 10px; gap: 6px; }
+    .history-item { padding: 12px; }
+    .history-amount { font-size: 15px; }
+    .history-line1 { font-size: 12px; gap: 6px; }
+}
+
+/* Tablet dọc */
+@media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
+    .history-item { padding: 16px; }
+}
+
+/* Tablet ngang */
+@media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) {
+    .history-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .history-item { margin-bottom: 0; }
+}
+
+/* Desktop */
+@media (min-width: 1025px) {
+    .history-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .history-item { margin-bottom: 0; }
+}
+
+/* ===== HISTORY DATE GROUP ===== */
+.history-date-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.history-date-group {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.history-date-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: #f8fafc;
+    cursor: pointer;
+}
+.history-date-title { font-weight: 600; }
+.history-date-summary { display: flex; align-items: center; gap: 8px; }
+.history-date-amount { font-weight: 700; color: var(--primary); }
+.history-date-items { padding: 8px; border-top: 1px solid var(--border); }
+.history-date-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+    cursor: pointer;
+}
+.history-date-item:active { background: #f1f5f9; }
+.history-date-item-time { font-size: 12px; }
+.history-date-item-amount { font-weight: 700; }
+/* ============================================================
+   HISTORY.CSS - Tab Lịch Sử (History View)
+   Sắp xếp 1 cột, giao dịch gần nhất ở trên cùng
+   ============================================================ */
+
+.history-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    background: var(--surface);
+    padding: 8px 12px;
+    border-radius: 60px;
+    border: 1px solid var(--border);
+}
+
+.date-display { 
+    flex: 1; 
+    text-align: center; 
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.filter-select {
+    padding: 8px 12px;
+    border-radius: 30px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 13px;
+    -webkit-appearance: none;
+}
+
+/* ===== HISTORY LIST - 1 CỘT, GẦN NHẤT Ở TRÊN ===== */
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ===== HISTORY ITEM ===== */
+.history-item {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    cursor: pointer;
+    transition: all 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.history-item:active {
+    background: #f8fafc;
+    transform: scale(0.99);
+}
+
+/* Giao dịch đã hủy */
+.history-item.refunded {
+    border-left-color: #ef4444;
+    opacity: 0.85;
+}
+
+/* Ghi nợ (mua chịu) - màu cam */
+.history-item.debt-record {
+    border-left-color: #f59e0b;
+    background: #fffbeb;
+}
+
+/* Thanh toán nợ (trả tiền) - màu xanh dương */
+.history-item.debt-payment {
+    border-left-color: #3b82f6;
+    background: #eff6ff;
+}
+
+/* DÒNG 1 */
+.history-line1 {
     display: flex;
     align-items: center;
     gap: 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 60px;
-    padding: 4px 8px;
-    margin-bottom: 20px;
-}
-.date-display {
-    flex: 1;
-    text-align: center;
-    font-weight: 600;
-    font-size: 14px;
-    background: #f8fafc;
-    padding: 8px;
-    border-radius: 30px;
-}
-.history-filter-row {
-    margin-bottom: 16px;
-}
-.history-select {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-}
-.history-list-container {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-.history-item {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 4px solid transparent;
-    border-radius: 16px;
-    padding: 14px;
-}
-.history-item.dinein { border-left-color: var(--primary); }
-.history-item.takeaway { border-left-color: var(--warning); }
-.history-item.debt_payment { border-left-color: var(--success); }
-.history-item.refund { border-left-color: var(--danger); background: #fef2f2; }
-.history-item.refunded { border-left-color: #94a3b8; background: #f8fafc; opacity: 0.9; }
-.history-header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 8px;
-}
-.history-amount {
-    font-weight: 700;
-    color: var(--danger);
-}
-.history-amount.text-success { color: var(--success); }
-.history-info-row {
-    display: flex;
     flex-wrap: wrap;
-    gap: 12px;
     margin-bottom: 10px;
+    font-size: 13px;
 }
-.history-type, .history-payment {
-    font-size: 12px;
-    padding: 4px 8px;
+
+.history-time {
+    font-weight: 600;
+    color: var(--text-secondary);
     background: #f1f5f9;
-    border-radius: 30px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    min-width: 70px;
+    text-align: center;
 }
-.history-detail {
+
+.history-location {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.history-item-count {
     font-size: 12px;
     color: var(--text-secondary);
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 20px;
 }
-.refund-reason {
-    background: #fef2f2;
-    padding: 8px;
-    border-radius: var(--radius-sm);
-    margin-top: 8px;
+
+.history-method {
     font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #f1f5f9;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
-.btn-refund-small {
-    background: var(--success);
+
+.history-method.refunded-method {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.history-method.debt-record-method {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.history-method.debt-payment-method {
+    background: #dbeafe;
+    color: #2563eb;
+}
+
+/* DÒNG 2 */
+.history-line2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.history-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn-refund {
+    background: #ef4444;
     color: white;
     border: none;
-    border-radius: 30px;
+    border-radius: 20px;
     padding: 4px 12px;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 11px;
+    font-weight: 600;
     cursor: pointer;
+    -webkit-appearance: none;
+    transition: all 0.1s ease;
+}
+
+.btn-refund:active {
+    transform: scale(0.95);
+    background: #dc2626;
+}
+
+.history-expand {
+    font-size: 12px;
+    color: var(--primary);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.history-amount {
+    font-size: 18px;
+    font-weight: 700;
+    color: #10b981;
+}
+
+.refunded-amount {
+    color: #ef4444;
+    text-decoration: line-through;
+}
+
+/* Ghi nợ (mua chịu) - màu cam */
+.history-amount.debt-record-amount {
+    color: #d97706;
+}
+
+/* Thanh toán nợ (trả tiền) - màu xanh dương */
+.history-amount.debt-payment-amount {
+    color: #2563eb;
+}
+
+/* Tên khách hàng trong history */
+.history-customer {
+    font-size: 12px;
+    color: #64748b;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+/* Trạng thái rỗng */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+}
+
+/* ===== RESPONSIVE ===== */
+
+/* Mobile nhỏ */
+@media (max-width: 480px) {
+    .history-controls { 
+        padding: 6px 10px; 
+        gap: 6px; 
+    }
+    
+    .history-item { 
+        padding: 12px; 
+    }
+    
+    .history-amount { 
+        font-size: 16px; 
+    }
+    
+    .history-line1 { 
+        font-size: 11px; 
+        gap: 6px; 
+    }
+    
+    .history-time {
+        font-size: 11px;
+        min-width: 60px;
+    }
+    
+    .btn-refund {
+        padding: 3px 8px;
+        font-size: 10px;
+    }
+    
+    .history-expand {
+        font-size: 11px;
+    }
+}
+
+/* Tablet dọc - vẫn 1 cột */
+@media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
+    .history-item { 
+        padding: 16px; 
+    }
+    
+    .history-line1 {
+        font-size: 14px;
+    }
+    
+    .history-amount {
+        font-size: 20px;
+    }
+}
+
+/* Tablet ngang - CÓ THỂ 2 CỘT (tùy chọn) */
+@media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) {
+    /* Muốn giữ 1 cột thì comment 2 dòng dưới */
+    /* .history-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .history-item { margin-bottom: 0; } */
+    
+    /* Hoặc giữ 1 cột cho đơn giản */
+    .history-list {
+        display: flex;
+        flex-direction: column;
+    }
+}
+
+/* Desktop - giữ 1 cột */
+@media (min-width: 1025px) {
+    .history-list {
+        max-width: 800px;
+        margin: 0 auto;
+    }
 }
