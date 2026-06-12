@@ -93,12 +93,12 @@ body {
 .header {
     background: #1e293b;
     color: white;
-    padding: 0 16px;
+    padding: 0 12px;               /* giảm padding ngang từ 16px xuống 12px */
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
-    height: var(--header-h);
+    height: 44px;                  /* thay đổi từ var(--header-h) hoặc 56px xuống 44px */
     position: fixed;
     bottom: 0;
     left: 0;
@@ -107,42 +107,38 @@ body {
     padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-.logo {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+.logo-icon { 
+    font-size: 16px;              /* giảm từ 20px xuống 16px */
 }
 
-.logo-icon { font-size: 20px; }
-.logo-text { font-weight: 600; font-size: 14px; }
-.staff-name { font-size: 12px; opacity: 0.9; }
+.logo-text { 
+    font-weight: 600; 
+    font-size: 12px;              /* giảm từ 14px xuống 12px */
+}
 
-.header-center {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
+.staff-name { 
+    font-size: 10px;              /* giảm từ 12px xuống 10px */
+    opacity: 0.9;
 }
 
 .header-date {
-    font-size: 12px;
+    font-size: 10px;              /* giảm từ 12px xuống 10px */
     color: #94a3b8;
     font-weight: 400;
     text-align: center;
 }
 
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
 .time {
     background: rgba(255,255,255,0.15);
-    padding: 4px 10px;
+    padding: 2px 8px;             /* giảm từ 4px 10px xuống 2px 8px */
     border-radius: 20px;
-    font-size: 12px;
+    font-size: 10px;              /* giảm từ 12px xuống 10px */
     font-weight: 500;
+}
+
+.logout-link {
+    font-size: 9px !important;    /* giảm từ 11px xuống 9px */
+    margin-left: 4px !important;  /* giảm từ 8px xuống 4px */
 }
 
 /* ========== MAIN TABS (POS: chỉ 3 tab) ========== */
@@ -168,7 +164,6 @@ body {
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.2s;
     border: none;
     -webkit-appearance: none;
     user-select: none;
@@ -181,7 +176,7 @@ body {
 }
 
 .tab-btn:active {
-    transform: scale(0.96);
+    background: #e2e8f0;
 }
 
 /* ========== MAIN CONTENT ========== */
@@ -295,32 +290,39 @@ body {
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
-    padding: 6px 4px;
+    padding: 4px 6px;              /* giảm padding từ 6px 8px xuống 4px 6px */
     border-bottom: 1px solid #334155;
     transition: background 0.15s;
     border-radius: 6px;
-    margin: 0 -4px;
-    padding: 6px 8px;
+    gap: 4px;                      /* thêm gap để kiểm soát khoảng cách giữa các phần tử */
 }
 
-.recent-toast-item:hover { background: #334155; }
-.recent-toast-item:active { background: #475569; transform: scale(0.98); }
-.recent-toast-item:last-child { border-bottom: none; }
+.toast-time {
+    color: #94a3b8;
+    min-width: 15px;               /* giảm từ 55px xuống 35px */
+    flex-shrink: 0;
+}
 
-.toast-time { color: #94a3b8; min-width: 55px; }
 .toast-info {
     flex: 1;
     color: #e2e8f0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin: 0 6px;
+    margin: 0 2px;                 /* giảm từ 6px xuống 2px */
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;                      /* giảm từ 4px xuống 2px */
 }
-.toast-amount { font-weight: 700; color: #f97316; }
 
+.toast-amount {
+    font-weight: 700;
+    color: #f97316;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 50px;               /* thêm min-width để số tiền thẳng hàng */
+    text-align: right;
+}
 /* ========== FORM ELEMENTS ========== */
 .form-input {
     width: 100%;
@@ -360,7 +362,6 @@ body {
 
 .btn-save:active {
     background: var(--primary-dark);
-    transform: scale(0.98);
 }
 
 .btn-cancel {
@@ -408,7 +409,6 @@ body {
     box-shadow: 0 4px 20px rgba(249, 115, 22, 0.15);
     cursor: pointer;
     pointer-events: auto;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
     border-left: 3px solid var(--primary);
     animation: bubbleIn 0.3s ease-out;
 }
@@ -420,8 +420,7 @@ body {
 }
 
 .draft-bubble:active {
-    transform: scale(0.96);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    background: #fff7ed;
 }
 
 .draft-bubble-header {
@@ -464,7 +463,7 @@ body {
 }
 
 .draft-bubble-close:hover { opacity: 1; }
-.draft-bubble-close:active { background: #fecaca; color: #dc2626; transform: scale(0.9); }
+.draft-bubble-close:active { background: #fecaca; color: #dc2626; }
 
 .draft-bubble-body {
     display: flex;
@@ -501,7 +500,6 @@ body {
 .action-btn.btn-draft:active,
 .header-action-btn.btn-draft:active {
     background: #7c3aed;
-    transform: scale(0.97);
 }
 
 /* Responsive cho draft bubbles */
@@ -599,7 +597,7 @@ body {
     -webkit-appearance: none;
 }
 
-.auth-btn:active { background: var(--primary-dark); transform: scale(0.98); }
+.auth-btn:active { background: var(--primary-dark); }
 
 .auth-error { color: var(--danger); font-size: 13px; margin-bottom: 12px; text-align: center; }
 
@@ -856,7 +854,7 @@ body.modal-open {
     -webkit-appearance: none;
 }
 
-.split-qty-btn:active { background: #f1f5f9; transform: scale(0.9); }
+.split-qty-btn:active { background: #f1f5f9; }
 
 .split-qty-value {
     font-weight: 700;
@@ -925,7 +923,6 @@ body.modal-open {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     cursor: pointer;
-    transition: all 0.1s;
     text-align: center;
     min-height: 56px;
     height: 60px;
@@ -935,7 +932,6 @@ body.modal-open {
 
 .cus-grid-item:active {
     background: #f1f5f9;
-    transform: scale(0.95);
     border-color: var(--primary);
 }
 
@@ -1015,7 +1011,6 @@ body.modal-open {
 
 .cus-sel-create-btn:active {
     background: var(--primary-dark);
-    transform: scale(0.97);
 }
 
 .cus-sel-body {
@@ -1190,7 +1185,6 @@ body.modal-open {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s;
     -webkit-appearance: none;
     padding: 0;
     line-height: 1;
@@ -1203,7 +1197,9 @@ body.modal-open {
 }
 
 .cart-item-content .cart-qty-btn:active {
-    transform: scale(0.9);
+    background: #f97316;
+    color: white;
+    border-color: #f97316;
 }
 
 /* Số lượng */
@@ -1246,7 +1242,6 @@ body.modal-open {
     cursor: pointer;
     text-align: center;
     -webkit-appearance: none;
-    transition: all 0.15s;
     white-space: nowrap;
     min-width: 0;
 }
@@ -1255,7 +1250,6 @@ body.modal-open {
     background: #f97316;
     color: white;
     border-color: #f97316;
-    transform: scale(0.95);
 }
 
 /* Nút Tùy chỉnh trong denom-actions */
@@ -1373,13 +1367,11 @@ body.modal-open {
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
-    transition: background 0.1s;
     -webkit-appearance: none;
     text-align: center;
 }
 #tableDetailModal .cart-item .cart-item-delete:active {
     background: #fef2f2;
-    transform: scale(0.9);
 }
 
 /* Tổng tiền + SL */
@@ -1439,7 +1431,6 @@ body.modal-open {
     font-weight: 600;
     text-align: center;
     cursor: pointer;
-    transition: 0.2s;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1605,7 +1596,6 @@ body.modal-open {
     margin: 4px 8px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s;
     text-align: center;
 }
 
@@ -1613,7 +1603,7 @@ body.modal-open {
 .category-item span:last-child { font-size: 11px; font-weight: 500; color: #475569; }
 .category-item.active { background: #f97316; }
 .category-item.active span:last-child { color: white; }
-.category-item:hover:not(.active) { background: #e2e8f0; }
+.category-item:active { background: #e2e8f0; }
 
 /* CỘT 2: MENU */
 .order-menu-column {
@@ -1638,7 +1628,6 @@ body.modal-open {
     padding: 12px 8px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
     border: 1px solid #e2e8f0;
     height: 80px;
     display: flex;
@@ -1648,16 +1637,14 @@ body.modal-open {
     box-sizing: border-box;
 }
 
-.menu-card:hover {
+.menu-card:active {
     background: #f97316;
     color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
 }
 
 .menu-card .menu-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .menu-card .menu-price { font-size: 12px; color: #f97316; }
-.menu-card:hover .menu-price { color: white; }
+.menu-card:active .menu-price { color: white; }
 
 /* Kéo thả sắp xếp món - dùng mouse/touch events thuần */
 .menu-card.dragging, .menu-item-variant.dragging {
@@ -1669,8 +1656,6 @@ body.modal-open {
     outline: 2px solid #f97316;
     outline-offset: -2px;
     background: #fff7ed !important;
-    transform: scale(1.03);
-    transition: transform 0.1s;
 }
 .menu-grid.drag-active .menu-card,
 .menu-grid.drag-active .menu-item-variant {
@@ -1681,6 +1666,40 @@ body.modal-open {
 .menu-grid.drag-active .menu-card:active,
 .menu-grid.drag-active .menu-item-variant:active {
     cursor: grabbing;
+}
+
+/* Kéo thả sắp xếp danh mục */
+.category-item.dragging {
+    opacity: 0.4;
+    outline: 2px dashed #f97316;
+    outline-offset: -2px;
+}
+.category-item.drag-over {
+    outline: 2px solid #f97316;
+    outline-offset: -2px;
+    background: #fff7ed !important;
+}
+.order-categories-column.drag-active .category-item {
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.order-categories-column.drag-active .category-item:active {
+    cursor: grabbing;
+}
+/* Nút sắp xếp danh mục */
+.category-sort-btn {
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 4px;
+    padding-bottom: 10px;
+    font-size: 12px;
+    color: #f97316;
+    cursor: pointer;
+}
+.category-sort-btn.active {
+    background: #fff7ed;
+    color: #ea580c;
+    font-weight: 700;
 }
 
 /* CỘT 3: GIỎ HÀNG */
@@ -1743,7 +1762,7 @@ body.modal-open {
     -webkit-appearance: none;
 }
 
-.cart-item-qty-btn:active { background: #f1f5f9; transform: scale(0.9); }
+.cart-item-qty-btn:active { background: #f1f5f9; }
 
 .cart-item-delete {
     width: 28px;
@@ -1760,7 +1779,7 @@ body.modal-open {
     -webkit-appearance: none;
 }
 
-.cart-item-delete:active { background: #fecaca; transform: scale(0.9); }
+.cart-item-delete:active { background: #fecaca; }
 
 .cart-total-section {
     flex: 0 0 auto;
@@ -1800,7 +1819,6 @@ body.modal-open {
     text-align: center;
 }
 
-.cart-action-buttons .action-btn:active { transform: scale(0.98); }
 
 .action-btn.btn-pay-now { background: #10b981; color: white; }
 .action-btn.btn-save-draft { background: #8b5cf6; color: white; }
@@ -1832,7 +1850,6 @@ body.modal-open {
     color: #5b21b6;
 }
 .cart-action-buttons .action-btn:active {
-    transform: scale(0.96);
     opacity: 0.85;
 }
 
@@ -1910,7 +1927,7 @@ body.modal-open {
 .tables-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
+    gap: 28px;
     padding: 12px;
 }
 
@@ -1926,7 +1943,6 @@ body.modal-open {
     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     border-left: 4px solid var(--primary);
     cursor: pointer;
-    transition: transform 0.1s;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -1934,8 +1950,6 @@ body.modal-open {
     user-select: none;
     -webkit-user-select: none;
 }
-
-.table-card:active { transform: scale(0.98); }
 .table-card.empty { border-left-color: var(--border); opacity: 0.85; }
 .table-card.paid { border-left-color: var(--success); opacity: 0.7; }
 .table-card.table-locked { border-left-color: #dc2626; background: #fef2f2; }
@@ -1995,14 +2009,13 @@ body.modal-open {
     background: #fff;
     border: 2px dashed #f97316;
     border-left: 4px solid #f97316;
-    transition: all 0.2s;
 }
 .table-create-btn:hover {
     background: #fff7ed;
     border-color: #ea580c;
 }
 .table-create-btn:active {
-    transform: scale(0.97);
+    background: #fff7ed;
 }
 .table-create-inner {
     display: flex;
@@ -2052,7 +2065,6 @@ body.modal-open {
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.1s, transform 0.1s;
     user-select: none;
     -webkit-user-select: none;
     border: none;
@@ -2062,17 +2074,9 @@ body.modal-open {
     padding: 0 6px;
 }
 .table-act-btn:active {
-    transform: scale(0.92);
+    opacity: 0.8;
 }
-/* Icon nhỏ: + và 🖨️ */
-.table-act-add {
-    background: var(--primary);
-    color: #fff;
-    font-size: 16px;
-    width: 28px;
-    padding: 0;
-    box-shadow: 0 1px 3px rgba(249,115,22,0.3);
-}
+
 .table-act-add:active { background: var(--primary-dark); }
 .table-act-print {
     background: #e2e8f0;
@@ -2223,7 +2227,7 @@ body.modal-open {
     -webkit-user-select: none;
 }
 
-.customer-card:active { transform: scale(0.99); background: #f8fafc; }
+.customer-card:active { background: #f8fafc; }
 
 .customer-avatar {
     width: 44px;
@@ -2369,7 +2373,7 @@ body.modal-open {
     -webkit-user-select: none;
 }
 
-.history-item:active { background: #f8fafc; transform: scale(0.99); }
+.history-item:active { background: #f8fafc; }
 .history-item.refunded { border-left-color: #ef4444; opacity: 0.9; }
 
 .history-line1 {
@@ -2486,8 +2490,8 @@ body.modal-open {
     #orderModal .modal-header .modal-title { font-size: 14px; white-space: nowrap; margin-left: auto; }
     #orderModal .modal-header .modal-close { font-size: 22px; order: -1; }
     #orderHeaderActions { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
-    #orderHeaderActions .header-action-btn { background: #f1f5f9; border: none; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.1s; -webkit-appearance: none; flex: 1; text-align: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    #orderHeaderActions .header-action-btn:active { transform: scale(0.96); }
+    #orderHeaderActions .header-action-btn { background: #f1f5f9; border: none; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; -webkit-appearance: none; flex: 1; text-align: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    #orderHeaderActions .header-action-btn:active { background: #e2e8f0; }
     #orderHeaderActions .header-action-btn.btn-total { background: #fef3c7; color: #92400e; font-weight: 700; flex: 0 0 auto; padding: 8px 14px; }
     #orderHeaderActions .header-action-btn.btn-table { background: #e0f2fe; color: #075985; }
     #orderHeaderActions .header-action-btn.btn-cash { background: #d1fae5; color: #065f46; }
@@ -2533,19 +2537,7 @@ body.modal-open {
     justify-content: center;
     text-align: center;
     box-sizing: border-box;
-    transition: all 0.2s;
     cursor: default;
-}
-
-.menu-item-variant:hover {
-    background: #f97316;
-    color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
-}
-
-.menu-item-variant:hover .menu-name {
-    color: white;
 }
 
 .menu-item-variant .menu-name {
@@ -2561,40 +2553,30 @@ body.modal-open {
 
 .variant-group {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+    justify-content: stretch;
+    width: 100%;
 }
 
 .variant-btn {
     background: white;
     border: 1px solid #e2e8f0;
     border-radius: 20px;
-    padding: 4px 10px;
+    padding: 6px 6px;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
     -webkit-appearance: none;
-}
-
-.variant-btn:hover {
-    background: #f97316;
-    color: white;
-    border-color: #f97316;
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .variant-btn:active {
-    transform: scale(0.95);
-}
-
-/* Khi hover toàn bộ card variant, nút variant vẫn giữ nền trắng để dễ đọc */
-.menu-item-variant:hover .variant-btn {
-    background: rgba(255,255,255,0.95);
-    border-color: rgba(255,255,255,0.5);
-    color: var(--text);
-}
-.menu-item-variant:hover .variant-btn:hover {
     background: #f97316;
     color: white;
     border-color: #f97316;
@@ -2743,9 +2725,6 @@ body.modal-open {
     white-space: nowrap;
 }
 
-.draft-bubble:active {
-    transform: scale(0.96);
-}
 
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(20px); }
@@ -2768,10 +2747,10 @@ body.modal-open {
 .toast {
     background: #1e293b;
     color: white;
-    padding: 12px 20px;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 500;
+    padding: 16px 28px;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 700;
     box-shadow: 0 8px 30px rgba(0,0,0,0.2);
     animation: toastIn 0.3s ease;
     pointer-events: auto;
@@ -2901,7 +2880,6 @@ body.modal-open {
     font-weight: 600;
     color: #64748b;
     cursor: pointer;
-    transition: all 0.2s;
     user-select: none;
     -webkit-user-select: none;
 }
@@ -2911,7 +2889,7 @@ body.modal-open {
     box-shadow: 0 1px 4px rgba(0,0,0,0.1);
 }
 .hvt-btn:active {
-    transform: scale(0.96);
+    background: #e2e8f0;
 }
 
 /* ========== HISTORY VIEW MODES ========== */
@@ -3019,11 +2997,10 @@ body.modal-open {
     cursor: pointer;
     border: 2px solid #e2e8f0;
     background: #fff;
-    transition: all 0.12s ease;
     white-space: nowrap;
 }
 .cus-pay-btn:active {
-    transform: scale(0.95);
+    opacity: 0.85;
 }
 .cus-pay-cash {
     border-color: #16a34a;
@@ -3082,7 +3059,6 @@ body.modal-open {
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s;
     -webkit-appearance: none;
     flex: 1;
     text-align: center;
@@ -3140,8 +3116,7 @@ body.modal-open {
 
 /* Hiệu ứng khi nhấn (touch) */
 #orderHeaderActions .header-action-btn:active {
-    transform: scale(0.96);
-    opacity: 0.9;
+    opacity: 0.85;
 }
 
 /* ============================================================
@@ -3273,14 +3248,12 @@ body.modal-open {
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: opacity 0.15s, transform 0.1s;
     flex: 1;
     min-width: 100px;
     text-align: center;
 }
 
 .settings-btn:active {
-    transform: scale(0.97);
     opacity: 0.85;
 }
 
@@ -3339,5 +3312,963 @@ body.modal-open {
 }
 
 .print-mode-btn:active {
-    transform: scale(0.96);
+    background: #e2e8f0;
+}
+
+/* Khi màn hình ngang và modal chi tiết giao dịch được hiển thị */
+@media (orientation: landscape) and (min-width: 640px) {
+    #transactionDetailModal .modal-body {
+        display: -webkit-box;
+        display: -webkit-flex;
+        display: -ms-flexbox;
+        display: flex;
+        -webkit-flex-wrap: wrap;
+        -ms-flex-wrap: wrap;
+        flex-wrap: wrap;
+        gap: 16px;
+        -webkit-box-align: start;
+        -webkit-align-items: flex-start;
+        -ms-flex-align: start;
+        align-items: flex-start;
+    }
+
+    #transactionDetailModal .modal-body .detail-section {
+        -webkit-box-flex: 1;
+        -webkit-flex: 1 1 calc(50% - 8px);
+        -ms-flex: 1 1 calc(50% - 8px);
+        flex: 1 1 calc(50% - 8px);
+        min-width: 200px;
+    }
+
+    /* Giữ nguyên form actions ở cuối, chiếm full chiều rộng */
+    #transactionDetailModal .modal-body .form-actions {
+        -webkit-box-flex: 1;
+        -webkit-flex: 1 1 100%;
+        -ms-flex: 1 1 100%;
+        flex: 1 1 100%;
+        margin-top: 8px;
+    }
+}
+
+/* ========== SPLIT BILL MODAL ========== */
+#splitBillModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+#splitBillModal .split-items-list {
+    max-height: 50vh;
+    overflow-y: auto;
+    margin-bottom: 16px;
+    -webkit-overflow-scrolling: touch;
+}
+
+#splitBillModal .split-item-row {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    -webkit-box-pack: justify;
+    -webkit-justify-content: space-between;
+    -ms-flex-pack: justify;
+    justify-content: space-between;
+    padding: 10px 8px;
+    border-bottom: 1px solid #e2e8f0;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#splitBillModal .split-item-row > span:first-child {
+    -webkit-box-flex: 2;
+    -webkit-flex: 2;
+    -ms-flex: 2;
+    flex: 2;
+    font-weight: 500;
+    font-size: 14px;
+    color: #1e293b;
+    min-width: 80px;
+}
+
+#splitBillModal .split-qty-control {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    padding: 4px 8px;
+    border-radius: 30px;
+}
+
+#splitBillModal .split-qty-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 28px;
+    border: 1px solid #cbd5e1;
+    background: white;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    display: -webkit-inline-box;
+    display: -webkit-inline-flex;
+    display: -ms-inline-flexbox;
+    display: inline-flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    -webkit-box-pack: center;
+    -webkit-justify-content: center;
+    -ms-flex-pack: center;
+    justify-content: center;
+    -webkit-appearance: none;
+    color: #1e293b;
+}
+
+#splitBillModal .split-qty-btn:active {
+    background: #f97316;
+    color: white;
+}
+
+#splitBillModal .split-qty-input {
+    width: 45px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 15px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 6px 0;
+    background: white;
+    -webkit-appearance: none;
+}
+
+#splitBillModal .split-item-price {
+    font-weight: 700;
+    color: #f97316;
+    font-size: 14px;
+    min-width: 65px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+#splitBillModal .split-total {
+    text-align: center;
+    font-size: 17px;
+    font-weight: 800;
+    padding: 12px;
+    background: #fff7ed;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    color: #f97316;
+}
+
+#splitBillModal .split-total span {
+    color: #f97316;
+}
+
+#splitBillModal .form-actions {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    gap: 10px;
+    -webkit-flex-wrap: wrap;
+    -ms-flex-wrap: wrap;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+#splitBillModal .form-actions button {
+    -webkit-box-flex: 1;
+    -webkit-flex: 1;
+    -ms-flex: 1;
+    flex: 1;
+    padding: 12px 8px;
+    border-radius: 40px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    text-align: center;
+    -webkit-appearance: none;
+}
+
+#splitBillModal .form-actions .cash {
+    background: #10b981;
+    color: white;
+}
+
+#splitBillModal .form-actions .transfer {
+    background: #3b82f6;
+    color: white;
+}
+
+#splitBillModal .form-actions .debt {
+    background: #f59e0b;
+    color: white;
+}
+
+#splitBillModal .form-actions .btn-cancel {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+#splitBillModal .form-actions button:active {
+    opacity: 0.85;
+}
+
+/* Responsive cho màn hình nhỏ */
+@media (max-width: 480px) {
+    #splitBillModal .split-item-row {
+        padding: 8px 4px;
+        gap: 6px;
+    }
+    #splitBillModal .split-qty-control {
+        padding: 2px 6px;
+    }
+    #splitBillModal .split-qty-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 16px;
+    }
+    #splitBillModal .split-qty-input {
+        width: 38px;
+        font-size: 13px;
+    }
+    #splitBillModal .form-actions button {
+        padding: 10px 4px;
+        font-size: 12px;
+    }
+}
+
+/* ========== TRANSFER ITEMS MODAL (CHUYỂN MÓN) ========== */
+#transferItemsModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+#transferItemsModal .transfer-items-list {
+    max-height: 50vh;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    -webkit-overflow-scrolling: touch;
+}
+
+#transferItemsModal .transfer-item-row {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    -webkit-box-pack: justify;
+    -webkit-justify-content: space-between;
+    -ms-flex-pack: justify;
+    justify-content: space-between;
+    padding: 10px 8px;
+    border-bottom: 1px solid #e2e8f0;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#transferItemsModal .transfer-item-row > span:first-child {
+    -webkit-box-flex: 2;
+    -webkit-flex: 2;
+    -ms-flex: 2;
+    flex: 2;
+    font-weight: 500;
+    font-size: 14px;
+    color: #1e293b;
+    min-width: 80px;
+}
+
+#transferItemsModal .transfer-qty-control {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    padding: 4px 8px;
+    border-radius: 30px;
+}
+
+#transferItemsModal .transfer-qty-minus,
+#transferItemsModal .transfer-qty-plus {
+    width: 28px;
+    height: 28px;
+    border-radius: 28px;
+    border: 1px solid #cbd5e1;
+    background: white;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    display: -webkit-inline-box;
+    display: -webkit-inline-flex;
+    display: -ms-inline-flexbox;
+    display: inline-flex;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    -webkit-box-pack: center;
+    -webkit-justify-content: center;
+    -ms-flex-pack: center;
+    justify-content: center;
+    -webkit-appearance: none;
+    color: #1e293b;
+}
+
+#transferItemsModal .transfer-qty-minus:active,
+#transferItemsModal .transfer-qty-plus:active {
+    background: #f97316;
+    color: white;
+}
+
+#transferItemsModal .transfer-qty-input {
+    width: 50px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 5px 0;
+    background: white;
+    -webkit-appearance: none;
+}
+
+#transferItemsModal .form-input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 40px;
+    font-size: 14px;
+    background: white;
+    margin: 8px 0;
+}
+
+#transferItemsModal .form-actions {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+#transferItemsModal .form-actions button {
+    -webkit-box-flex: 1;
+    -webkit-flex: 1;
+    -ms-flex: 1;
+    flex: 1;
+    padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    text-align: center;
+}
+
+#transferItemsModal .btn-save {
+    background: #f97316;
+    color: white;
+}
+
+#transferItemsModal .btn-cancel {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+#transferItemsModal button:active {
+    opacity: 0.85;
+}
+
+/* ========== MERGE TABLE MODAL (GỘP BÀN) ========== */
+#mergeTableModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+#mergeTableModal .merge-tables-list {
+    max-height: 55vh;
+    overflow-y: auto;
+    margin-bottom: 16px;
+    -webkit-overflow-scrolling: touch;
+}
+
+#mergeTableModal .merge-table-item {
+    padding: 12px 16px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    -webkit-box-pack: justify;
+    -webkit-justify-content: space-between;
+    -ms-flex-pack: justify;
+    justify-content: space-between;
+    -webkit-box-align: center;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    font-size: 14px;
+    color: #1e293b;
+}
+
+#mergeTableModal .merge-table-item:active {
+    background: #fff7ed;
+    border-color: #f97316;
+}
+
+#mergeTableModal .merge-table-item.selected {
+    background: #fff7ed;
+    border-left: 4px solid #f97316;
+    font-weight: 600;
+}
+
+#mergeTableModal .form-actions {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: -ms-flexbox;
+    display: flex;
+    gap: 10px;
+}
+
+#mergeTableModal .form-actions button {
+    -webkit-box-flex: 1;
+    -webkit-flex: 1;
+    -ms-flex: 1;
+    flex: 1;
+    padding: 12px;
+    border-radius: 40px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#mergeTableModal .btn-cancel {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
+#mergeTableModal button:active {
+    opacity: 0.85;
+}
+
+/* Responsive cho màn hình nhỏ */
+@media (max-width: 480px) {
+    #transferItemsModal .transfer-item-row {
+        padding: 8px 4px;
+    }
+    #transferItemsModal .transfer-qty-control {
+        padding: 2px 6px;
+    }
+    #transferItemsModal .transfer-qty-minus,
+    #transferItemsModal .transfer-qty-plus {
+        width: 24px;
+        height: 24px;
+        font-size: 16px;
+    }
+    #transferItemsModal .transfer-qty-input {
+        width: 42px;
+        font-size: 12px;
+    }
+    #mergeTableModal .merge-table-item {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+}
+
+/* Đảm bảo edit-actions hiển thị 6 nút trên 1 dòng trên màn hình đủ rộng */
+#tableDetailModal .edit-actions {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+/* Khi màn hình nhỏ hơn 550px, chuyển thành 2 hàng (3 cột) */
+@media (max-width: 550px) {
+    #tableDetailModal .edit-actions {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+    }
+}
+
+/* Nếu vẫn muốn cố gắng giữ 1 dòng trên màn hình rất nhỏ (không khuyến khích) thì dùng overflow-x:auto; white-space:nowrap; nhưng sẽ mất tính thẩm mỹ */
+@media (max-width: 400px) {
+    #tableDetailModal .edit-actions {
+        display: flex;
+        overflow-x: auto;
+        white-space: nowrap;
+        gap: 8px;
+        padding-bottom: 4px;
+        -webkit-overflow-scrolling: touch;
+    }
+    #tableDetailModal .edit-actions .cart-action-btn {
+        flex: 0 0 auto;
+        width: auto;
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+}
+
+/* ========== ĐẾM TIỀN NHANH (Quick Cash Counter) ========== */
+.cash-counter {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 4px;
+}
+.cash-counter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+.cash-counter-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+}
+.cash-counter-total {
+    font-size: 18px;
+    font-weight: 700;
+    color: #16a34a;
+}
+.denom-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.denom-card {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 10px 8px;
+    text-align: center;
+}
+.denom-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 6px;
+}
+.denom-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+.ctrl-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.ctrl-minus {
+    background: #fee2e2;
+    color: #dc2626;
+}
+.ctrl-plus {
+    background: #dcfce7;
+    color: #16a34a;
+}
+.ctrl-btn:active {
+    opacity: 0.8;
+}
+.denom-input {
+    width: 48px;
+    height: 32px;
+    text-align: center;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+    -moz-appearance: textfield;
+}
+.denom-input::-webkit-inner-spin-button,
+.denom-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.denom-input:focus {
+    border-color: #f97316;
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+.denom-subtotal {
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+    margin-top: 2px;
+}
+.cash-counter-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+.cash-action-btn {
+    flex: 1;
+    max-width: 160px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.cash-action-btn:active {
+    opacity: 0.7;
+}
+.cash-reset-btn {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+.cash-copy-btn {
+    background: #f97316;
+    color: #fff;
+}
+@media (max-width: 400px) {
+    .denom-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .denom-card {
+        padding: 8px 6px;
+    }
+    .ctrl-btn {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
+    }
+    .denom-input {
+        width: 40px;
+        height: 28px;
+        font-size: 12px;
+    }
+    .cash-counter-total {
+        font-size: 16px;
+    }
+}
+
+/* ========== TIỀN MẶT TẠI POS (Cash Counter + Đối soát) ========== */
+.pos-cash-info {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+.pos-cash-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 13px;
+    color: #334155;
+}
+.pos-cash-row + .pos-cash-row {
+    border-top: 1px dashed #e2e8f0;
+}
+.pos-cash-expense {
+    color: #dc2626;
+}
+.pos-cash-expected {
+    font-weight: 700;
+    color: #2563eb;
+    font-size: 14px;
+}
+.pos-cash-formula {
+    background: #eff6ff;
+    margin: 4px -8px -4px -8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border-top: 1px solid #bfdbfe !important;
+}
+.pos-cash-diff {
+    font-weight: 600;
+    font-size: 14px;
+    padding: 6px 0;
+}
+.pos-cash-positive {
+    color: #16a34a;
+}
+.pos-cash-negative {
+    color: #dc2626;
+}
+.pos-cash-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.pos-cash-total-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    margin-bottom: 10px;
+    border-top: 2px solid #e2e8f0;
+    border-bottom: 2px solid #e2e8f0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+}
+.cash-closed-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: #64748b;
+    padding: 3px 10px;
+    border-radius: 20px;
+}
+.cash-save-btn {
+    background: #2563eb;
+    color: #fff;
+}
+.cash-close-btn {
+    background: #dc2626;
+    color: #fff;
+}
+.cash-unlock-btn {
+    background: #7c3aed;
+    color: #fff;
+}
+.cash-unlock-btn:active {
+    background: #6d28d9;
+}
+.pos-cash-staff-result {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-top: 10px;
+}
+
+/* Manager Pickup Input */
+.pos-cash-mgr-pickup {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.mgr-pickup-input {
+    width: 80px;
+    height: 28px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0 6px;
+    font-size: 13px;
+    text-align: right;
+    outline: none;
+}
+.mgr-pickup-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
+}
+.mgr-pickup-btn {
+    height: 28px;
+    background: #f59e0b;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.mgr-pickup-btn:active {
+    background: #d97706;
+}
+.pos-cash-pickup-log {
+    font-size: 12px;
+    color: #64748b;
+    padding: 2px 0 2px 12px !important;
+}
+.pos-cash-pickup-log span:last-child {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+/* ========== REFUND REASON MODAL ========== */
+#refundReasonModal .modal-content {
+    max-width: 500px;
+    width: 90%;
+    border-radius: 24px;
+    overflow: hidden;
+}
+
+/* Header dạng title */
+#refundReasonModal .modal-header {
+    background: #f8fafc;
+    padding: 16px 20px;
+    font-size: 18px;
+    font-weight: 700;
+    color: #1e293b;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: center;
+}
+
+/* Danh sách lý do - dùng grid linh hoạt */
+#refundReasonList {
+    padding: 20px;
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+
+/* Khi màn hình ngang hoặc đủ rộng, chuyển sang 2 cột */
+@media (min-width: 480px) and (orientation: landscape) {
+    #refundReasonList {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Nút lý do */
+#refundReasonList .btn-save {
+    width: 100%;
+    text-align: center;
+    background: #f97316;
+    color: white;
+    border: none;
+    border-radius: 60px;
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    -webkit-appearance: none;
+}
+#refundReasonList .btn-save:active {
+    background: #ea580c;
+}
+
+/* Ô nhập lý do "Khác" */
+#refundReasonOther {
+    padding: 0 20px 20px;
+}
+#refundReasonOther .form-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #cbd5e1;
+    border-radius: 40px;
+    font-size: 14px;
+    background: white;
+    outline: none;
+    transition: border-color 0.2s;
+}
+#refundReasonOther .form-input:focus {
+    border-color: #f97316;
+}
+
+/* Form actions (nút Hủy) */
+#refundReasonModal .form-actions {
+    padding: 0 20px 20px;
+    display: flex;
+    justify-content: center;
+}
+#refundReasonModal .btn-cancel {
+    background: #e2e8f0;
+    color: #1e293b;
+    border: none;
+    border-radius: 60px;
+    padding: 12px 24px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    width: 100%;
+    max-width: 200px;
+    text-align: center;
+}
+#refundReasonModal .btn-cancel:active {
+    background: #cbd5e1;
+}
+
+/* Responsive nhỏ (dọc hẹp) giữ 1 cột */
+@media (max-width: 479px) {
+    #refundReasonList {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        padding: 16px;
+    }
+    #refundReasonModal .modal-header {
+        padding: 12px 16px;
+        font-size: 16px;
+    }
+}
+
+/* Chặn scroll ngang toàn bộ */
+html, body, .app, .main-content {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+}
+
+/* Đảm bảo tables-grid không bị tràn */
+.tables-grid {
+    width: 100%;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+}
+
+/* Trên màn hình nhỏ, giảm gap và padding của card nếu cần */
+@media (max-width: 480px) {
+    .tables-grid {
+        gap: 6px !important;
+    }
+    .table-card {
+        padding: 6px 4px !important;
+    }
+    .table-name {
+        font-size: 11px !important;
+        white-space: normal !important;  /* cho phép xuống dòng thay vì tràn */
+        word-break: break-word;
+    }
+}
+
+.variant-group {
+    display: flex;
+    gap: 10px;               /* tạo khoảng cách 3px giữa các nút */
+    flex-wrap: wrap;
+    justify-content: center;
 }
