@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#f97316">
-    <title>POS Cafe - Bán hàng</title>
+    <title>MILANO COFFEE 259 - Bán hàng</title>
     <link rel="stylesheet" href="css/pos-base.css">
     
 </head>
@@ -18,7 +18,7 @@
             <!-- FORM ĐĂNG NHẬP -->
             <div class="auth-form" id="loginForm">
                 <div class="auth-logo">☕</div>
-                <h2 class="auth-title">POS CAFE</h2>
+                <h2 class="auth-title">MILANO COFFEE 259</h2>
                 <p class="auth-subtitle">Đăng nhập để tiếp tục</p>
                 
                 <div class="auth-field">
@@ -210,12 +210,89 @@
                         </div>
                     </div>
 
+                    <!-- PHẦN CÀI ĐẶT CHAT -->
+                    <div class="settings-section" id="settingsChatSection">
+                        <h3 class="settings-title">💬 Cài đặt Chat nội bộ</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Âm thanh thông báo</label>
+                            <div class="settings-toggle-row">
+                                <span class="settings-toggle-label" id="chatSoundStatusLabel">🔊 Đang bật</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="chatSoundToggle" checked onchange="toggleChatSoundSetting(this.checked)">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-hint">Bật/tắt âm thanh khi có tin nhắn mới</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Tự động hiện popup</label>
+                            <div class="settings-toggle-row">
+                                <span class="settings-toggle-label" id="chatAutoPopupStatusLabel">✅ Đang bật</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="chatAutoPopupToggle" checked onchange="toggleChatAutoPopup(this.checked)">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-hint">Tự động hiện popup thông báo khi có tin nhắn khẩn</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Xóa tin nhắn cũ</label>
+                            <div class="settings-actions" style="margin-top:4px;">
+                                <button class="settings-btn settings-btn-secondary" onclick="clearOldChatMessages()" style="font-size:13px;">
+                                    🗑️ Xóa tin nhắn > 30 ngày
+                                </button>
+                            </div>
+                            <div class="settings-hint">Chỉ admin mới có quyền xóa tin nhắn cũ</div>
+                        </div>
+                    </div>
+
+                    <!-- PHẦN TELEGRAM -->
+                    <div class="settings-section" id="settingsTelegramSection">
+                        <h3 class="settings-title">🤖 Cấu hình Telegram</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Bot Token</label>
+                            <div class="settings-input-group">
+                                <input type="password" id="telegramBotToken" class="form-input"
+                                    placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                <button class="settings-toggle-btn" id="settingsToggleTelegramToken"
+                                    onclick="toggleTelegramTokenVisibility()">👁️</button>
+                            </div>
+                            <div class="settings-hint">
+                                Token từ <a href="https://t.me/BotFather" target="_blank"
+                                   style="color:#f97316;text-decoration:underline;">@BotFather</a>
+                                trên Telegram
+                            </div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Chat ID</label>
+                            <input type="text" id="telegramChatId" class="form-input"
+                                placeholder="VD: -1001234567890 hoặc 123456789">
+                            <div class="settings-hint">
+                                Chat ID nhóm/channel để gửi thông báo.
+                                <a href="https://t.me/username_to_id_bot" target="_blank"
+                                   style="color:#f97316;text-decoration:underline;">Lấy Chat ID tại đây</a>
+                            </div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Tên bot hiển thị</label>
+                            <input type="text" id="telegramBotName" class="form-input"
+                                placeholder="VD: MILANO Coffee Bot">
+                            <div class="settings-hint">Tên hiển thị khi gửi thông báo</div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveTelegramConfig()">💾 Lưu cấu hình</button>
+                            <button class="settings-btn settings-btn-primary" onclick="testTelegramConfig()" style="background:#22c55e;">📨 Gửi thử</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearTelegramConfig()">🗑️ Xóa</button>
+                        </div>
+                        <div id="telegramConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
                     <!-- PHẦN THÔNG TIN QUÁN -->
                     <div class="settings-section" id="settingsShopSection">
                         <h3 class="settings-title">🏪 Thông tin quán</h3>
                         <div class="settings-field">
                             <label class="settings-label">Tên quán</label>
-                            <input type="text" id="shopInfoName" class="form-input" placeholder="VD: POS Cafe">
+                            <input type="text" id="shopInfoName" class="form-input" placeholder="VD: MILANO COFFEE 259">
                         </div>
                         <div class="settings-field">
                             <label class="settings-label">Địa chỉ</label>
@@ -237,6 +314,30 @@
                         <div id="shopInfoStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
                     </div>
 
+                    <!-- PHẦN PHÂN QUYỀN QUẢN LÝ -->
+                    <div class="settings-section" id="settingsPermissionSection">
+                        <h3 class="settings-title">🔐 Phân quyền quản lý</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Danh sách nhân viên</label>
+                            <div id="staffPermissionList" class="permission-staff-list">
+                                <div class="permission-loading">Đang tải...</div>
+                            </div>
+                            <div class="settings-hint">Nhấn vào tên nhân viên để thay đổi quyền (Admin/Staff)</div>
+                        </div>
+                        <div class="settings-field" style="margin-top:12px;">
+                            <label class="settings-label">Thêm nhân viên mới</label>
+                            <div class="settings-input-group" style="margin-bottom:6px;">
+                                <input type="text" id="newStaffUsername" class="form-input" placeholder="Tên đăng nhập" style="flex:1;">
+                            </div>
+                            <div class="settings-input-group">
+                                <input type="password" id="newStaffPassword" class="form-input" placeholder="Mật khẩu" style="flex:1;">
+                                <button class="settings-btn settings-btn-primary" onclick="createNewStaff()" style="white-space:nowrap;">➕ Thêm</button>
+                            </div>
+                            <div class="settings-hint">Nhân viên mới sẽ có quyền Staff mặc định</div>
+                        </div>
+                        <div id="staffPermissionStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -251,7 +352,7 @@
             <div class="modal-header">
                 
                 <div class="modal-header-actions" id="orderHeaderActions"></div>
-                <span class="modal-close" onclick="closeModal('orderModal')">&times;</span>
+                <button class="modal-close-btn" onclick="closeModal('orderModal')">✕ Đóng</button>
             </div>
             <div class="modal-body order-modal-body">
                 <div class="order-three-columns">
@@ -260,6 +361,12 @@
                     
                     <!-- CỘT 2: MENU -->
                     <div class="order-menu-column">
+                        <!-- Dropdown chọn danh mục (mobile) -->
+                        <select class="order-category-select" id="orderCategorySelect" onchange="onCategorySelectChange()"></select>
+                        <div class="order-menu-header">
+                            <span>📋 Thực đơn</span>
+                            <button class="quick-create-menu-btn" onclick="showQuickCreateMenuItem()" title="Tạo món nhanh">➕</button>
+                        </div>
                         <div class="menu-grid" id="menuGrid"></div>
                     </div>
                     
@@ -358,8 +465,35 @@
     </div>
 
     <!-- Toast giao dịch gần đây -->
+    <!-- CHAT POPUP -->
+    <div id="chatPopup" class="chat-popup" style="display:none;">
+        <div class="chat-popup-header">
+            <span>💬 Chat nội bộ</span>
+            <div class="chat-popup-header-actions">
+                <button class="chat-popup-close-btn" onclick="toggleChatPopup()">✕</button>
+            </div>
+        </div>
+        <div class="chat-popup-body" id="chatPopupBody">
+            <div class="chat-empty">Đang tải...</div>
+        </div>
+        <div class="chat-popup-footer">
+            <div class="chat-input-row">
+                <select id="chatPrioritySelect" class="chat-priority-select">
+                    <option value="normal">📝 Thường</option>
+                    <option value="important">⭐ Quan trọng</option>
+                    <option value="urgent">🔴 Gấp</option>
+                </select>
+                <input type="text" id="chatInput" class="chat-input" placeholder="Nhập tin nhắn..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+                <button class="chat-send-btn" onclick="sendChatMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
     <div id="recentToast" class="recent-toast">
-        <div class="recent-toast-header">🍽️ BÀN GẦN ĐÂY</div>
+        <div class="recent-toast-header" onclick="toggleRecentToast()">
+            <span>🔄 GIAO DỊCH GẦN ĐÂY</span>
+            <span id="recentToastToggle" class="recent-toast-toggle">▲</span>
+        </div>
         <div id="recentToastList" class="recent-toast-list"></div>
     </div>
 
@@ -393,6 +527,9 @@
     <!-- Telegram notification integration -->
     <script src="telegram.js"></script>
     
+    <!-- Chat nội bộ -->
+    <script src="messages.js"></script>
+    
     <!-- Lunar calendar + Notification (giữ để có thông báo) -->
     <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/dist/lunar.min.js"></script>
     <script src="notifications.js"></script>
@@ -402,12 +539,15 @@
     
     <!-- HEADER DƯỚI ĐÁY -->
     <div class="header">
-        <div class="logo"><span class="logo-icon">☕</span><span class="logo-text">POS CAFE</span></div>
+        <div class="logo"><span class="logo-icon">☕</span><span class="logo-text" id="shopNameHeader">MILANO COFFEE 259</span></div>
         <div class="header-center">
             <span class="header-date" id="headerDate">--</span>
         </div>
         <div class="header-right">
             <span class="staff-name">👤 Nhân viên</span>
+            <button class="chat-btn" id="chatBtn" onclick="toggleChatPopup()" title="Chat nội bộ">
+                💬 <span id="chatBadge" class="chat-badge" style="display:none;">0</span>
+            </button>
             <span class="time" id="currentTime">--:--</span>
         </div>
     </div>

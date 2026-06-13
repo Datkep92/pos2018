@@ -54,9 +54,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return loadDraftOrders();
     }).then(function() {
         initEventListeners();
+        // Khôi phục trạng thái recentToast (thu gọn/mở rộng)
+        if (typeof restoreRecentToastState === 'function') {
+            restoreRecentToastState();
+        }
         renderCurrentTime();
         if (typeof initNotifications === 'function') {
             initNotifications();
+        }
+        // Khởi tạo chat nội bộ
+        if (typeof initChat === 'function') {
+            initChat();
         }
         // OPTIMIZE: Khởi tạo event delegation cho menu grid (thay vì inline onclick)
         if (typeof _initMenuEventDelegation === 'function') {
@@ -94,7 +102,9 @@ function loadData() {
         DB.getAll('menu'),
         DB.getAll('menu_categories'),
         DB.getAll('customers'),
-        DB.getAll('shop_info')
+        DB.getAll('info'),
+        // Đọc trực tiếp từ Firebase để đảm bảo shopConfig luôn đúng
+        DB.getShopConfig()
     ]).then(function(results) {
         menuItems = results[0] || [];
         // Sắp xếp menuItems theo sortOrder để kéo thả hoạt động đúng
@@ -105,7 +115,7 @@ function loadData() {
         });
         menuCategories = results[1] || [];
         customers = results[2] || [];
-        // Load shop info
+        // Load shop info từ IndexedDB (ưu tiên)
         var shopInfoList = results[3] || [];
         if (shopInfoList.length > 0) {
             shopInfo = shopInfoList[0];
@@ -113,6 +123,22 @@ function loadData() {
             shopInfo = null;
         }
         window.shopInfo = shopInfo;
+        // Cập nhật tên quán trên header từ DB
+        var shopNameEl = document.getElementById('shopNameHeader');
+        if (shopNameEl && shopInfo && shopInfo.name) {
+            shopNameEl.textContent = shopInfo.name;
+        }
+        // Shop config: ưu tiên dữ liệu từ Firebase (results[4]), fallback về IndexedDB, rồi hardcode
+        var fbConfig = results[4] || {};
+        window.shopConfig = {
+            telegramBotToken: fbConfig.telegramBotToken || (shopInfo && shopInfo.telegramBotToken) || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+            telegramChatId: fbConfig.telegramChatId || (shopInfo && shopInfo.telegramChatId) || '6372876364',
+            lockPassword: fbConfig.lockPassword || (shopInfo && shopInfo.lockPassword) || '28122020',
+            lockStartHour: fbConfig.lockStartHour !== undefined ? fbConfig.lockStartHour : (shopInfo && shopInfo.lockStartHour !== undefined ? shopInfo.lockStartHour : 17),
+            lockEndHour: fbConfig.lockEndHour !== undefined ? fbConfig.lockEndHour : (shopInfo && shopInfo.lockEndHour !== undefined ? shopInfo.lockEndHour : 5),
+            lockEndMinute: fbConfig.lockEndMinute !== undefined ? fbConfig.lockEndMinute : (shopInfo && shopInfo.lockEndMinute !== undefined ? shopInfo.lockEndMinute : 30),
+            tableLockHours: fbConfig.tableLockHours !== undefined ? fbConfig.tableLockHours : (shopInfo && shopInfo.tableLockHours !== undefined ? shopInfo.tableLockHours : 5)
+        };
         window.menuItems = menuItems;
         window.customers = customers;
         window.ingredients = ingredients;

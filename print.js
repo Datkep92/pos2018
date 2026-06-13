@@ -295,7 +295,7 @@ function printReceipt(data) {
 function printAfterPayment(paymentData) {
     var shop = (typeof shopInfo !== 'undefined' && shopInfo) ? shopInfo : null;
     var printData = {
-        storeName: paymentData.shopName || (shop ? shop.name : null) || 'POS CAFE',
+        storeName: paymentData.shopName || (shop ? shop.name : null) || 'MILANO COFFEE 259',
         storeAddress: paymentData.shopAddress || (shop ? shop.address : null) || null,
         storePhone: shop ? shop.phone : null,
         qrCode: shop ? shop.qrCode : null,

@@ -156,7 +156,7 @@ function loadHeaderNotification() {
     DB.getAll(NOTIFICATIONS_COLLECTION).then(function(notifications) {
         if (!notifications || notifications.length === 0) {
             // FIX: Hiển thị thông báo mặc định khi chưa có dữ liệu từ Firebase
-            showHeaderNotification('☕ POS Cafe - Chào mừng bạn!', '#f97316');
+            showHeaderNotification('☕ ' + (window.shopInfo && window.shopInfo.name ? window.shopInfo.name : 'MILANO COFFEE 259') + ' - Chào mừng bạn!', '#f97316');
             renderNotificationHistory([]);
             return;
         }
@@ -183,7 +183,7 @@ function loadHeaderNotification() {
             showHeaderNotification(latestActive.content || latestActive.message || "", latestActive.color || '#f97316');
         } else if (isEnabled) {
             // FIX: Nếu không có thông báo active nhưng toggle vẫn bật, hiển thị mặc định
-            showHeaderNotification('☕ POS Cafe - Hệ thống sẵn sàng', '#64748b');
+            showHeaderNotification('☕ ' + (window.shopInfo && window.shopInfo.name ? window.shopInfo.name : 'MILANO COFFEE 259') + ' - Hệ thống sẵn sàng', '#64748b');
         } else {
             hideHeaderNotification();
         }
@@ -192,7 +192,7 @@ function loadHeaderNotification() {
         renderNotificationHistory(notifications);
     }).catch(function() {
         // FIX: Khi có lỗi (offline), vẫn hiển thị thông báo mặc định
-        showHeaderNotification('☕ POS Cafe - Đang hoạt động', '#f97316');
+        showHeaderNotification('☕ ' + (window.shopInfo && window.shopInfo.name ? window.shopInfo.name : 'MILANO COFFEE 259') + ' - Đang hoạt động', '#f97316');
     });
 }
 

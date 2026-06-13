@@ -748,24 +748,52 @@ function showCloseableToast(message, type) {
 
 function initSettingsTab() {
     // Phân quyền hiển thị:
-    // - Nhân viên: ẩn "🏪 Thông tin quán", hiển thị "⚙️ Cài đặt ứng dụng"
-    // - Quản lý: ẩn "⚙️ Cài đặt ứng dụng", hiển thị "🏪 Thông tin quán"
+    // - Nhân viên: chỉ thấy "⚙️ Cài đặt ứng dụng" + "💬 Cài đặt Chat"
+    // - Admin: thấy tất cả (Telegram, Thông tin quán, Phân quyền)
     var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
     var appSection = document.getElementById('settingsAppSection');
     var shopSection = document.getElementById('settingsShopSection');
+    var telegramSection = document.getElementById('settingsTelegramSection');
+    var permSection = document.getElementById('settingsPermissionSection');
+    var chatSection = document.getElementById('settingsChatSection');
+
+    // App section: staff thấy, admin ẩn (admin đã có các section khác)
     if (appSection) appSection.style.display = isAdmin ? 'none' : '';
+    // Shop section: chỉ admin mới thấy
     if (shopSection) shopSection.style.display = isAdmin ? '' : 'none';
+    // Telegram section: chỉ admin mới thấy
+    if (telegramSection) telegramSection.style.display = isAdmin ? '' : 'none';
+    // Permission section: chỉ admin mới thấy
+    if (permSection) permSection.style.display = isAdmin ? '' : 'none';
+    // Chat section: tất cả đều thấy (để bật/tắt âm thanh)
+    if (chatSection) chatSection.style.display = '';
+
+    // Load Telegram config nếu có
+    var savedToken = localStorage.getItem('telegram_bot_token');
+    var tokenInput = document.getElementById('telegramBotToken');
+    if (tokenInput) tokenInput.value = savedToken || '';
+    var savedChatId = localStorage.getItem('telegram_chat_id');
+    var chatIdInput = document.getElementById('telegramChatId');
+    if (chatIdInput) chatIdInput.value = savedChatId || '';
+    var savedBotName = localStorage.getItem('telegram_bot_name');
+    var botNameInput = document.getElementById('telegramBotName');
+    if (botNameInput) botNameInput.value = savedBotName || '';
+
+    // Load staff permission list (nếu là admin)
+    if (isAdmin && typeof loadStaffPermissionList === 'function') {
+        loadStaffPermissionList();
+    }
 
     // Khởi tạo Đếm tiền nhanh
     if (typeof initQuickCashCounter === 'function') {
         initQuickCashCounter();
     }
 
-    // Load token
-    var savedToken = localStorage.getItem('github_token');
-    var tokenInput = document.getElementById('settingsGithubToken');
-    if (tokenInput) {
-        tokenInput.value = savedToken || '';
+    // Load token GitHub
+    var savedGithubToken = localStorage.getItem('github_token');
+    var githubTokenInput = document.getElementById('settingsGithubToken');
+    if (githubTokenInput) {
+        githubTokenInput.value = savedGithubToken || '';
     }
 
     // Load skipped version
@@ -959,7 +987,7 @@ function saveShopInfo() {
         updatedAt: new Date().toISOString()
     };
 
-    DB.set('shop_info', data).then(function() {
+    DB.create('shop_info', data, 'shop_info').then(function() {
         window.shopInfo = data;
         showToast('✅ Đã lưu thông tin quán', 'success');
     }).catch(function(err) {
@@ -978,6 +1006,252 @@ function clearShopInfo() {
         console.error('Clear shop info error:', err);
         showToast('❌ Lỗi xóa thông tin quán', 'error');
     });
+}
+
+// ============================================================
+// 5. TELEGRAM CONFIG
+// ============================================================
+
+function toggleTelegramTokenVisibility() {
+    var input = document.getElementById('telegramBotToken');
+    var btn = document.getElementById('settingsToggleTelegramToken');
+    if (!input || !btn) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+    }
+}
+
+function saveTelegramConfig() {
+    var token = document.getElementById('telegramBotToken').value.trim();
+    var chatId = document.getElementById('telegramChatId').value.trim();
+    var botName = document.getElementById('telegramBotName').value.trim();
+
+    if (!token || !chatId) {
+        showToast('⚠️ Vui lòng nhập Bot Token và Chat ID', 'warning');
+        return;
+    }
+
+    localStorage.setItem('telegram_bot_token', token);
+    localStorage.setItem('telegram_chat_id', chatId);
+    if (botName) {
+        localStorage.setItem('telegram_bot_name', botName);
+    }
+
+    // Cập nhật biến global trong telegram.js nếu có
+    if (typeof window.TELEGRAM_BOT_TOKEN !== 'undefined') {
+        window.TELEGRAM_BOT_TOKEN = token;
+    }
+    if (typeof window.TELEGRAM_CHAT_ID !== 'undefined') {
+        window.TELEGRAM_CHAT_ID = chatId;
+    }
+
+    var statusEl = document.getElementById('telegramConfigStatus');
+    if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình Telegram';
+    showToast('✅ Đã lưu cấu hình Telegram', 'success');
+}
+
+function testTelegramConfig() {
+    var token = localStorage.getItem('telegram_bot_token');
+    var chatId = localStorage.getItem('telegram_chat_id');
+    if (!token || !chatId) {
+        showToast('⚠️ Chưa có cấu hình Telegram', 'warning');
+        return;
+    }
+
+    var statusEl = document.getElementById('telegramConfigStatus');
+    if (statusEl) statusEl.textContent = '📨 Đang gửi tin nhắn thử...';
+
+    var message = encodeURIComponent('🟢 *Tin nhắn thử từ POS* \n\nNếu bạn thấy tin nhắn này, cấu hình Telegram đã hoạt động!');
+    var url = 'https://api.telegram.org/bot' + token + '/sendMessage?chat_id=' + chatId + '&text=' + message + '&parse_mode=Markdown';
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.timeout = 10000;
+
+    xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            if (statusEl) statusEl.textContent = '✅ Gửi thử thành công!';
+            showToast('✅ Gửi tin nhắn thử thành công', 'success');
+        } else {
+            if (statusEl) statusEl.textContent = '❌ Lỗi: ' + xhr.status;
+            showToast('❌ Gửi thử thất bại (HTTP ' + xhr.status + ')', 'error');
+        }
+    };
+
+    xhr.onerror = function() {
+        if (statusEl) statusEl.textContent = '❌ Không thể kết nối Telegram';
+        showToast('❌ Không thể kết nối Telegram API', 'error');
+    };
+
+    xhr.ontimeout = function() {
+        if (statusEl) statusEl.textContent = '❌ Hết thời gian chờ';
+        showToast('❌ Hết thời gian chờ kết nối Telegram', 'error');
+    };
+
+    xhr.send();
+}
+
+function clearTelegramConfig() {
+    if (!confirm('Xóa cấu hình Telegram?')) return;
+    localStorage.removeItem('telegram_bot_token');
+    localStorage.removeItem('telegram_chat_id');
+    localStorage.removeItem('telegram_bot_name');
+
+    document.getElementById('telegramBotToken').value = '';
+    document.getElementById('telegramChatId').value = '';
+    document.getElementById('telegramBotName').value = '';
+
+    var statusEl = document.getElementById('telegramConfigStatus');
+    if (statusEl) statusEl.textContent = '🗑️ Đã xóa cấu hình Telegram';
+    showToast('🗑️ Đã xóa cấu hình Telegram', 'info');
+}
+
+// ============================================================
+// 6. PHÂN QUYỀN NHÂN VIÊN (Staff Permission)
+// ============================================================
+
+function loadStaffPermissionList() {
+    var listEl = document.getElementById('staffPermissionList');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<div class="permission-loading">Đang tải...</div>';
+
+    if (typeof DB === 'undefined' || typeof DB.getStaffs !== 'function') {
+        listEl.innerHTML = '<div class="permission-loading">⚠️ Chưa sẵn sàng</div>';
+        return;
+    }
+
+    // Ưu tiên đọc từ local cache trước, sau đó mới fetch từ Firebase
+    var localPromise = (typeof DB.getAll === 'function') ? DB.getAll('staffs') : Promise.resolve(null);
+    var fbPromise = DB.getStaffs();
+    Promise.all([localPromise, fbPromise]).then(function(results) {
+        var staffs = results[1] || results[0] || [];
+        if (!staffs || staffs.length === 0) {
+            listEl.innerHTML = '<div class="permission-loading">Chưa có nhân viên nào</div>';
+            return;
+        }
+
+        var currentUser = DB.getCurrentUser();
+        var currentUserId = currentUser ? currentUser.id : null;
+
+        var html = '';
+        for (var i = 0; i < staffs.length; i++) {
+            var staff = staffs[i];
+            if (!staff) continue;
+
+            var name = staff.displayName || staff.username || staff.id || 'Unknown';
+            var username = staff.username || '';
+            var role = staff.role || 'staff';
+            var isSelf = staff.id === currentUserId;
+
+            var roleClass = isSelf ? 'self' : role;
+            var roleLabel = isSelf ? '👤 Chính bạn' : (role === 'admin' ? '🔑 Admin' : '👤 Staff');
+
+            html += '<div class="permission-staff-item" onclick="' + (isSelf ? '' : 'toggleStaffRole(\'' + escapeJsString(staff.id) + '\', \'' + escapeJsString(role) + '\')') + '">' +
+                '<div class="permission-staff-info">' +
+                '<span class="permission-staff-name">' + escapeHtml(name) + '</span>' +
+                (username ? '<span class="permission-staff-username">@' + escapeHtml(username) + '</span>' : '') +
+                '</div>' +
+                '<span class="permission-staff-role ' + roleClass + '">' + roleLabel + '</span>' +
+                '</div>';
+        }
+
+        listEl.innerHTML = html;
+    }).catch(function(err) {
+        listEl.innerHTML = '<div class="permission-loading">❌ Lỗi tải danh sách</div>';
+        console.error('loadStaffPermissionList error:', err);
+    });
+}
+
+function toggleStaffRole(staffId, currentRole) {
+    if (!staffId) return;
+
+    var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
+    if (!isAdmin) {
+        showToast('⚠️ Chỉ admin mới có thể thay đổi quyền', 'warning');
+        return;
+    }
+
+    var newRole = (currentRole === 'admin') ? 'staff' : 'admin';
+    var confirmMsg = (newRole === 'admin')
+        ? 'Bạn có chắc muốn nâng cấp nhân viên này lên Admin?'
+        : 'Bạn có chắc muốn hạ quyền nhân viên này xuống Staff?';
+
+    if (!confirm(confirmMsg)) return;
+
+    DB.update('staffs', staffId, { role: newRole }).then(function() {
+        showToast('✅ Đã thay đổi quyền thành ' + (newRole === 'admin' ? 'Admin' : 'Staff'), 'success');
+        loadStaffPermissionList();
+    }).catch(function(err) {
+        console.error('toggleStaffRole error:', err);
+        showToast('❌ Lỗi thay đổi quyền', 'error');
+    });
+}
+
+function createNewStaff() {
+    var username = document.getElementById('newStaffUsername').value.trim();
+    var password = document.getElementById('newStaffPassword').value.trim();
+
+    if (!username || !password) {
+        showToast('⚠️ Vui lòng nhập tên đăng nhập và mật khẩu', 'warning');
+        return;
+    }
+
+    if (password.length < 4) {
+        showToast('⚠️ Mật khẩu phải có ít nhất 4 ký tự', 'warning');
+        return;
+    }
+
+    if (typeof DB === 'undefined' || typeof DB.createStaff !== 'function') {
+        showToast('⚠️ Chưa sẵn sàng', 'warning');
+        return;
+    }
+
+    var statusEl = document.getElementById('staffPermissionStatus');
+    if (statusEl) statusEl.textContent = 'Đang tạo...';
+
+    DB.createStaff({
+        username: username,
+        password: password,
+        role: 'staff',
+        displayName: username
+    }).then(function() {
+        document.getElementById('newStaffUsername').value = '';
+        document.getElementById('newStaffPassword').value = '';
+        if (statusEl) statusEl.textContent = '✅ Đã tạo nhân viên ' + username;
+        showToast('✅ Đã tạo nhân viên ' + username, 'success');
+        loadStaffPermissionList();
+    }).catch(function(err) {
+        console.error('createNewStaff error:', err);
+        if (statusEl) statusEl.textContent = '❌ Lỗi: ' + (err.message || 'Không thể tạo');
+        showToast('❌ Lỗi tạo nhân viên', 'error');
+    });
+}
+
+// ============================================================
+// 7. ESCAPE HELPER
+// ============================================================
+
+function escapeJsString(str) {
+    if (!str) return '';
+    return str.replace(/\\/g, '\\\\')
+              .replace(/'/g, "\\'")
+              .replace(/"/g, '\\"')
+              .replace(/\n/g, '\\n')
+              .replace(/\r/g, '\\r');
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&')
+              .replace(/</g, '<')
+              .replace(/>/g, '>')
+              .replace(/"/g, '"')
+              .replace(/'/g, '&#039;');
 }
 
 // ============================================================

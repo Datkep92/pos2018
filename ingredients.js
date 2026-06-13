@@ -122,6 +122,8 @@ function deductIngredients(items) {
 function restoreIngredients(items) {
     _buildLookups();
     var updates = [];
+    // FIX: items có thể undefined (giao dịch debt_payment không có items)
+    if (!items || !items.length) return Promise.resolve(updates);
     for (var i = 0; i < items.length; i++) {
         var orderItem = items[i];
         var baseName = orderItem.name.replace(/\s*\([^)]*\)/g, '').trim();

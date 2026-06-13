@@ -68,7 +68,8 @@ function loadData() {
         DB.getAll('cost_categories'),
         DB.getAll('cost_transactions'),
         DB.getAll('inventory_transactions'),
-        DB.getAll('manager_cash_pickups')
+        DB.getAll('manager_cash_pickups'),
+        DB.getAll('info')
     ]).then(function(results) {
         menuItems = results[0] || [];
         // Sắp xếp menuItems theo sortOrder để kéo thả hoạt động đúng
@@ -89,6 +90,24 @@ function loadData() {
         window.customers = customers;
         window.inventoryTransactions = inventoryTransactions;
         window.managerCashPickups = managerCashPickups;
+        // Load shop info
+        var shopInfoList = results[8] || [];
+        window.shopInfo = shopInfoList.length > 0 ? shopInfoList[0] : null;
+        // Shop config với fallback values
+        window.shopConfig = {
+            telegramBotToken: window.shopInfo && window.shopInfo.telegramBotToken ? window.shopInfo.telegramBotToken : '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+            telegramChatId: window.shopInfo && window.shopInfo.telegramChatId ? window.shopInfo.telegramChatId : '6372876364',
+            lockPassword: window.shopInfo && window.shopInfo.lockPassword ? window.shopInfo.lockPassword : '28122020',
+            lockStartHour: window.shopInfo && window.shopInfo.lockStartHour !== undefined ? window.shopInfo.lockStartHour : 17,
+            lockEndHour: window.shopInfo && window.shopInfo.lockEndHour !== undefined ? window.shopInfo.lockEndHour : 5,
+            lockEndMinute: window.shopInfo && window.shopInfo.lockEndMinute !== undefined ? window.shopInfo.lockEndMinute : 30,
+            tableLockHours: window.shopInfo && window.shopInfo.tableLockHours !== undefined ? window.shopInfo.tableLockHours : 5
+        };
+        // Cập nhật tên quán trên header từ DB
+        var shopNameEl = document.getElementById('shopNameHeader');
+        if (shopNameEl && window.shopInfo && window.shopInfo.name) {
+            shopNameEl.textContent = window.shopInfo.name;
+        }
         renderTables();
         updateRecentToast();
     }).then(function() {

@@ -121,6 +121,7 @@ function renderOrderCategoriesColumn() {
         _menuCategoryIds.push(categories[i].id);
     }
     
+    // === RENDER THANH CATEGORIES NGANG (cho landscape) ===
     var html = '';
     // Nút sắp xếp danh mục - chỉ hiển thị khi có danh mục từ DB
     if (window.menuCategories && window.menuCategories.length > 1) {
@@ -143,6 +144,34 @@ function renderOrderCategoriesColumn() {
     // Nếu đang ở chế độ sắp xếp danh mục, gắn drag events
     if (_isCategoryReorderMode) {
         _enableCatDragReorder(container);
+    }
+    
+    // === RENDER DROPDOWN SELECT (cho mobile/portrait) ===
+    _renderCategorySelect(categories);
+}
+
+// Render dropdown select để chọn danh mục trên mobile (thay thế thanh ngang)
+function _renderCategorySelect(categories) {
+    var select = document.getElementById('orderCategorySelect');
+    if (!select) return;
+    
+    var currentVal = select.value;
+    var html = '';
+    for (var i = 0; i < categories.length; i++) {
+        var cat = categories[i];
+        var selected = (cat.id === currentMenuCategory) ? ' selected' : '';
+        html += '<option value="' + cat.id + '"' + selected + '>' + cat.icon + ' ' + escapeHtml(cat.name) + '</option>';
+    }
+    select.innerHTML = html;
+}
+
+// Xử lý khi chọn danh mục từ dropdown (mobile)
+function onCategorySelectChange() {
+    var select = document.getElementById('orderCategorySelect');
+    if (!select) return;
+    var categoryId = select.value;
+    if (categoryId) {
+        renderMenuByCategory(categoryId);
     }
 }
 
@@ -167,6 +196,14 @@ function renderMenuByCategory(categoryId) {
     
     var container = document.getElementById('menuGrid');
     if (!container) return;
+    
+    // Reset scroll của menu column về đầu mỗi khi chuyển danh mục
+    var menuColumn = document.querySelector('.order-menu-column');
+    if (menuColumn) menuColumn.scrollTop = 0;
+    
+    // Cập nhật dropdown select nếu đang hiển thị
+    var catSelect = document.getElementById('orderCategorySelect');
+    if (catSelect) catSelect.value = categoryId;
     
     // Lọc món theo danh mục
     var items = [];
@@ -746,6 +783,9 @@ function _syncCategorySortOrderToFirebase() {
 }
 
 // ========== VUỐT LÊN/XUỐNG CHUYỂN DANH MỤC ==========
+// Biến lưu scrollTop tại thời điểm touchstart để phát hiện scroll dọc
+var _menuSwipeStartScrollTop = 0;
+
 function _initMenuSwipe() {
     var el = document.querySelector('.order-menu-column');
     if (!el) return;
@@ -757,11 +797,19 @@ function _initMenuSwipe() {
 }
 function _menuSwipeStart(e) {
     _menuSwipeStartY = e.touches[0].clientY;
+    // Lưu scrollTop tại thời điểm bắt đầu chạm
+    var menuEl = document.querySelector('.order-menu-column');
+    _menuSwipeStartScrollTop = menuEl ? menuEl.scrollTop : 0;
 }
 function _menuSwipeEnd(e) {
     if (_menuCategoryIds.length < 2) return;
     // Khóa vuốt khi đang ở chế độ sắp xếp món
     if (_isReorderMode) return;
+    
+    // QUAN TRỌNG: Nếu scrollTop thay đổi so với lúc touchstart -> đây là thao tác cuộn, không phải vuốt chuyển danh mục
+    var menuEl = document.querySelector('.order-menu-column');
+    if (menuEl && menuEl.scrollTop !== _menuSwipeStartScrollTop) return;
+    
     var endY = e.changedTouches[0].clientY;
     var diff = _menuSwipeStartY - endY;
     // Ngưỡng 50px để tránh vuốt vô tình
@@ -917,6 +965,7 @@ function _doRenderCart() {
                 '</div>' +
                 // Nút mệnh giá thanh toán nhanh tiền mặt
 '<div class="denom-actions">' +
+    '<button class="denom-btn denom-custom" onclick="showTakeawayCustomDenomInput()">✏️ Tùy chỉnh</button>' +
     '<button class="denom-btn" onclick="takeawayCashPayWithDenom(50000)">50.000đ</button>' +
     '<button class="denom-btn" onclick="takeawayCashPayWithDenom(100000)">100.000đ</button>' +
     '<button class="denom-btn" onclick="takeawayCashPayWithDenom(200000)">200.000đ</button>' +
@@ -1313,6 +1362,69 @@ function handleAddToExistingTable() {
 var _takeawayChangeToastEl = null;
 var _takeawayChangeGivenAmount = 0;
 
+// Hàm hiển thị popup nhập số tiền tùy chỉnh cho takeaway
+function showTakeawayCustomDenomInput() {
+    // Xóa popup cũ nếu có
+    var oldOverlay = document.getElementById('customDenomOverlay');
+    if (oldOverlay) oldOverlay.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'customDenomOverlay';
+    overlay.className = 'custom-denom-overlay';
+    overlay.innerHTML =
+        '<div class="custom-denom-modal">' +
+            '<div class="custom-denom-header">✏️ Nhập số tiền khách đưa</div>' +
+            '<div class="custom-denom-body">' +
+                '<input type="number" id="customDenomInput" class="custom-denom-input" placeholder="0" min="0" step="1000" inputmode="numeric">' +
+                
+            '</div>' +
+            '<div class="custom-denom-footer">' +
+                '<button class="denom-cancel-btn" onclick="closeCustomDenomInput()">Hủy</button>' +
+                '<button class="denom-confirm-btn" onclick="confirmTakeawayCustomDenom()">Xác nhận</button>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+
+    // Focus vào input
+    setTimeout(function() {
+        var input = document.getElementById('customDenomInput');
+        if (input) input.focus();
+    }, 100);
+
+    // Gán sự kiện click cho các nút gợi ý
+    var suggestBtns = overlay.querySelectorAll('.denom-suggest-btn');
+    for (var i = 0; i < suggestBtns.length; i++) {
+        suggestBtns[i].onclick = function() {
+            var amount = parseInt(this.getAttribute('data-amount'));
+            document.getElementById('customDenomInput').value = amount;
+        };
+    }
+
+    // Enter để xác nhận
+    setTimeout(function() {
+        var input = document.getElementById('customDenomInput');
+        if (input) {
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    confirmTakeawayCustomDenom();
+                }
+            };
+        }
+    }, 200);
+}
+
+function confirmTakeawayCustomDenom() {
+    var input = document.getElementById('customDenomInput');
+    if (!input) return;
+    var amount = parseInt(input.value);
+    if (!amount || amount <= 0) {
+        showToast('❌ Vui lòng nhập số tiền hợp lệ', 'error');
+        return;
+    }
+    closeCustomDenomInput();
+    takeawayCashPayWithDenom(amount);
+}
+
 // ========== XỬ LÝ THANH TOÁN MANG ĐI ==========
 function handleTakeawayPayment(method) {
     if (!tempOrder.length) {
@@ -1673,12 +1785,138 @@ function handleDebtOrder() {
     });
 }
 
-// Xuất global (nếu cần)
-window.handleCreateNewTable = handleCreateNewTable;
-window.handleAddToExistingTable = handleAddToExistingTable;
-window.handleTakeawayPayment = handleTakeawayPayment;
-window.handleGrabOrder = handleGrabOrder;
-window.handleDebtOrder = handleDebtOrder;
+// ========== TẠO MÓN NHANH (QUICK CREATE MENU ITEM) ==========
+function showQuickCreateMenuItem() {
+    var oldOverlay = document.getElementById('quickCreateOverlay');
+    if (oldOverlay) oldOverlay.remove();
+
+    // Lấy danh sách danh mục từ window.menuCategories
+    var cats = window.menuCategories || [];
+    var catOptions = '';
+    for (var i = 0; i < cats.length; i++) {
+        var c = cats[i];
+        catOptions += '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>';
+    }
+
+    var overlay = document.createElement('div');
+    overlay.id = 'quickCreateOverlay';
+    overlay.className = 'quick-create-overlay';
+    // Click overlay = đóng popup, tránh cảm giác lag
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeQuickCreateMenuItem();
+    });
+    overlay.innerHTML =
+        '<div class="quick-create-modal">' +
+            '<div class="quick-create-header">➕ Tạo món nhanh</div>' +
+            '<div class="quick-create-body">' +
+                '<div class="quick-create-field">' +
+                    '<label>Tên món</label>' +
+                    '<input type="text" id="quickCreateName" class="form-input" placeholder="Nhập tên món..." autocomplete="off">' +
+                '</div>' +
+                '<div class="quick-create-field">' +
+                    '<label>Danh mục</label>' +
+                    '<select id="quickCreateCategory" class="form-input">' +
+                        catOptions +
+                    '</select>' +
+                '</div>' +
+                '<div class="quick-create-field">' +
+                    '<label>Giá bán</label>' +
+                    '<input type="number" id="quickCreatePrice" class="form-input" placeholder="0" min="0" step="1000" inputmode="numeric">' +
+                '</div>' +
+            '</div>' +
+            '<div class="quick-create-footer">' +
+                '<button class="quick-create-cancel-btn" onclick="closeQuickCreateMenuItem()">Hủy</button>' +
+                '<button class="quick-create-confirm-btn" onclick="confirmQuickCreateMenuItem()">Tạo món</button>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+
+    // Focus vào ô tên
+    setTimeout(function() {
+        var nameInput = document.getElementById('quickCreateName');
+        if (nameInput) nameInput.focus();
+    }, 200);
+
+    // Enter để submit
+    var priceInput = document.getElementById('quickCreatePrice');
+    if (priceInput) {
+        priceInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmQuickCreateMenuItem();
+            }
+        });
+    }
+    var nameInput2 = document.getElementById('quickCreateName');
+    if (nameInput2) {
+        nameInput2.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var priceInput2 = document.getElementById('quickCreatePrice');
+                if (priceInput2) priceInput2.focus();
+            }
+        });
+    }
+}
+
+function closeQuickCreateMenuItem() {
+    var overlay = document.getElementById('quickCreateOverlay');
+    if (overlay) overlay.remove();
+}
+
+function confirmQuickCreateMenuItem() {
+    var nameInput = document.getElementById('quickCreateName');
+    var catSelect = document.getElementById('quickCreateCategory');
+    var priceInput = document.getElementById('quickCreatePrice');
+
+    if (!nameInput || !catSelect || !priceInput) return;
+
+    var name = nameInput.value.trim();
+    var categoryId = catSelect.value;
+    var price = parseInt(priceInput.value);
+
+    if (!name) {
+        showToast('❌ Vui lòng nhập tên món', 'error');
+        nameInput.focus();
+        return;
+    }
+    if (!categoryId) {
+        showToast('❌ Vui lòng chọn danh mục', 'error');
+        return;
+    }
+    if (!price || price <= 0) {
+        showToast('❌ Vui lòng nhập giá bán hợp lệ', 'error');
+        priceInput.focus();
+        return;
+    }
+
+    // Tìm sortOrder cao nhất để thêm món mới xuống cuối
+    var maxSort = 0;
+    for (var i = 0; i < menuItems.length; i++) {
+        var s = menuItems[i].sortOrder || 0;
+        if (s > maxSort) maxSort = s;
+    }
+
+    var newItem = {
+        name: name,
+        categoryId: categoryId,
+        price: price,
+        sortOrder: maxSort + 1,
+        hasVariants: false,
+        createdAt: new Date().toISOString()
+    };
+
+    closeQuickCreateMenuItem();
+    showToast('⏳ Đang tạo món...', 'warning');
+
+    DB.create('menu', newItem).then(function(saved) {
+        showToast('✅ Đã tạo món "' + name + '"', 'success');
+        // Menu sẽ tự cập nhật qua realtime subscription
+    }).catch(function(err) {
+        console.error('Lỗi tạo món:', err);
+        showToast('❌ Lỗi tạo món: ' + (err.message || 'unknown'), 'error');
+    });
+}
 
 // ========== SWIPE TO DELETE CHO CART ITEM ==========
 function _initCartSwipe() {
@@ -1756,3 +1994,7 @@ window.toggleCategoryReorderMode = toggleCategoryReorderMode;
 window._checkAndDeductIngredients = _checkAndDeductIngredients;
 // OPTIMIZE: Export _initMenuEventDelegation để pos-app.js có thể gọi khi khởi tạo
 window._initMenuEventDelegation = _initMenuEventDelegation;
+// Export tạo món nhanh
+window.showQuickCreateMenuItem = showQuickCreateMenuItem;
+window.closeQuickCreateMenuItem = closeQuickCreateMenuItem;
+window.confirmQuickCreateMenuItem = confirmQuickCreateMenuItem;

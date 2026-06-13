@@ -1,17 +1,25 @@
 // tables.js - Quản lý bàn
 // Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 
-// ========== HẰNG SỐ KHÓA BÀN ==========
-var TABLE_LOCK_HOURS = 5; // Khóa bàn sau 5h sử dụng (áp dụng ngoài khung giờ lock period)
-var TABLE_LOCK_MS = TABLE_LOCK_HOURS * 60 * 60 * 1000;
-var LOCK_PASSWORD = '28122020';
-
-// ========== KHUNG GIỜ KHÓA TOÀN BỘ ==========
-// 17h00 hôm nay -> 5h30 hôm sau: tất cả bàn đều bị khóa
-// Sau 5h30: áp dụng khóa theo thời gian ngồi (startTime + 5h)
-var LOCK_START_HOUR = 17;  // 17h00 bắt đầu khóa
-var LOCK_END_HOUR = 5;     // 5h30 kết thúc khóa (5h + 30 phút)
-var LOCK_END_MINUTE = 30;
+// ========== HẰNG SỐ KHÓA BÀN (đọc từ shopConfig, fallback hardcode) ==========
+function _getTableLockHours() {
+    return (window.shopConfig && window.shopConfig.tableLockHours !== undefined) ? window.shopConfig.tableLockHours : 5;
+}
+function _getTableLockMs() {
+    return _getTableLockHours() * 60 * 60 * 1000;
+}
+function _getLockPassword() {
+    return (window.shopConfig && window.shopConfig.lockPassword) ? window.shopConfig.lockPassword : '28122020';
+}
+function _getLockStartHour() {
+    return (window.shopConfig && window.shopConfig.lockStartHour !== undefined) ? window.shopConfig.lockStartHour : 17;
+}
+function _getLockEndHour() {
+    return (window.shopConfig && window.shopConfig.lockEndHour !== undefined) ? window.shopConfig.lockEndHour : 5;
+}
+function _getLockEndMinute() {
+    return (window.shopConfig && window.shopConfig.lockEndMinute !== undefined) ? window.shopConfig.lockEndMinute : 30;
+}
 
 // Biến global lưu ID toast thanh toán để có thể ẩn sau khi xử lý xong
 var _paymentToastId = null;
@@ -20,16 +28,19 @@ function isInLockPeriod() {
     var now = new Date();
     var hourVietnam = (now.getUTCHours() + 7) % 24;
     var minuteVietnam = now.getUTCMinutes(); // UTC+7, minutes same
+    var startH = _getLockStartHour();
+    var endH = _getLockEndHour();
+    var endM = _getLockEndMinute();
     
-    if (hourVietnam >= LOCK_START_HOUR) {
-        // 17h00 - 23h59: đang trong lock period
+    if (hourVietnam >= startH) {
+        // startH:00 - 23h59: đang trong lock period
         return true;
     }
-    if (hourVietnam < LOCK_END_HOUR || (hourVietnam === LOCK_END_HOUR && minuteVietnam < LOCK_END_MINUTE)) {
-        // 0h00 - 5h29: đang trong lock period
+    if (hourVietnam < endH || (hourVietnam === endH && minuteVietnam < endM)) {
+        // 0h00 - endH:endM: đang trong lock period
         return true;
     }
-    // 5h30 - 16h59: ngoài lock period
+    // endH:endM - (startH-1):59: ngoài lock period
     return false;
 }
 
@@ -42,7 +53,7 @@ function isTableLocked(table) {
     
     // Điều kiện 2: Ngoài lock period -> khóa theo thời gian ngồi (quá 5h)
     var elapsed = Date.now() - new Date(table.startTime).getTime();
-    if (elapsed >= TABLE_LOCK_MS) return true;
+    if (elapsed >= _getTableLockMs()) return true;
     
     return false;
 }
@@ -56,15 +67,15 @@ function getTableLockInfo(table) {
     
     // Đang trong lock period (17h-5h30)
     if (isInLockPeriod()) {
-        if (hourVietnam >= LOCK_START_HOUR) {
-            return { hours: 0, mins: 0, elapsed: 0, reason: 'đã qua ' + LOCK_START_HOUR + 'h' };
+        if (hourVietnam >= _getLockStartHour()) {
+            return { hours: 0, mins: 0, elapsed: 0, reason: 'đã qua ' + _getLockStartHour() + 'h' };
         } else {
             return { hours: 0, mins: 0, elapsed: 0, reason: 'khung giờ khóa (17h-5h30)' };
         }
     }
     
     // Ngoài lock period: kiểm tra thời gian ngồi
-    if (elapsed >= TABLE_LOCK_MS) {
+    if (elapsed >= _getTableLockMs()) {
         var hours = Math.floor(elapsed / 3600000);
         var mins = Math.floor((elapsed % 3600000) / 60000);
         return { hours: hours, mins: mins, elapsed: elapsed, reason: 'quá ' + hours + 'h' + mins + 'p' };
@@ -76,7 +87,7 @@ function getTableLockInfo(table) {
 // ========== YÊU CẦU MẬT KHẨU ==========
 function requirePassword(action, callback) {
     var pwd = prompt('🔒 Nhập mật khẩu để ' + action + ':');
-    if (pwd === LOCK_PASSWORD) {
+    if (pwd === _getLockPassword()) {
         callback();
     } else if (pwd !== null) {
         showToast('❌ Sai mật khẩu!', 'error');

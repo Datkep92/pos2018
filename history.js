@@ -11,13 +11,19 @@ function isTransactionLocked(trans) {
     var hourVN = (payTime.getUTCHours() + 7) % 24;
     var minVN = payTime.getUTCMinutes();
     
-    // Điều kiện 1: Thanh toán trong khung giờ khóa cố định (17h-5h30)
-    // 17h00-23h59
-    if (hourVN >= 17) return true;
-    // 00h00-5h29
-    if (hourVN < 5 || (hourVN === 5 && minVN < 30)) return true;
+    // Đọc cấu hình lock từ shopConfig (giống tables.js)
+    var lockStartHour = (window.shopConfig && window.shopConfig.lockStartHour !== undefined) ? window.shopConfig.lockStartHour : 17;
+    var lockEndHour = (window.shopConfig && window.shopConfig.lockEndHour !== undefined) ? window.shopConfig.lockEndHour : 5;
+    var lockEndMinute = (window.shopConfig && window.shopConfig.lockEndMinute !== undefined) ? window.shopConfig.lockEndMinute : 30;
+    var lockHours = (window.shopConfig && window.shopConfig.tableLockHours !== undefined) ? window.shopConfig.tableLockHours : 5;
     
-    // Điều kiện 2: Nếu là bàn (dinein), kiểm tra thời gian ngồi quá 5h
+    // Điều kiện 1: Thanh toán trong khung giờ khóa cố định (vd: 22h-5h30)
+    // lockStartHour:00 - 23h59
+    if (hourVN >= lockStartHour) return true;
+    // 00h00 - lockEndHour:lockEndMinute
+    if (hourVN < lockEndHour || (hourVN === lockEndHour && minVN < lockEndMinute)) return true;
+    
+    // Điều kiện 2: Nếu là bàn (dinein), kiểm tra thời gian ngồi quá giới hạn
     if (trans.type === 'dinein' && trans.tableId) {
         // Dùng tableTime nếu có (vd: "2h15p", "5h30p")
         if (trans.tableTime) {
@@ -25,14 +31,14 @@ function isTransactionLocked(trans) {
             if (match) {
                 var hours = parseInt(match[1], 10);
                 var mins = parseInt(match[2] || '0', 10);
-                if (hours > 5 || (hours === 5 && mins > 0)) return true;
+                if (hours > lockHours || (hours === lockHours && mins > 0)) return true;
             }
         }
         // Fallback: dùng originalCreatedAt (thời gian gốc) nếu có
         if (trans.originalCreatedAt) {
             var startTime = new Date(trans.originalCreatedAt);
             var elapsed = payTime.getTime() - startTime.getTime();
-            if (elapsed >= 5 * 60 * 60 * 1000) return true;
+            if (elapsed >= lockHours * 60 * 60 * 1000) return true;
         }
     }
     
@@ -116,9 +122,6 @@ function _renderTxItem(tx) {
         customerHtml = '<span class="history-customer">👤 ' + escapeHtml(tx.customer.name) + '</span>';
     }
 
-    var refundBtn = isRefunded ? '' :
-        '<button class="btn-refund" onclick="event.stopPropagation(); refundTransaction(\'' + tx.id + '\')">Hoàn tác</button>';
-
     var itemCount = 0;
     if (tx.items && tx.items.length) {
         for (var j = 0; j < tx.items.length; j++) {
@@ -139,6 +142,10 @@ function _renderTxItem(tx) {
     else if (isDebtRecord) amountClass += ' debt-record-amount';
     else if (isDebtPayment) amountClass += ' debt-payment-amount';
 
+    // Vuốt trái để hoàn tác (swipe-to-refund)
+    var swipeHtml = isRefunded ? '' :
+        '<div class="history-swipe-actions"><button class="swipe-refund-btn" onclick="event.stopPropagation(); refundTransaction(\'' + tx.id + '\')">↩️ Hoàn tác</button></div>';
+
     return '<div class="' + itemClass + '" onclick="showTransactionDetail(\'' + tx.id + '\')">' +
         '<div class="history-line1">' +
             '<span class="history-time">' + time + '</span>' +
@@ -147,16 +154,11 @@ function _renderTxItem(tx) {
             '<span class="history-item-count">📦 ' + itemCount + ' món</span>' +
             '<span class="history-method ' + methodClass + '">' + method + '</span>' +
             customerHtml +
-        '</div>' +
-        '<div class="history-line2">' +
-            '<div class="history-actions">' +
-                refundBtn +
-                '<span class="history-expand">Chi tiết →</span>' +
-            '</div>' +
-            '<div class="' + amountClass + '">' +
+            '<span class="' + amountClass + ' history-amount-inline">' +
                 amountSign + ' ' + formatMoney(tx.amount) +
-            '</div>' +
+            '</span>' +
         '</div>' +
+        swipeHtml +
     '</div>';
 }
 
@@ -239,6 +241,7 @@ function renderHistoryByDate(dateObj) {
                 '<div class="history-column"><div class="history-column-title">💰 Tiền mặt</div>' + (html1 || '<div class="empty-state" style="padding:12px;">Không có</div>') + '</div>' +
                 '<div class="history-column"><div class="history-column-title">💳🚕 CK / Grab</div>' + (html2 || '<div class="empty-state" style="padding:12px;">Không có</div>') + '</div>';
         }
+        _initHistorySwipe();
     });
 }
 
@@ -320,6 +323,7 @@ function renderHistoryByDateStr(dateStr) {
                 '<div class="history-column"><div class="history-column-title">💰 Tiền mặt</div>' + (html1 || '<div class="empty-state" style="padding:12px;">Không có</div>') + '</div>' +
                 '<div class="history-column"><div class="history-column-title">💳🚕 CK / Grab</div>' + (html2 || '<div class="empty-state" style="padding:12px;">Không có</div>') + '</div>';
         }
+        _initHistorySwipe();
     });
 }
 
@@ -617,49 +621,68 @@ function proceedRefund(trans, needPassword) {
         showRefundReasonModal(function(reason) {
             if (!reason) return;
             restoreIngredients(trans.items).then(function() {
+                // Xử lý hoàn tác nợ: trả về Promise để đợi hoàn thành trước khi update transaction
+                var debtPromise = Promise.resolve();
+                
                 if (trans.type === 'debt_payment' && trans.customer) {
                     if (trans.paymentMethod === 'debt') {
                         // GHI NỢ: hoàn tác = trừ nợ (vì lúc ghi nợ đã cộng nợ)
-                        var c = null;
-                        for (var i = 0; i < customers.length; i++) {
-                            if (customers[i].id === trans.customer.id) { c = customers[i]; break; }
-                        }
-                        if (c) {
-                            c.totalDebt = Math.max(0, (c.totalDebt || 0) - trans.amount);
-                            c.debtHistory = c.debtHistory || [];
-                            c.debtHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -trans.amount, note: 'Hoàn tác ghi nợ - ' + reason, status: 'cancelled' });
-                            DB.update('customers', c.id, { totalDebt: c.totalDebt, debtHistory: c.debtHistory }).then(function() {
-                                return DB.getAll('customers').then(function(newCusts) { customers = newCusts; });
-                            });
-                        }
+                        debtPromise = new Promise(function(resolve) {
+                            var c = null;
+                            for (var i = 0; i < customers.length; i++) {
+                                if (customers[i].id === trans.customer.id) { c = customers[i]; break; }
+                            }
+                            if (c) {
+                                c.totalDebt = Math.max(0, (c.totalDebt || 0) - trans.amount);
+                                c.debtHistory = c.debtHistory || [];
+                                c.debtHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -trans.amount, note: 'Hoàn tác ghi nợ - ' + reason, status: 'cancelled' });
+                                DB.update('customers', c.id, { totalDebt: c.totalDebt, debtHistory: c.debtHistory }).then(function() {
+                                    return DB.getAll('customers').then(function(newCusts) {
+                                        customers = newCusts;
+                                        resolve();
+                                    });
+                                });
+                            } else {
+                                resolve();
+                            }
+                        });
                     } else {
                         // THANH TOÁN NỢ: hoàn tác = cộng lại nợ (vì lúc thanh toán đã trừ nợ)
-                        addCustomerDebt(trans.customer.id, trans.amount, 'Hoàn tiền - ' + reason);
+                        debtPromise = addCustomerDebt(trans.customer.id, trans.amount, 'Hoàn tiền - ' + reason);
                     }
                 }
                 
-                // YÊU CẦU 2: Lưu thời gian gốc trước khi cập nhật createdAt
-                if (!trans.originalCreatedAt) {
-                    trans.originalCreatedAt = trans.createdAt;
+                // Khôi phục bàn nếu là giao dịch dinein
+                var tablePromise = Promise.resolve();
+                if (trans.type === 'dinein' && trans.tableId) {
+                    tablePromise = restoreTable(trans);
                 }
-                trans.createdAt = new Date().toISOString(); // Cập nhật để nổi lên đầu sort
-                trans.refunded = true;
-                trans.refundReason = reason;
-                trans.refundedAt = Date.now();
                 
-                DB.update('transactions', transactionId, trans).then(function() {
-                    showToast('✅ Đã hủy giao dịch', 'success');
-                    // Gửi thông báo Telegram
-                    if (typeof notifyTelegramRefund === 'function') {
-                        notifyTelegramRefund(trans, reason, needPassword);
+                // Đợi xử lý nợ + khôi phục bàn xong mới update transaction
+                Promise.all([debtPromise, tablePromise]).then(function() {
+                    // YÊU CẦU 2: Lưu thời gian gốc trước khi cập nhật createdAt
+                    if (!trans.originalCreatedAt) {
+                        trans.originalCreatedAt = trans.createdAt;
                     }
-                    // Cập nhật lại lịch sử và báo cáo
-                    if (currentTab === 'history') {
-                        renderHistoryByDate(currentHistoryDate);
-                    }
-                    if (currentTab === 'report') {
-                        renderReport(currentReportDate);
-                    }
+                    trans.createdAt = new Date().toISOString(); // Cập nhật để nổi lên đầu sort
+                    trans.refunded = true;
+                    trans.refundReason = reason;
+                    trans.refundedAt = Date.now();
+                    
+                    DB.update('transactions', transactionId, trans).then(function() {
+                        showToast('✅ Đã hủy giao dịch', 'success');
+                        // Gửi thông báo Telegram
+                        if (typeof notifyTelegramRefund === 'function') {
+                            notifyTelegramRefund(trans, reason, needPassword);
+                        }
+                        // Cập nhật lại lịch sử và báo cáo
+                        if (currentTab === 'history') {
+                            renderHistoryByDate(currentHistoryDate);
+                        }
+                        if (currentTab === 'report') {
+                            renderReport(currentReportDate);
+                        }
+                    });
                 });
             });
         });
@@ -670,6 +693,73 @@ function proceedRefund(trans, needPassword) {
     } else {
         doRefund();
     }
+}
+
+// ========== KHÔI PHỤC BÀN KHI HOÀN TÁC GIAO DỊCH DINEIN ==========
+function restoreTable(trans) {
+    return new Promise(function(resolve) {
+        // Tính tổng tiền từ items (ưu tiên dùng trans.amount)
+        var total = trans.amount || 0;
+        if (total === 0 && trans.items && trans.items.length) {
+            for (var i = 0; i < trans.items.length; i++) {
+                total += (trans.items[i].price || 0) * (trans.items[i].qty || 1);
+            }
+        }
+        
+        // Lấy customerId, customerName từ transaction
+        var customerId = null;
+        var customerName = null;
+        if (trans.customer) {
+            customerId = trans.customer.id || null;
+            customerName = trans.customer.name || null;
+        }
+        
+        // Tạo dữ liệu bàn để khôi phục
+        var tableData = {
+            name: trans.tableName || 'Bàn',
+            items: trans.items || [],
+            total: total,
+            startTime: trans.startTime || new Date().toISOString(),
+            customerId: customerId,
+            customerName: customerName,
+            recentAdds: []
+        };
+        
+        // Kiểm tra xem bàn đã tồn tại chưa (tránh ghi đè nếu bàn đã được tạo lại)
+        DB.get('tables', String(trans.tableId)).then(function(existingTable) {
+            if (existingTable && existingTable.items && existingTable.items.length > 0) {
+                // Bàn đã có dữ liệu (có thể đã được dùng lại) -> không ghi đè
+                console.warn('Table ' + trans.tableId + ' already has data, skipping restore');
+                resolve();
+            } else {
+                // Khôi phục bàn: tạo mới hoặc cập nhật
+                if (existingTable) {
+                    // Bàn đã tồn tại (rỗng) -> cập nhật
+                    DB.update('tables', String(trans.tableId), tableData).then(function() {
+                        resolve();
+                    }).catch(function() {
+                        resolve();
+                    });
+                } else {
+                    // Bàn chưa tồn tại -> tạo mới
+                    tableData.id = trans.tableId;
+                    DB.create('tables', tableData, String(trans.tableId)).then(function() {
+                        resolve();
+                    }).catch(function() {
+                        resolve();
+                    });
+                }
+            }
+        }).catch(function() {
+            // Nếu lỗi khi get, thử tạo mới
+            tableData.id = trans.tableId;
+            DB.create('tables', tableData, String(trans.tableId)).then(function() {
+                resolve();
+            }).catch(function() {
+                resolve();
+            });
+        });
+    });
 }
 
 function changeHistoryDate(delta) {
@@ -703,6 +793,42 @@ function addHistory(transaction) {
     return DB.create('transactions', newTrans).then(function(result) {
         // KHÔNG gọi render trực tiếp nữa, để realtime subscription tự cập nhật
     });
+}
+
+// ========== SWIPE TO REFUND ==========
+function _initHistorySwipe() {
+    var items = document.querySelectorAll('.history-item');
+    for (var i = 0; i < items.length; i++) {
+        (function(el) {
+            var startX = 0, currentX = 0, isDragging = false;
+            el.addEventListener('touchstart', function(e) {
+                startX = e.touches[0].clientX;
+                isDragging = true;
+            }, { passive: true });
+            el.addEventListener('touchmove', function(e) {
+                if (!isDragging) return;
+                currentX = e.touches[0].clientX;
+                var diff = startX - currentX;
+                if (diff > 0) {
+                    el.style.transition = 'none';
+                    el.style.transform = 'translateX(' + (-Math.min(diff, 80)) + 'px)';
+                }
+            }, { passive: true });
+            el.addEventListener('touchend', function(e) {
+                if (!isDragging) return;
+                isDragging = false;
+                el.style.transition = 'transform 0.2s ease';
+                var diff = startX - currentX;
+                if (diff > 50) {
+                    el.classList.add('swipe-reveal');
+                    el.style.transform = '';
+                } else {
+                    el.classList.remove('swipe-reveal');
+                    el.style.transform = '';
+                }
+            }, { passive: true });
+        })(items[i]);
+    }
 }
 
 // Export global

@@ -1,16 +1,21 @@
 // telegram.js - Gửi thông báo giao dịch qua Telegram Bot
 // ES5, tương thích Android 6, iOS 12
 
-var TELEGRAM_BOT_TOKEN = "8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc";
-var TELEGRAM_CHAT_ID = "6372876364";
+// Đọc token/chatId từ shopConfig (load từ DB), fallback về hardcode
+function _getTelegramToken() {
+    return (window.shopConfig && window.shopConfig.telegramBotToken) || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc';
+}
+function _getTelegramChatId() {
+    return (window.shopConfig && window.shopConfig.telegramChatId) || '6372876364';
+}
 
 // ========== GỬI THÔNG BÁO ĐƠN GIẢN ==========
 function sendTelegramMessage(message) {
     if (!message) return Promise.resolve();
     
-    var url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
+    var url = "https://api.telegram.org/bot" + _getTelegramToken() + "/sendMessage";
     var params = {
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: _getTelegramChatId(),
         text: message,
         parse_mode: "HTML"
     };

@@ -24,15 +24,53 @@ function _renderNow(key, fn) {
     fn();
 }
 
+// ========== TOGGLE RECENT TOAST (thu gọn / mở rộng) ==========
+function toggleRecentToast() {
+    var container = document.getElementById('recentToast');
+    if (!container) return;
+    container.classList.toggle('collapsed');
+    var toggleIcon = document.getElementById('recentToastToggle');
+    if (toggleIcon) {
+        toggleIcon.textContent = container.classList.contains('collapsed') ? '▼' : '▲';
+    }
+    // Lưu trạng thái vào localStorage
+    try {
+        localStorage.setItem('recentToastCollapsed', container.classList.contains('collapsed') ? '1' : '0');
+    } catch(e) {}
+}
+
+// Khôi phục trạng thái recentToast từ localStorage
+function restoreRecentToastState() {
+    var container = document.getElementById('recentToast');
+    if (!container) return;
+    try {
+        var collapsed = localStorage.getItem('recentToastCollapsed');
+        if (collapsed === '1') {
+            container.classList.add('collapsed');
+            var toggleIcon = document.getElementById('recentToastToggle');
+            if (toggleIcon) toggleIcon.textContent = '▼';
+        }
+    } catch(e) {}
+}
+
 // ========== UPDATE RECENT TOAST ==========
 function updateRecentToast() {
     var todayStr = new Date().toISOString().slice(0, 10);
     DB.getTransactionsByDate(todayStr).then(function(transactions) {
-        var validTx = transactions.filter(function(tx) { return !tx.refunded; });
+        // FIX: Hiển thị cả giao dịch hủy (refund) trong recentToast
+        // Chỉ lọc bỏ các transaction bị đánh dấu trùng lặp tự động (có note chứa 'Tự động')
+        var validTx = transactions.filter(function(tx) {
+            // Giữ lại giao dịch refunded do người dùng chủ động hủy
+            // Chỉ lọc bỏ nếu refunded và có note 'Tự động đánh dấu trùng lặp'
+            if (tx.refunded && tx.note && tx.note.indexOf('Tự động') !== -1) {
+                return false;
+            }
+            return true;
+        });
         validTx.sort(function(a, b) {
             return new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date);
         });
-        var recent = validTx.slice(0, 3);
+        var recent = validTx.slice(0, 5); // Tăng lên 5 để có chỗ cho cả giao dịch hủy
         var container = document.getElementById('recentToastList');
         if (!container) return;
         
@@ -52,7 +90,13 @@ function updateRecentToast() {
             else timeText = Math.floor(timeDiff / 60) + 'h';
             
             var shortInfo = '';
-            if (tx.tableName) {
+            if (tx.refunded) {
+                shortInfo = '↩️ Hoàn tác';
+            } else if (tx.type === 'debt_payment') {
+                shortInfo = '💢 Thanh toán nợ';
+            } else if (tx.type === 'credit') {
+                shortInfo = '💰 Tiền dư';
+            } else if (tx.tableName) {
                 var displayLabel = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
                 shortInfo = '🍽️ ' + displayLabel;
             } else if (tx.type === 'takeaway') {
@@ -70,7 +114,9 @@ function updateRecentToast() {
             var itemInfo = totalItems > 0 ? ' (' + totalItems + ' món)' : '';
             
             var methodIcon = '';
-            if (tx.paymentMethod === 'cash') methodIcon = '💰';
+            if (tx.refunded) {
+                methodIcon = '↩️';
+            } else if (tx.paymentMethod === 'cash') methodIcon = '💰';
             else if (tx.paymentMethod === 'transfer') methodIcon = '💳';
             else if (tx.paymentMethod === 'debt') methodIcon = '💢';
             else if (tx.paymentMethod === 'grab') methodIcon = '🚕';
@@ -135,7 +181,7 @@ function createTableCard(table) {
         if (typeof isTableLocked === 'function') {
             isLocked = isTableLocked(table);
         } else {
-            isLocked = diffMins >= (TABLE_LOCK_HOURS || 5) * 60;
+            isLocked = diffMins >= ((window.shopConfig && window.shopConfig.tableLockHours) || 5) * 60;
         }
     }
     
@@ -204,7 +250,7 @@ function updateTableCard(card, table) {
         if (typeof isTableLocked === 'function') {
             isLocked = isTableLocked(table);
         } else {
-            isLocked = diffMins >= (TABLE_LOCK_HOURS || 5) * 60;
+            isLocked = diffMins >= ((window.shopConfig && window.shopConfig.tableLockHours) || 5) * 60;
         }
     }
     
@@ -410,7 +456,7 @@ function startTableTimer() {
                         if (typeof isTableLocked === 'function') {
                             isLocked = isTableLocked(cachedTables[j]);
                         } else {
-                            isLocked = diffSecs >= (TABLE_LOCK_HOURS || 5) * 3600;
+                            isLocked = diffSecs >= ((window.shopConfig && window.shopConfig.tableLockHours) || 5) * 3600;
                         }
                         break;
                     }
@@ -549,5 +595,64 @@ function initRealtime() {
                 renderHistoryByDate(currentHistoryDate);
             }
         }, 300);
+    });
+
+    // Info (shop config) - cập nhật realtime khi thay đổi giờ lock, telegram, v.v.
+    DB.subscribe('info', function(data) {
+        if (!data || data.length === 0) return;
+        _debounceRealtime('info', function() {
+            // Lấy item shop_config từ mảng (chỉ có 1 item duy nhất)
+            var infoItem = null;
+            for (var i = 0; i < data.length; i++) {
+                if (data[i].id === 'shop_config') {
+                    infoItem = data[i];
+                    break;
+                }
+            }
+            if (!infoItem) return;
+            
+            // Cập nhật window.shopConfig với dữ liệu mới từ Firebase
+            var oldConfig = window.shopConfig || {};
+            window.shopConfig = {
+                telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+                telegramChatId: infoItem.telegramChatId || oldConfig.telegramChatId || '6372876364',
+                lockPassword: infoItem.lockPassword || oldConfig.lockPassword || '28122020',
+                lockStartHour: infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 17),
+                lockEndHour: infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
+                lockEndMinute: infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
+                tableLockHours: infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
+            };
+            
+            // Cập nhật tên quán trên header nếu có
+            if (infoItem.name) {
+                window.shopInfo = window.shopInfo || {};
+                window.shopInfo.name = infoItem.name;
+                var shopNameEl = document.getElementById('shopNameHeader');
+                if (shopNameEl) shopNameEl.textContent = infoItem.name;
+            }
+            
+            console.log('🔄 Shop config updated realtime:', JSON.stringify(window.shopConfig));
+        }, 200);
+    });
+    
+    // Messages - cập nhật chat realtime
+    DB.subscribe('messages', function(data) {
+        if (!data) return;
+        _debounceRealtime('messages', function() {
+            // Cập nhật badge
+            if (typeof updateChatBadge === 'function') {
+                updateChatBadge();
+            }
+            // Nếu popup đang mở, render lại danh sách
+            if (_chatPopupVisible) {
+                if (typeof renderChatMessages === 'function') {
+                    renderChatMessages();
+                }
+            }
+            // Kiểm tra tin nhắn mới để hiển thị popup tự động + âm thanh
+            if (typeof checkNewMessages === 'function') {
+                checkNewMessages();
+            }
+        }, 200);
     });
 }
