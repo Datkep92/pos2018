@@ -1,5 +1,171 @@
-// settings.js - Cài đặt ứng dụng + Tiền mặt tại POS
+﻿// settings.js - Cài đặt ứng dụng + Tiền mặt tại POS
 // ES5, tương thích Android 6, iOS 12
+
+// ============================================================
+// LẮNG NGHE FIREBASE REALTIME: cập nhật window.shopConfig + UI tự động
+// Khi admin thay đổi token Telegram / thông tin quán từ Settings,
+// tất cả thiết bị đều nhận được mà không cần F5
+// ============================================================
+(function _initSettingsRealtime() {
+    // Khởi tạo window.shopConfig nếu chưa có
+    if (!window.shopConfig) {
+        window.shopConfig = {};
+    }
+
+    // === Hàm cập nhật UI Telegram từ config ===
+    function _updateTelegramUI(config) {
+        var tokenInput = document.getElementById('telegramBotToken');
+        if (tokenInput && config.telegramBotToken !== undefined) {
+            tokenInput.value = config.telegramBotToken || '';
+        }
+        var chatIdInput = document.getElementById('telegramChatId');
+        if (chatIdInput && config.telegramChatId !== undefined) {
+            chatIdInput.value = config.telegramChatId || '';
+        }
+        var shiftCloseInput = document.getElementById('telegramShiftCloseToken');
+        if (shiftCloseInput && config.telegramShiftCloseToken !== undefined) {
+            shiftCloseInput.value = config.telegramShiftCloseToken || '';
+        }
+        var warningInput = document.getElementById('telegramWarningToken');
+        if (warningInput && config.telegramWarningToken !== undefined) {
+            warningInput.value = config.telegramWarningToken || '';
+        }
+        var expenseInput = document.getElementById('telegramExpenseToken');
+        if (expenseInput && config.telegramExpenseToken !== undefined) {
+            expenseInput.value = config.telegramExpenseToken || '';
+        }
+    }
+
+    // === Hàm cập nhật UI Shop Info từ data ===
+    function _updateShopInfoUI(data) {
+        var nameEl = document.getElementById('shopInfoName');
+        if (nameEl && data.name !== undefined) nameEl.value = data.name || '';
+        var addressEl = document.getElementById('shopInfoAddress');
+        if (addressEl && data.address !== undefined) addressEl.value = data.address || '';
+        var phoneEl = document.getElementById('shopInfoPhone');
+        if (phoneEl && data.phone !== undefined) phoneEl.value = data.phone || '';
+        // Cập nhật lock config nếu có
+        var lockStartInput = document.getElementById('settingsLockStartHour');
+        if (lockStartInput && data.lockStartHour !== undefined) lockStartInput.value = data.lockStartHour !== null ? data.lockStartHour : '';
+        var lockEndHourInput = document.getElementById('settingsLockEndHour');
+        if (lockEndHourInput && data.lockEndHour !== undefined) lockEndHourInput.value = data.lockEndHour !== null ? data.lockEndHour : '';
+        var lockEndMinInput = document.getElementById('settingsLockEndMinute');
+        if (lockEndMinInput && data.lockEndMinute !== undefined) lockEndMinInput.value = data.lockEndMinute !== null ? data.lockEndMinute : '';
+        var tableLockInput = document.getElementById('settingsTableLockHours');
+        if (tableLockInput && data.tableLockHours !== undefined) tableLockInput.value = data.tableLockHours !== null ? data.tableLockHours : '';
+    }
+
+    // Lắng nghe sự kiện db_update từ db.js (khi Firebase thay đổi)
+    window.addEventListener('db_update', function(e) {
+        var detail = e.detail;
+        if (!detail || !detail.data) return;
+
+        // --- Xử lý collection 'info' (Telegram config + Lock config) ---
+        if (detail.collection === 'info') {
+            var infoData = detail.data;
+            var config = Array.isArray(infoData) ? (infoData[0] || {}) : infoData;
+            if (config.id === 'shop_config') {
+                // Cập nhật window.shopConfig
+                window.shopConfig.telegramBotToken = config.telegramBotToken || '';
+                window.shopConfig.telegramChatId = config.telegramChatId || '';
+                window.shopConfig.telegramShiftCloseToken = config.telegramShiftCloseToken || '';
+                window.shopConfig.telegramWarningToken = config.telegramWarningToken || '';
+                window.shopConfig.telegramExpenseToken = config.telegramExpenseToken || '';
+                // Cập nhật UI Telegram nếu đang mở
+                _updateTelegramUI(config);
+                // Cập nhật UI lock config
+                _updateShopInfoUI(config);
+            }
+        }
+
+        // --- Xử lý collection 'shop_info' (Thông tin quán) ---
+        if (detail.collection === 'shop_info') {
+            var shopData = detail.data;
+            var infoItem = Array.isArray(shopData) ? (shopData[0] || {}) : shopData;
+            if (infoItem && infoItem.id === 'shop_info') {
+                window.shopInfo = infoItem;
+                _updateShopInfoUI(infoItem);
+            }
+        }
+    });
+
+    // Cũng lắng nghe trực tiếp từ Firebase (nếu firebase sẵn sàng)
+    // Đảm bảo dữ liệu được cập nhật ngay cả khi db_update chưa kịp dispatch
+    setTimeout(function() {
+        try {
+            var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : localStorage.getItem('current_shop_id');
+            if (shopId && typeof firebase !== 'undefined' && firebase.database) {
+                // Lắng nghe collection 'info'
+                var infoRef = firebase.database().ref(shopId + '/info');
+                infoRef.on('value', function(snapshot) {
+                    if (!snapshot.exists()) return;
+                    var src = snapshot.val() || {};
+                    window.shopConfig.telegramBotToken = src.telegramBotToken || '';
+                    window.shopConfig.telegramChatId = src.telegramChatId || '';
+                    window.shopConfig.telegramShiftCloseToken = src.telegramShiftCloseToken || '';
+                    window.shopConfig.telegramWarningToken = src.telegramWarningToken || '';
+                    window.shopConfig.telegramExpenseToken = src.telegramExpenseToken || '';
+                    // Cập nhật UI
+                    _updateTelegramUI(src);
+                    _updateShopInfoUI(src);
+                });
+
+                // Lắng nghe collection 'shop_info'
+                var shopInfoRef = firebase.database().ref(shopId + '/shop_info');
+                shopInfoRef.on('value', function(snapshot) {
+                    if (!snapshot.exists()) return;
+                    var src = snapshot.val() || {};
+                    // shop_info là object, lấy item đầu tiên
+                    for (var key in src) {
+                        if (src.hasOwnProperty(key)) {
+                            var item = src[key];
+                            if (item && item.id === 'shop_info') {
+                                window.shopInfo = item;
+                                _updateShopInfoUI(item);
+                            }
+                            break;
+                        }
+                    }
+                });
+            }
+        } catch (e) {
+        }
+    }, 3000); // Đợi 3s cho Firebase khởi tạo
+})();
+
+// ============================================================
+// LẮNG NGHE GLOBAL: Cập nhật doanh thu pos-cash-info realtime
+// Đăng ký ngay khi settings.js load, không phụ thuộc vào tab Settings
+// ============================================================
+(function _initPosCashRealtime() {
+    // Hàm xử lý db_update cho pos-cash-info (doanh thu)
+    function _onPosCashDbUpdate(e) {
+        try {
+            var detail = e.detail;
+            if (!detail || !detail.collection) return;
+            if (_selectedCloseDate) return;
+            if (detail.collection === 'transactions' || detail.collection === 'tables' || detail.collection === 'cost_transactions') {
+                loadPosCashData();
+            }
+        } catch (e) {
+        }
+    }
+
+    // Hàm xử lý pos_cash_update từ order.js và tables.js (thanh toán trên cùng máy)
+    function _onPosCashLocalUpdate() {
+        try {
+            if (_selectedCloseDate) return;
+            loadPosCashData();
+        } catch (e) {
+        }
+    }
+
+    // Đăng ký listener global - luôn sẵn sàng dù tab nào đang mở
+    window.removeEventListener('db_update', _onPosCashDbUpdate);
+    window.addEventListener('db_update', _onPosCashDbUpdate);
+    window.removeEventListener('pos_cash_update', _onPosCashLocalUpdate);
+    window.addEventListener('pos_cash_update', _onPosCashLocalUpdate);
+})();
 
 // ============================================================
 // 0. HÀM KIỂM TRA CHỐT NGÀY (dùng chung cho toàn bộ POS)
@@ -36,55 +202,132 @@ var CASH_DENOMS = [
 var cashCounts = {};
 var _posCashData = null; // Cache dữ liệu đối soát
 
+// === Lưu/Khôi phục số đếm tiền mặt vào localStorage (tránh mất khi chuyển tab) ===
+function _getCashCountStorageKey() {
+    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
+    return 'pos_cash_counts_' + today;
+}
+
+function _saveCashCountsToLocal() {
+    try {
+        var key = _getCashCountStorageKey();
+        var data = {};
+        for (var i = 0; i < CASH_DENOMS.length; i++) {
+            var v = CASH_DENOMS[i].value;
+            if (cashCounts[v] > 0) {
+                data[v] = cashCounts[v];
+            }
+        }
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch(e) {}
+}
+
+function _loadCashCountsFromLocal() {
+    try {
+        var key = _getCashCountStorageKey();
+        var saved = localStorage.getItem(key);
+        if (saved) {
+            var data = JSON.parse(saved);
+            for (var i = 0; i < CASH_DENOMS.length; i++) {
+                var v = CASH_DENOMS[i].value;
+                if (data[v] !== undefined) {
+                    cashCounts[v] = data[v];
+                }
+            }
+        }
+    } catch(e) {}
+}
+
+// Gọi khôi phục ngay khi load
+_loadCashCountsFromLocal();
+var _selectedCloseDate = null; // Ngày đang chọn để chốt (null = hôm nay)
+
+// Hàm lấy ngày hôm nay theo giờ Việt Nam (UTC+7), trả về định dạng YYYY-MM-DD
+// Tránh lỗi timezone khi dùng new Date().toISOString()
+function getTodayDateKey() {
+    var now = new Date();
+    // Chuyển sang giờ Việt Nam (UTC+7)
+    var vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    return vnTime.toISOString().slice(0, 10);
+}
+
 function initQuickCashCounter() {
     cashCounts = {};
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         cashCounts[CASH_DENOMS[i].value] = 0;
     }
+    // Khôi phục số đếm đã lưu trong localStorage (nếu có)
+    _loadCashCountsFromLocal();
     _posCashData = null;
+    _selectedCloseDate = null;
     loadPosCashData();
 
     // Subscribe realtime vào daily_balances hôm nay để cập nhật _dayClosedCache
     // Khi admin hủy chốt từ thiết bị khác, nhân viên sẽ thấy ngay
     _subscribeDayClosedRealtime();
+
+    // Tự động fix dữ liệu cũ: các ngày đã chốt nhưng thiếu cashKept
+    // Chỉ chạy 1 lần khi khởi tạo, không block UI
+    setTimeout(function() {
+        fixMissingCashKept();
+    }, 2000);
 }
 
-// Lắng nghe realtime thay đổi trạng thái chốt ngày
+// Lắng nghe realtime thay đổi daily_balances (chốt ngày, chênh lệch, hủy chốt...)
 function _subscribeDayClosedRealtime() {
     try {
-        var today = new Date().toISOString().slice(0, 10);
+        var today = getTodayDateKey();
         var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-        var dbRef = firebase.database().ref(shopId + '/daily_balances/' + today);
+        var dbRef = firebase.database().ref(shopId);
 
-        // Lắng nghe thay đổi trên daily_balances hôm nay
-        dbRef.on('value', function(snapshot) {
+        // 1. Lắng nghe thay đổi trên daily_balances hôm nay
+        // Khi nhân viên A chốt ngày (ghi difference + isClosed lên Firebase),
+        // nhân viên B và admin sẽ nhận được cập nhật realtime và reload UI
+        dbRef.child('daily_balances/' + today).on('value', function(snapshot) {
             var data = snapshot.val();
             if (data) {
                 var newIsClosed = data.isClosed === true;
-                // Nếu trạng thái thay đổi, cập nhật cache và reload
-                if (newIsClosed !== _dayClosedCache) {
-                    _dayClosedCache = newIsClosed;
-                    console.log('[DayClosed] Realtime update: isClosed =', _dayClosedCache);
-                    // Reload dữ liệu để cập nhật UI
+                // Luôn cập nhật cache isClosed
+                _dayClosedCache = newIsClosed;
+                // Chỉ reload nếu không đang xem ngày khác (không có _selectedCloseDate)
+                // Tránh reset về ngày hôm nay khi đang xem ngày trước đó
+                if (!_selectedCloseDate) {
+                    loadPosCashData();
+                }
+            }
+        });
+
+        // 2. Lắng nghe thay đổi trên manager_cash_pickups (Tiền QL nhận)
+        // Khi admin nhập pickup ở máy A, máy B đang mở tab Settings tự động cập nhật
+        dbRef.child('manager_cash_pickups').on('value', function(snapshot) {
+            var data = snapshot.val();
+            if (data) {
+                // Chỉ reload nếu không đang xem ngày khác
+                if (!_selectedCloseDate) {
                     loadPosCashData();
                 }
             }
         });
     } catch (e) {
-        console.error('[DayClosed] Subscribe realtime error:', e);
     }
 }
 
-function loadPosCashData() {
-    var today = new Date().toISOString().slice(0, 10);
+function loadPosCashData(targetDate) {
+    try {
+    // FIX: Dùng hàm getTodayDateKey() để lấy ngày theo giờ Việt Nam (UTC+7), tránh lỗi timezone
+    var today = targetDate || getTodayDateKey();
     var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
 
     // Lấy ngày hôm trước để tính số dư đầu kỳ
-    var prevDate = new Date(today);
+    // FIX: Dùng Date.UTC để tránh lỗi timezone (toISOString trả về UTC, trong khi setDate tính theo local time)
+    var prevDate = new Date(Date.UTC(
+        parseInt(today.split('-')[0], 10),
+        parseInt(today.split('-')[1], 10) - 1,
+        parseInt(today.split('-')[2], 10)
+    ));
     prevDate.setDate(prevDate.getDate() - 1);
     var prevDateStr = prevDate.toISOString().slice(0, 10);
 
-    console.log('[POS Cash] Loading data for:', today, 'prev:', prevDateStr);
 
     // Lấy shopId từ DB
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
@@ -101,14 +344,17 @@ function loadPosCashData() {
         dbRef.child('cost_transactions').once('value'),
         // Tiền quản lý nhận - đọc trực tiếp từ Firebase
         dbRef.child('manager_cash_pickups').once('value'),
-        // daily_balances hôm nay (đã lưu) - đọc trực tiếp từ Firebase
-        dbRef.child('daily_balances/' + today).once('value')
+        // daily_balances của ngày target (đã lưu) - đọc trực tiếp từ Firebase
+        dbRef.child('daily_balances/' + today).once('value'),
+        // Bàn đang hoạt động
+        DB.getAll('tables')
     ]).then(function(results) {
         var prevBalance = results[0].val() || {};
         var transactions = results[1] || [];
         var allCostsSnapshot = results[2].val() || {};
         var pickupsSnapshot = results[3].val() || {};
         var savedBalance = results[4].val() || {};
+        var allTables = results[5] || [];
 
         // Chuyển đổi Firebase snapshot object thành array
         var allCosts = [];
@@ -136,20 +382,35 @@ function loadPosCashData() {
             transactions = [];
         }
 
-        console.log('[POS Cash] prevBalance:', prevBalance);
-        console.log('[POS Cash] transactions:', transactions.length, 'items');
-        console.log('[POS Cash] allCosts (from Firebase):', allCosts.length, 'items');
-        console.log('[POS Cash] pickups (from Firebase):', pickups.length, 'items');
-        console.log('[POS Cash] savedBalance:', savedBalance);
 
         // Số dư đầu kỳ
         var openingBalance = (prevBalance && prevBalance.cashKept) || 0;
-
-        // Doanh thu tiền mặt
-        var cashRevenue = 0;
+        // Thống kê doanh thu theo phương thức thanh toán
+        var totalRevenue = 0;
+        var totalCount = 0;
+        var cashCount = 0, cashRevenue = 0;
+        var transferCount = 0, transferAmount = 0;
+        var grabCount = 0, grabAmount = 0;
+        var debtCount = 0, debtAmount = 0;
         for (var i = 0; i < transactions.length; i++) {
-            if (transactions[i].paymentMethod === 'cash') {
-                cashRevenue += transactions[i].amount;
+            var tx = transactions[i];
+            var amt = tx.amount || 0;
+            if (tx.paymentMethod === 'debt') {
+                debtCount++;
+                debtAmount += amt;
+            } else {
+                totalCount++;
+                totalRevenue += amt;
+                if (tx.paymentMethod === 'cash') {
+                    cashCount++;
+                    cashRevenue += amt;
+                } else if (tx.paymentMethod === 'transfer') {
+                    transferCount++;
+                    transferAmount += amt;
+                } else if (tx.paymentMethod === 'grab') {
+                    grabCount++;
+                    grabAmount += amt;
+                }
             }
         }
 
@@ -161,7 +422,6 @@ function loadPosCashData() {
             if (c.dateKey === today && !c.deleted && c.fundSource === 'pos_cash') {
                 posCashExpense += c.amount;
                 posCostCount++;
-                console.log('[POS Cash] Found cost:', c.categoryName, c.amount, c.dateKey, c.fundSource);
             }
         }
 
@@ -179,10 +439,22 @@ function loadPosCashData() {
             return (a.createdAt || 0) - (b.createdAt || 0);
         });
 
-        // expectedClosing KHÔNG trừ managerPickup - tiền QL nhận sẽ trừ vào số thực tế
-        var expectedClosing = openingBalance + cashRevenue - posCashExpense;
+        // expectedClosing = số tiền dự kiến phải có trong két SAU KHI trừ QL nhận
+        // Nếu đã lưu đối soát trước đó thì ưu tiên dùng expectedClosing đã lưu (tránh sai lệch khi F5)
+        var expectedClosing;
+        if (savedBalance && savedBalance.expectedClosing !== undefined && savedBalance.expectedClosing !== null) {
+            expectedClosing = savedBalance.expectedClosing;
+        } else {
+            expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal;
+        }
 
-        console.log('[POS Cash] Result:', { openingBalance: openingBalance, cashRevenue: cashRevenue, posCashExpense: posCashExpense, posCostCount: posCostCount, managerPickupTotal: managerPickupTotal, expectedClosing: expectedClosing });
+
+        // Bàn đang hoạt động
+        var activeTables = allTables.filter(function(t) { return (t.items && t.items.length) || t.total > 0; });
+        var activeTableTotal = 0;
+        for (var ti = 0; ti < activeTables.length; ti++) {
+            activeTableTotal += activeTables[ti].total || 0;
+        }
 
         _posCashData = {
             openingBalance: openingBalance,
@@ -194,19 +466,40 @@ function loadPosCashData() {
             expectedClosing: expectedClosing,
             actualClosing: (savedBalance.actualClosing !== undefined && savedBalance.actualClosing !== null) ? savedBalance.actualClosing : null,
             isClosed: savedBalance.isClosed || false,
+            cashKept: (savedBalance.cashKept !== undefined && savedBalance.cashKept !== null) ? savedBalance.cashKept : null,
             difference: (savedBalance.difference !== undefined && savedBalance.difference !== null) ? savedBalance.difference : null,
             diffPercent: (savedBalance.diffPercent !== undefined && savedBalance.diffPercent !== null) ? savedBalance.diffPercent : null,
-            status: savedBalance.status || null
+            status: savedBalance.status || null,
+            closedAtTime: savedBalance.closedAtTime || null,
+            // Thống kê doanh thu theo phương thức
+            totalRevenue: totalRevenue,
+            totalCount: totalCount,
+            cashCount: cashCount,
+            transferCount: transferCount,
+            transferAmount: transferAmount,
+            grabCount: grabCount,
+            grabAmount: grabAmount,
+            debtCount: debtCount,
+            debtAmount: debtAmount,
+            // Bàn đang hoạt động
+            activeTables: activeTables,
+            activeTableTotal: activeTableTotal,
+            dateKey: today
         };
 
         // Cập nhật cache isDayClosed để các module khác (refund, xóa món, xóa bàn) kiểm tra
-        _updateDayClosedCache();
+        // CHỈ cập nhật cache nếu đang xem ngày hôm nay (không phải ngày trước đó)
+        if (!targetDate) {
+            _updateDayClosedCache();
+        }
 
         renderCashCounter(isAdmin);
     }).catch(function(err) {
-        console.error('[POS Cash] loadPosCashData error:', err);
         renderCashCounter(isAdmin);
     });
+    } catch(e) {
+        renderCashCounter(isAdmin);
+    }
 }
 
 function renderCashCounter(isAdmin) {
@@ -225,85 +518,212 @@ function renderCashCounter(isAdmin) {
     var data = _posCashData || {
         openingBalance: 0, cashRevenue: 0, posCashExpense: 0, posCostCount: 0,
         managerPickupTotal: 0, pickupHistory: [], expectedClosing: 0, actualClosing: null,
-        isClosed: false, difference: null, diffPercent: null, status: null
+        isClosed: false, cashKept: null, difference: null, diffPercent: null, status: null,
+        totalRevenue: 0, totalCount: 0, cashCount: 0,
+        transferCount: 0, transferAmount: 0,
+        grabCount: 0, grabAmount: 0,
+        debtCount: 0, debtAmount: 0,
+        activeTables: [], activeTableTotal: 0
     };
 
-    // Chênh lệch = tổng đếm được - dự kiến còn
+    // expectedClosing đã trừ QL nhận, nên chênh lệch = đếm được - dự kiến còn
     var liveDiff = countedTotal - data.expectedClosing;
     var liveDiffClass = liveDiff >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
 
-    // Số tiền tại POS hiện tại (realtime)
-    // Khi chưa đếm: expectedClosing - managerPickupTotal
-    // Khi đã đếm: countedTotal - managerPickupTotal
-    var currentPosCash = data.expectedClosing - data.managerPickupTotal;
-    var actualPosCash = countedTotal > 0 ? (countedTotal - data.managerPickupTotal) : currentPosCash;
+    // Số tiền tại POS hiện tại = expectedClosing (đã trừ QL nhận)
+    // Khi đã đếm: lấy countedTotal
+    var currentPosCash = data.expectedClosing;
+    var actualPosCash = countedTotal > 0 ? countedTotal : currentPosCash;
     if (actualPosCash < 0) actualPosCash = 0;
 
     var html = '';
     html += '<div class="cash-counter">';
 
     // ===== HEADER =====
+    var displayDate = data.dateKey || getTodayDateKey();
+    var todayStr = getTodayDateKey();
+    var isToday = (displayDate === todayStr);
+    var minDate = '2020-01-01';
     html += '  <div class="cash-counter-header">';
     html += '    <span class="cash-counter-title">💰 Tiền mặt tại POS</span>';
     if (data.isClosed) {
         html += '    <span class="cash-closed-badge">🔒 Đã chốt</span>';
     }
+    if (!isToday && !data.isClosed) {
+        html += '    <span style="font-size:11px;color:#e67e22;background:#fef3e2;padding:2px 6px;border-radius:4px;margin-left:6px;">⚠️ Chưa chốt</span>';
+    }
+    if (!isToday) {
+        html += '    <button class="cash-action-btn" style="padding:4px 8px;font-size:11px;margin-left:auto;" onclick="selectCloseDate(\'' + todayStr + '\')">📅 Hôm nay</button>';
+    }
+    html += '  </div>';
+    // Date selector: ◀ Ngày ▶
+    html += '  <div class="pos-cash-date-selector" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:#f8f9fa;border-radius:8px;margin-bottom:8px;">';
+    html += '    <button class="cash-action-btn" style="padding:6px 10px;font-size:14px;line-height:1;" onclick="changeCloseDate(-1)" ' + (displayDate <= minDate ? 'disabled' : '') + '>◀</button>';
+    html += '    <span style="flex:1;text-align:center;font-size:14px;font-weight:600;color:#2c3e50;">' + formatDateDisplay(displayDate) + '</span>';
+    html += '    <button class="cash-action-btn" style="padding:6px 10px;font-size:14px;line-height:1;" onclick="changeCloseDate(1)" ' + (isToday ? 'disabled' : '') + '>▶</button>';
     html += '  </div>';
 
     // ===== THÔNG TIN ĐỐI SOÁT (chỉ Quản lý mới thấy) =====
     if (isAdmin) {
         html += '  <div class="pos-cash-info">';
-        html += '    <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
-        html += '    <div class="pos-cash-row"><span>💵 Doanh thu tiền mặt</span><span>' + formatMoney(data.cashRevenue) + '</span></div>';
-        html += '    <div class="pos-cash-row"><span>🏦 Chi phí từ Két POS</span><span class="pos-cash-expense">' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
 
-        html += '    <div class="pos-cash-row pos-cash-formula">';
-        html += '      <span>📐 Dự kiến còn:</span>';
-        html += '      <span class="pos-cash-expected" id="posCashExpected">' + formatMoney(data.expectedClosing) + '</span>';
-        html += '    </div>';
+        // Layout 2 cột flex - dùng flex:1 1 0 để 2 cột luôn bằng nhau, dàn đều 2 bên
+        html += '    <div style="display:flex;gap:12px;flex-wrap:wrap;">';
 
-        // Số tiền thực tế = tổng đếm được
-        html += '    <div class="pos-cash-row">';
-        html += '      <span>📊 Số tiền thực tế:</span>';
-        html += '      <span class="cash-counter-total" id="cashGrandTotal">' + formatMoney(countedTotal) + '</span>';
-        html += '    </div>';
+        // ===== CỘT 1: DOANH THU =====
+        html += '      <div style="flex:1 1 0;min-width:180px;">';
+        html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📈 Doanh thu</div>';
+        html += '        <div class="pos-cash-row" style="border-bottom:1px dashed #e2e8f0;padding-bottom:4px;margin-bottom:4px;"><span style="font-weight:600;">📊 Tổng doanh thu</span><span style="font-weight:600;">' + data.totalCount + ' đơn - ' + formatMoney(data.totalRevenue) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn - ' + formatMoney(data.cashRevenue) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn - ' + formatMoney(data.transferAmount) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn - ' + formatMoney(data.grabAmount) + '</span></div>';
+        if (data.debtCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
+        }
+        html += '      </div>';
 
-        // Chênh lệch realtime
-        html += '    <div class="pos-cash-row pos-cash-diff" id="posCashDiffRow">';
-        html += '      <span>📋 Chênh lệch:</span>';
-        html += '      <span class="' + liveDiffClass + '" id="posCashDiffValue">' + (liveDiff >= 0 ? '+' : '') + formatMoney(liveDiff) + '</span>';
-        html += '    </div>';
+        // ===== CỘT 2: THÔNG TIN =====
+        html += '      <div style="flex:1 1 0;min-width:180px;">';
+        html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📋 Thông tin</div>';
+html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span style="color:#ca8a04;font-weight:600;">' + formatMoney(data.activeTableTotal) + '</span></div>';        html += '        <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
+        html += '        <div class="pos-cash-row pos-cash-formula" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
+        html += '          <span>📐 Dự kiến còn:</span>';
+        html += '          <span class="pos-cash-expected" id="posCashExpected">' + formatMoney(data.expectedClosing) + '</span>';
+        html += '        </div>';
+        var adminPosCashDisplay = countedTotal > 0 ? countedTotal : data.expectedClosing;
+        html += '        <div class="pos-cash-row">';
+        html += '          <span>💵 Số tiền tại POS hiện tại:</span>';
+        html += '          <span class="' + (adminPosCashDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative') + '" id="adminPosCashValue">' + formatMoney(adminPosCashDisplay) + '</span>';
+        html += '        </div>';
+        var displayDiff = data.difference !== null && data.difference !== undefined ? data.difference : liveDiff;
+        var diffSuffix = data.isClosed ? ' (đã chốt)' : '';
+        var diffPercent = 0;
+        var baseForPercent = data.expectedClosing || data.openingBalance || 1;
+        if (baseForPercent > 0) {
+            diffPercent = Math.round(displayDiff / baseForPercent * 10000) / 100;
+        }
+        var isWithinLimit = Math.abs(diffPercent) <= 1;
+        var displayDiffClass = displayDiff < 0 ? 'pos-cash-negative' : (displayDiff > 0 ? 'pos-cash-warning' : 'pos-cash-positive');
+        html += '        <div class="pos-cash-row pos-cash-diff" id="posCashDiffRow" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
+        html += '          <span>📋 Chênh lệch:</span>';
+        html += '          <span class="' + displayDiffClass + '" id="posCashDiffValue">' + (displayDiff >= 0 ? '+' : '') + formatMoney(displayDiff) + ' (' + (displayDiff >= 0 ? '+' : '') + diffPercent + '%)' + diffSuffix + '</span>';
+        if (!isWithinLimit && displayDiff > 0) {
+            html += '          <span class="pos-cash-warning" style="margin-left:8px;font-size:11px;">⚠️ Dư >1% - Kiểm tra lại!</span>';
+        } else if (!isWithinLimit && displayDiff < 0) {
+            html += '          <span class="pos-cash-negative" style="margin-left:8px;font-size:11px;">🔴 Thiếu >1% - Cần rà soát!</span>';
+        }
+        html += '        </div>';
+        html += '      </div>';
+
+        html += '    </div>'; // end flex row
+
+        // ===== PHẦN CHỐT CA (full width, chỉ hiển thị khi đã chốt) =====
+        if (data.isClosed) {
+            html += '    <div style="margin-top:8px;border-top:2px solid #2ecc71;padding-top:8px;">';
+            var closedCashDisplay = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : data.expectedClosing;
+            html += '    <div class="pos-cash-row">';
+            html += '      <span style="font-weight:700;color:#27ae60;">💰 Số tiền quỹ POS thực tế sau chốt:</span>';
+            html += '      <span style="font-weight:700;color:#27ae60;font-size:16px;">' + formatMoney(closedCashDisplay) + '</span>';
+            html += '    </div>';
+            if (data.closedAtTime) {
+                html += '    <div class="pos-cash-row">';
+                html += '      <span>🕐 Chốt lúc:</span>';
+                html += '      <span style="font-weight:600;color:#2c3e50;">' + data.closedAtTime + '</span>';
+                html += '    </div>';
+            }
+            html += '    </div>';
+        }
+
         html += '  </div>';
     }
 
-    // ===== HIỂN THỊ THÔNG TIN CHO NHÂN VIÊN (đưa LÊN TRÊN bộ đếm) =====
+    // ===== HIỂN THỊ THÔNG TIN CHO NHÂN VIÊN =====
     if (!isAdmin) {
         html += '  <div class="pos-cash-staff-result">';
-        html += '    <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
 
-        // 💵 Doanh thu tiền mặt - chỉ hiện khi đã chốt
-        if (data.isClosed) {
-            html += '    <div class="pos-cash-row"><span>💵 Doanh thu tiền mặt</span><span>' + formatMoney(data.cashRevenue) + '</span></div>';
+        // Layout 2 cột ngang
+        html += '    <div style="display:flex;gap:12px;flex-wrap:wrap;">';
+
+        // ===== CỘT 1: DOANH THU =====
+        html += '      <div style="flex:1;min-width:180px;">';
+        html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📈 Doanh thu</div>';
+        html += '        <div class="pos-cash-row" style="border-bottom:1px dashed #e2e8f0;padding-bottom:4px;margin-bottom:4px;"><span style="font-weight:600;">📊 Tổng doanh thu</span><span style="font-weight:600;">' + data.totalCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.totalRevenue) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.cashRevenue) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.transferAmount) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.grabAmount) : '') + '</span></div>';
+        if (data.debtCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
         }
+        html += '      </div>';
 
-        html += '    <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
-        html += '    <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
+        // ===== CỘT 2: THÔNG TIN KHÁC =====
+        html += '      <div style="flex:1;min-width:180px;">';
+        html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📋 Thông tin</div>';
+        html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span>' + formatMoney(data.activeTableTotal) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
 
-        // 💵 Số tiền tại POS hiện tại = số nhân viên đếm
-        html += '    <div class="pos-cash-row">';
-        html += '      <span>💵 Số tiền tại POS hiện tại:</span>';
-        html += '      <span class="' + (countedTotal >= 0 ? 'pos-cash-positive' : 'pos-cash-negative') + '" id="staffPosCashValue">' + formatMoney(countedTotal) + '</span>';
-        html += '    </div>';
+        // 💵 Số tiền tại POS hiện tại
+        var staffPosCashDisplay = countedTotal > 0 ? countedTotal : data.expectedClosing;
+        html += '        <div class="pos-cash-row" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
+        html += '          <span>💵 Số tiền tại POS hiện tại:</span>';
+        html += '          <span class="' + (staffPosCashDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative') + '" id="staffPosCashValue">' + formatMoney(staffPosCashDisplay) + '</span>';
+        html += '        </div>';
+        html += '      </div>';
 
-        // 📊 Chênh lệch thực tế - chỉ hiển thị khi đã chốt
+        html += '    </div>'; // end flex row
+
+        // Chỉ hiển thị dự kiến còn, chênh lệch SAU KHI đã chốt ngày
         if (data.isClosed) {
-            var expectedAfterPickup = data.expectedClosing - data.managerPickupTotal;
-            var staffDiff = countedTotal - expectedAfterPickup;
-            var staffDiffClass = staffDiff >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
-            html += '    <div class="pos-cash-row pos-cash-diff" id="staffDiffRow">';
-            html += '      <span>📊 Chênh lệch thực tế:</span>';
-            html += '      <span class="' + staffDiffClass + '" id="staffDiffValue">' + (staffDiff >= 0 ? '+' : '') + formatMoney(staffDiff) + ' (đã chốt)</span>';
+            html += '    <div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:8px;">';
+            // 💵 Doanh thu tiền mặt
+            html += '    <div class="pos-cash-row"><span>💵 Doanh thu tiền mặt</span><span>' + formatMoney(data.cashRevenue) + '</span></div>';
+
+            // 📐 Dự kiến còn
+            var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+            html += '    <div class="pos-cash-row" style="border-top:1px dashed #ddd;padding-top:6px;">';
+            html += '      <span>📐 Dự kiến còn:</span>';
+            html += '      <span style="font-weight:600;color:#2c3e50;">' + formatMoney(expectedClosing) + '</span>';
             html += '    </div>';
+
+            // 📊 Chênh lệch - dùng data.difference từ Firebase (do nhân viên A đã chốt ghi lên)
+            var savedDiff = (data.difference !== null && data.difference !== undefined) ? data.difference : null;
+            if (savedDiff !== null) {
+                var baseForPct = expectedClosing || data.openingBalance || 1;
+                var diffPct = Math.round(savedDiff / baseForPct * 10000) / 100;
+                var isWithinLimit = Math.abs(diffPct) <= 1;
+
+                if (savedDiff > 0) {
+                    html += '    <div class="pos-cash-row pos-cash-diff" id="staffDiffRow">';
+                    html += '      <span>📊 Chênh lệch thực tế:</span>';
+                    html += '      <span class="pos-cash-warning" id="staffDiffValue">+' + formatMoney(savedDiff) + ' (+' + diffPct + '%) (đã chốt)</span>';
+                    html += '    </div>';
+                    if (!isWithinLimit) {
+                        html += '    <div class="pos-cash-row" style="margin-top:4px;">';
+                        html += '      <span style="color:#e67e22;font-size:12px;">⚠️ Nhập máy thiếu so với tiền mặt tại POS - Yêu cầu nhập đầy đủ lần sau.</span>';
+                        html += '    </div>';
+                    }
+                } else if (savedDiff < 0) {
+                    html += '    <div class="pos-cash-row pos-cash-diff" id="staffDiffRow">';
+                    html += '      <span>📊 Chênh lệch thực tế:</span>';
+                    html += '      <span class="pos-cash-negative" id="staffDiffValue">' + formatMoney(savedDiff) + ' (' + diffPct + '%) (đã chốt)</span>';
+                    html += '    </div>';
+                    if (!isWithinLimit) {
+                        html += '    <div class="pos-cash-row" style="margin-top:4px;">';
+                        html += '      <span style="color:#e74c3c;font-size:12px;">🔴 Số tiền bị thiếu so với nhập máy. Thực tế so với máy chênh lệch ' + formatMoney(Math.abs(savedDiff)) + ' - Yêu cầu rà soát lại giao dịch, gửi thông báo tới quản lý.</span>';
+                        html += '    </div>';
+                    }
+                } else {
+                    html += '    <div class="pos-cash-row pos-cash-diff" id="staffDiffRow">';
+                    html += '      <span>📊 Chênh lệch thực tế:</span>';
+                    html += '      <span class="pos-cash-positive" id="staffDiffValue">' + formatMoney(savedDiff) + ' (0%) (đã chốt)</span>';
+                    html += '    </div>';
+                }
+            }
+            html += '    </div>'; // end closed section
         }
 
         html += '  </div>';
@@ -331,23 +751,21 @@ function renderCashCounter(isAdmin) {
     html += '  </div>';
 
     // ===== NÚT HÀNH ĐỘNG =====
+    var displayDate = data.dateKey || (typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10));
+    var dateLabel = formatDateDisplay(displayDate);
     if (isAdmin) {
         html += '  <div class="cash-counter-actions">';
         html += '    <button class="cash-action-btn cash-reset-btn" onclick="resetCashCounter()">🔄 Làm lại</button>';
-        html += '    <button class="cash-action-btn cash-copy-btn" onclick="copyCashResult()">📋 Sao chép</button>';
-        if (!data.isClosed) {
-            html += '    <button class="cash-action-btn cash-save-btn" onclick="savePosCashClosing()">💾 Lưu lại</button>';
-        } else {
+        if (data.isClosed) {
             // Admin có nút "Hủy chốt" để mở khóa cho nhân viên chốt lại
-            html += '    <button class="cash-action-btn cash-unlock-btn" onclick="unlockDayClose()">🔓 Hủy chốt</button>';
+            html += '    <button class="cash-action-btn cash-unlock-btn" onclick="unlockDayClose()">🔓 Hủy chốt ' + dateLabel + '</button>';
         }
         html += '  </div>';
     } else {
         html += '  <div class="cash-counter-actions">';
         html += '    <button class="cash-action-btn cash-reset-btn" onclick="resetCashCounter()">🔄 Làm lại</button>';
-        html += '    <button class="cash-action-btn cash-copy-btn" onclick="copyCashResult()">📋 Sao chép</button>';
         if (!data.isClosed) {
-            html += '    <button class="cash-action-btn cash-close-btn" onclick="staffCloseDay()">🔒 Chốt ngày</button>';
+            html += '    <button class="cash-action-btn cash-close-btn" onclick="staffCloseDay()">🔒 Chốt ngày ' + dateLabel + '</button>';
         }
         html += '  </div>';
     }
@@ -362,9 +780,9 @@ function renderCashCounter(isAdmin) {
         html += '  </div>';
         html += '  <div class="pos-cash-info">';
         html += '    <div class="pos-cash-row">';
-        html += '      <span>💰 Tiền QL nhận:</span>';
+        html += '      <span>Tiền QL nhận:</span>';
         html += '      <span class="pos-cash-mgr-pickup">';
-        html += '        <input type="number" class="mgr-pickup-input" id="mgrPickupInput" value="' + data.managerPickupTotal + '" min="0" placeholder="0">';
+        html += '        <input type="number" class="mgr-pickup-input" id="mgrPickupInput" value="" min="0" placeholder="0">';
         html += '        <button class="mgr-pickup-btn" onclick="saveManagerPickup()">💾 Lưu</button>';
         html += '      </span>';
         html += '    </div>';
@@ -378,9 +796,11 @@ function renderCashCounter(isAdmin) {
                     var d = new Date(ph.createdAt);
                     timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
                 }
+                var pickupId = ph.id || '';
                 html += '    <div class="pos-cash-row pos-cash-pickup-log">';
                 html += '      <span>🕐 ' + timeStr + '</span>';
                 html += '      <span>-' + formatMoney(ph.amount) + '</span>';
+                html += '      <button class="cash-action-btn" style="padding:2px 6px;font-size:10px;margin-left:auto;color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:4px;cursor:pointer;" onclick="deleteManagerPickup(\'' + pickupId + '\')" title="Xóa">🗑️</button>';
                 html += '    </div>';
             }
         }
@@ -396,6 +816,7 @@ function adjustCashCount(denomValue, delta) {
     var newVal = current + delta;
     if (newVal < 0) newVal = 0;
     cashCounts[denomValue] = newVal;
+    _saveCashCountsToLocal();
     updateDenomSubtotal(denomValue);
     updateCashGrandTotal();
 }
@@ -404,6 +825,7 @@ function setCashCount(denomValue, val) {
     var num = parseInt(val, 10);
     if (isNaN(num) || num < 0) num = 0;
     cashCounts[denomValue] = num;
+    _saveCashCountsToLocal();
     updateDenomSubtotal(denomValue);
     updateCashGrandTotal();
 }
@@ -424,9 +846,21 @@ function updateCashGrandTotal() {
         total += denom.value * (cashCounts[denom.value] || 0);
     }
 
-    // Số tiền thực tế = tổng đếm được
+    // Số tiền thực tế
+    // - Nếu đã chốt ngày: hiển thị cashKept đã lưu (không thay đổi theo số đếm)
+    //   Nếu cashKept null (dữ liệu cũ): fallback về expectedClosing
+    // - Nếu chưa chốt: hiển thị tổng đếm được (total)
     var el = document.getElementById('cashGrandTotal');
-    if (el) el.textContent = formatMoney(total);
+    if (el) {
+        var isClosed = _posCashData && _posCashData.isClosed;
+        var displayTotal;
+        if (isClosed) {
+            displayTotal = (_posCashData.cashKept !== null && _posCashData.cashKept !== undefined) ? _posCashData.cashKept : _posCashData.expectedClosing;
+        } else {
+            displayTotal = total;
+        }
+        el.textContent = formatMoney(displayTotal);
+    }
 
     // Cập nhật chênh lệch realtime (admin)
     var expectedClosing = _posCashData ? _posCashData.expectedClosing : 0;
@@ -438,18 +872,27 @@ function updateCashGrandTotal() {
         diffEl.className = diffClass;
     }
 
-    // Cập nhật Số tiền tại POS hiện tại (staff) = số nhân viên đếm
+    // Cập nhật Số tiền tại POS hiện tại (staff)
+    // - Nếu đã đếm tiền (total > 0): hiển thị số đếm được
+    // - Nếu chưa đếm (total === 0): hiển thị expectedClosing (dự kiến còn trong két)
     var staffPosCashEl = document.getElementById('staffPosCashValue');
     if (staffPosCashEl) {
-        staffPosCashEl.textContent = formatMoney(total);
-        staffPosCashEl.className = total >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
+        var staffDisplay = total > 0 ? total : (_posCashData ? _posCashData.expectedClosing : 0);
+        staffPosCashEl.textContent = formatMoney(staffDisplay);
+        staffPosCashEl.className = staffDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
     }
 }
 
 function resetCashCounter() {
+    // Nếu đã chốt ngày thì không cho reset - tránh nhầm lẫn số liệu
+    if (_posCashData && _posCashData.isClosed) {
+        showToast('🔒 Đã chốt ngày, không thể làm lại', 'warning');
+        return;
+    }
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         cashCounts[CASH_DENOMS[i].value] = 0;
     }
+    _saveCashCountsToLocal();
     renderCashCounter();
 }
 
@@ -511,13 +954,13 @@ function fallbackCopy(text) {
 function saveManagerPickup() {
     var input = document.getElementById('mgrPickupInput');
     if (!input) return;
-    var amount = parseInt(input.value, 10);
-    if (isNaN(amount) || amount <= 0) {
+    var amount = parseFloat(input.value) || 0;
+    if (amount <= 0) {
         showToast('⚠️ Nhập số tiền hợp lệ', 'warning');
         return;
     }
 
-    var today = new Date().toISOString().slice(0, 10);
+    var today = getTodayDateKey();
     var now = Date.now();
     var pickupId = 'pickup_' + now.toString(36) + '_' + Math.random().toString(36).substr(2, 4);
 
@@ -530,73 +973,85 @@ function saveManagerPickup() {
         note: 'Quản lý nhận tiền mặt'
     };
 
-    // Lưu trực tiếp lên Firebase
-    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-    var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
+    // Bước 1: Lưu vào IndexedDB qua DB.create trước -> memoryCache được cập nhật ngay
+    // -> realtime subscription nhận notify -> UI cập nhật
+    if (typeof DB !== 'undefined' && typeof DB.create === 'function') {
+        DB.create('manager_cash_pickups', pickupData).then(function() {
+            // Bước 2: Sau khi DB.create thành công, ghi lên Firebase để đồng bộ các máy khác
+            var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+            var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
+            dbRef.set(pickupData).catch(function(err) {});
 
-    dbRef.set(pickupData).then(function() {
-        showToast('✅ Đã lưu: ' + formatMoney(amount), 'success');
-        // Reload lại dữ liệu
+            showToast('✅ Đã lưu: ' + formatMoney(amount), 'success');
+            loadPosCashData();
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi lưu!', 'error');
+        });
+    } else {
+        // Fallback: ghi thẳng lên Firebase nếu DB.create không có sẵn
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
+        dbRef.set(pickupData).catch(function(err) {});
+        showToast('✅ Đã lưu: ' + formatMoney(amount) + ' (chưa đồng bộ)', 'success');
         loadPosCashData();
-    }).catch(function(err) {
-        console.error('saveManagerPickup error:', err);
-        showToast('❌ Lỗi khi lưu!', 'error');
-    });
+    }
 }
 
-// ========== QUẢN LÝ: LƯU LẠI (Lưu thông tin lên Firebase để chốt ca cuối ngày) ==========
-function savePosCashClosing() {
-    var countedTotal = 0;
-    for (var i = 0; i < CASH_DENOMS.length; i++) {
-        countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
+// ========== QUẢN LÝ: XÓA TIỀN QUẢN LÝ NHẬN ==========
+function deleteManagerPickup(pickupId) {
+    if (!pickupId) {
+        showToast('⚠️ Không tìm thấy mã pickup', 'warning');
+        return;
+    }
+    if (!confirm('🗑️ Xóa khoản tiền QL nhận này?\nThao tác này không thể hoàn tác!')) {
+        return;
     }
 
-    if (countedTotal === 0 && !confirm('⚠️ Số tiền đếm được là 0đ. Xác nhận lưu?')) return;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
 
-    var today = new Date().toISOString().slice(0, 10);
-    var expectedClosing = _posCashData ? _posCashData.expectedClosing : 0;
-    var difference = countedTotal - expectedClosing;
-    var diffPercent = expectedClosing > 0 ? Math.abs(difference) / expectedClosing * 100 : 0;
-
-    var msg = '⚠️ XÁC NHẬN LƯU\n\n' +
-              '📊 Số tiền thực tế: ' + formatMoney(countedTotal) + '\n' +
-              '📐 Dự kiến: ' + formatMoney(expectedClosing) + '\n' +
-              '📋 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference) + '\n\n' +
-              '📌 Lưu thông tin lên Firebase để chốt ca cuối ngày.';
-
-    if (!confirm(msg)) return;
-
-    // Lưu thông tin lên Firebase (chủ yếu để chốt ca cuối ngày)
-    DB.get('daily_balances', today).then(function(existing) {
-        var data = existing || { id: today };
-        data.actualClosing = countedTotal;
-        data.expectedClosing = expectedClosing;
-        data.difference = difference;
-        data.diffPercent = diffPercent;
-        data.updatedAt = Date.now();
-
-        if (!data.cashKept && data.cashKept !== 0) {
-            data.cashKept = countedTotal;
-        }
-
-        return DB.create('daily_balances', data, today);
-    }).then(function() {
-        showToast('✅ Đã lưu: ' + formatMoney(countedTotal), 'success');
-        // Gửi Telegram thông báo
-        if (typeof sendTelegramMessage === 'function') {
-            var icon = diffPercent <= 1 ? '✅' : '⚠️';
-            var msg = icon + ' LƯU ĐỐI SOÁT ' + formatDateDisplay(today) + '\n' +
-                      '📊 Thực tế: ' + formatMoney(countedTotal) + '\n' +
-                      '📐 Dự kiến: ' + formatMoney(expectedClosing) + '\n' +
-                      '📋 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference) + '\n' +
-                      '📈 Tỷ lệ: ' + diffPercent.toFixed(2) + '%';
-            sendTelegramMessage(msg);
-        }
-        loadPosCashData(); // Reload
-    }).catch(function(err) {
-        console.error('savePosCashClosing error:', err);
-        showToast('❌ Lỗi khi lưu!', 'error');
+    // Bước 1: Xóa trên Firebase
+    var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
+    dbRef.remove().catch(function(err) {
     });
+
+    // Bước 2: Xóa trong IndexedDB qua DB.remove (nếu có)
+    if (typeof DB !== 'undefined' && typeof DB.remove === 'function') {
+        DB.remove('manager_cash_pickups', pickupId).then(function() {
+            showToast('✅ Đã xóa pickup', 'success');
+            loadPosCashData();
+        }).catch(function(err) {
+            showToast('✅ Đã xóa trên Firebase', 'success');
+            loadPosCashData();
+        });
+    } else {
+        showToast('✅ Đã xóa pickup', 'success');
+        loadPosCashData();
+    }
+}
+
+
+// ========== HÀM CHỌN NGÀY TRƯỚC ĐÓ ĐỂ CHỐT ==========
+function selectCloseDate(dateStr) {
+    if (!dateStr) return;
+    _selectedCloseDate = dateStr;
+    // Reset bộ đếm tiền khi chuyển ngày
+    for (var i = 0; i < CASH_DENOMS.length; i++) {
+        cashCounts[CASH_DENOMS[i].value] = 0;
+    }
+    loadPosCashData(dateStr);
+}
+
+// Lùi/Tiến ngày (delta = -1: lùi, delta = 1: tiến)
+function changeCloseDate(delta) {
+    var currentDate = _selectedCloseDate || (_posCashData && _posCashData.dateKey) || getTodayDateKey();
+    var d = new Date(Date.UTC(
+        parseInt(currentDate.split('-')[0], 10),
+        parseInt(currentDate.split('-')[1], 10) - 1,
+        parseInt(currentDate.split('-')[2], 10)
+    ));
+    d.setDate(d.getDate() + delta);
+    var newDateStr = d.toISOString().slice(0, 10);
+    selectCloseDate(newDateStr);
 }
 
 // ========== NHÂN VIÊN: CHỐT NGÀY ==========
@@ -606,102 +1061,336 @@ function staffCloseDay() {
         countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
     }
 
-    // Chốt ngay, không cần confirm
-    var managerPickupTotal = _posCashData ? (_posCashData.managerPickupTotal || 0) : 0;
-    var expectedClosing = _posCashData ? _posCashData.expectedClosing : 0;
+    var data = _posCashData || {
+        openingBalance: 0, cashRevenue: 0, posCashExpense: 0,
+        managerPickupTotal: 0, expectedClosing: 0
+    };
+    var managerPickupTotal = data.managerPickupTotal || 0;
+    var expectedClosing = data.expectedClosing || 0;
 
-    // Chênh lệch = số đếm - (dự kiến - QL nhận)
-    var expectedAfterPickup = expectedClosing - managerPickupTotal;
+    // expectedClosing đã trừ QL nhận
+    var expectedAfterPickup = expectedClosing;
     var difference = countedTotal - expectedAfterPickup;
-    var diffPercent = expectedAfterPickup > 0 ? Math.abs(difference) / expectedAfterPickup * 100 : 0;
+    var isNegative = difference < 0;
+    var isSurplus = difference > 0;
 
-    var today = new Date().toISOString().slice(0, 10);
+    // differenceType: 'surplus' (dư), 'deficit' (thiếu), 'balanced' (cân bằng)
+    // Dùng cho admin lọc danh sách chốt ngày dễ dàng
+    var differenceType = isSurplus ? 'surplus' : (isNegative ? 'deficit' : 'balanced');
 
-    // Lưu và chốt ngày
-    DB.get('daily_balances', today).then(function(existing) {
-        var data = existing || { id: today };
-        data.actualClosing = countedTotal;
-        data.countedTotal = countedTotal;
-        data.managerPickupTotal = managerPickupTotal;
-        data.expectedClosing = expectedClosing;
-        data.expectedAfterPickup = expectedAfterPickup;
-        data.difference = difference;
-        data.diffPercent = diffPercent;
-        data.isClosed = true;
-        data.closedAt = Date.now();
-        data.closedBy = window.currentDeviceId || 'staff';
-        data.updatedAt = Date.now();
+    // Dùng ngày đã chọn (nếu có), nếu không thì dùng hôm nay
+    var closeDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
 
-        if (!data.cashKept && data.cashKept !== 0) {
-            data.cashKept = countedTotal;
-        }
+    // Tạo thời gian chốt ca theo UTC+7
+    var now = new Date();
+    var vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    var closedAtTime = ('0' + vnTime.getUTCHours()).slice(-2) + ':' +
+                       ('0' + vnTime.getUTCMinutes()).slice(-2) + ' ' +
+                       ('0' + vnTime.getUTCDate()).slice(-2) + '/' +
+                       ('0' + (vnTime.getUTCMonth() + 1)).slice(-2) + '/' +
+                       vnTime.getUTCFullYear();
 
-        return DB.create('daily_balances', data, today);
+    // Ghi lên Firebase - các máy khác đọc realtime sẽ tự cập nhật
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    var dbRef = firebase.database().ref(shopId + '/daily_balances/' + closeDate);
+    dbRef.update({
+        cashKept: countedTotal,
+        difference: difference,
+        differenceType: differenceType,
+        isClosed: true,
+        closedAt: Date.now(),
+        closedAtTime: closedAtTime,
+        closedBy: window.currentDeviceId || 'staff',
+        updatedAt: Date.now()
     }).then(function() {
-        // Hiển thị toast có nút tắt để nhân viên đọc kết quả
-        showCloseableToast(
-            '🔒 ĐÃ CHỐT NGÀY ' + formatDateDisplay(today) + '\n' +
-            '📂 Đầu kỳ: ' + formatMoney(_posCashData ? _posCashData.openingBalance : 0) + '\n' +
-            '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
-            '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
-            '📐 Dự kiến: ' + formatMoney(expectedClosing) + '\n' +
-            '📊 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference) + ' (' + diffPercent.toFixed(2) + '%)',
-            'success'
-        );
-
-        // Gửi Telegram cho admin
-        if (typeof sendTelegramMessage === 'function') {
-            var icon = diffPercent <= 1 ? '✅' : '⚠️';
-            var msg = icon + ' NHÂN VIÊN CHỐT NGÀY ' + formatDateDisplay(today) + '\n\n' +
-                      '📂 Số dư đầu kỳ: ' + formatMoney(_posCashData ? _posCashData.openingBalance : 0) + '\n' +
-                      '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
-                      '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
-                      '📐 Dự kiến còn: ' + formatMoney(expectedClosing) + '\n' +
-                      '📊 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference) + '\n' +
-                      '📈 Tỷ lệ: ' + diffPercent.toFixed(2) + '%';
-            sendTelegramMessage(msg);
+        // Thông báo kết quả
+        try {
+            var toastMsg = '';
+            var isSurplus = difference > 0;
+            if (isNegative) {
+                toastMsg = '🔒 ĐÃ CHỐT NGÀY ' + formatDateDisplay(closeDate) + '\n' +
+                           '🔴 THIẾU ' + formatMoney(Math.abs(difference)) + ' - BÁO QUẢN LÝ!\n\n' +
+                           '📂 Đầu kỳ: ' + formatMoney(data.openingBalance) + '\n' +
+                           '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
+                           '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
+                           '📐 Dự kiến còn: ' + formatMoney(expectedAfterPickup) + '\n' +
+                           '📋 Thiếu: ' + formatMoney(Math.abs(difference));
+                showCloseableToast(toastMsg, 'error');
+            } else if (isSurplus) {
+                toastMsg = '🔒 ĐÃ CHỐT NGÀY ' + formatDateDisplay(closeDate) + '\n' +
+                           '⚠️ Dư tiền! Vui lòng nhập dữ liệu lần sau chính xác hơn.\n\n' +
+                           '📂 Đầu kỳ: ' + formatMoney(data.openingBalance) + '\n' +
+                           '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
+                           '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
+                           '📐 Dự kiến còn: ' + formatMoney(expectedAfterPickup);
+                showCloseableToast(toastMsg, 'warning');
+            } else {
+                toastMsg = '🔒 ĐÃ CHỐT NGÀY ' + formatDateDisplay(closeDate) + '\n' +
+                           '✅ Số dư đầu kỳ mai: ' + formatMoney(countedTotal) + '\n\n' +
+                           '📂 Đầu kỳ: ' + formatMoney(data.openingBalance) + '\n' +
+                           '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
+                           '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
+                           '📐 Dự kiến còn: ' + formatMoney(expectedAfterPickup) + '\n' +
+                           '📋 Không chênh lệch';
+                showCloseableToast(toastMsg, 'success');
+            }
+        } catch (e) {
         }
 
-        loadPosCashData(); // Reload
+        // Gửi Telegram cho admin (dùng token riêng cho chốt ca - luồng riêng, ko qua telegram.js)
+        // Tính thống kê doanh thu từ transactions
+        // Cách đơn giản: gửi trực tiếp, đồng bộ (giống unlockDayClose)
+        // Thử đọc transactions từ IndexedDB, nếu lỗi thì gửi với số liệu = 0
+        var totalRevenue = 0;
+        var cashCount = 0, cashAmount = 0;
+        var transferCount = 0, transferAmount = 0;
+        var grabCount = 0, grabAmount = 0;
+        
+        // Hàm xử lý transactions và gửi Telegram
+        function _processTransactionsAndSend(txList) {
+            for (var t = 0; t < txList.length; t++) {
+                var tx = txList[t];
+                if (tx.refunded) continue;
+                // Bỏ qua ghi nợ - chỉ tính doanh thu thực tế khi khách thanh toán
+                if (tx.paymentMethod === 'debt') continue;
+                var amt = tx.amount || 0;
+                totalRevenue += amt;
+                if (tx.paymentMethod === 'cash') {
+                    cashCount++;
+                    cashAmount += amt;
+                } else if (tx.paymentMethod === 'transfer') {
+                    transferCount++;
+                    transferAmount += amt;
+                } else if (tx.paymentMethod === 'grab') {
+                    grabCount++;
+                    grabAmount += amt;
+                }
+            }
+            _sendShiftCloseTelegram(closeDate, data, countedTotal, managerPickupTotal, expectedAfterPickup, difference, isNegative, isSurplus, closedAtTime, totalRevenue, cashCount, cashAmount, transferCount, transferAmount, grabCount, grabAmount);
+        }
+        
+        // Đọc transactions từ IndexedDB (bất đồng bộ)
+        try {
+            if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDate === 'function') {
+                var txPromise = DB.getTransactionsByDate(closeDate);
+                if (txPromise && typeof txPromise.then === 'function') {
+                    txPromise.then(function(txList) {
+                        _processTransactionsAndSend(txList || []);
+                    }).catch(function() {
+                        _processTransactionsAndSend([]);
+                    });
+                } else if (Array.isArray(txPromise)) {
+                    _processTransactionsAndSend(txPromise);
+                } else {
+                    _processTransactionsAndSend([]);
+                }
+            } else {
+                _processTransactionsAndSend([]);
+            }
+        } catch (e) {
+            _processTransactionsAndSend([]);
+        }
+
+        // Sau khi chốt, quay về ngày hôm nay
+        _selectedCloseDate = null;
+        loadPosCashData();
     }).catch(function(err) {
-        console.error('staffCloseDay error:', err);
+        // Vẫn thử gửi Telegram ngay cả khi Firebase lỗi
+        try {
+            _sendShiftCloseTelegram(closeDate, data || {}, countedTotal || 0, managerPickupTotal || 0, expectedAfterPickup || 0, difference || 0, isNegative, isSurplus, closedAtTime || '', 0, 0, 0, 0, 0, 0, 0);
+        } catch(e3) {
+        }
         showToast('❌ Lỗi khi chốt ngày!', 'error');
     });
+}
+
+// ========== GỬI TELEGRAM CHỐT CA (LUỒNG RIÊNG - KO QUA telegram.js) ==========
+// Dùng token riêng cho chốt ca, KHÔNG fallback về token chính
+// Nếu chưa cấu hình token chốt ca thì bỏ qua (ko gửi)
+function _sendShiftCloseTelegram(closeDate, data, countedTotal, managerPickupTotal, expectedAfterPickup, difference, isNegative, isSurplus, closedAtTime, totalRevenue, cashCount, cashAmount, transferCount, transferAmount, grabCount, grabAmount) {
+    // Đọc token từ window.shopConfig (cập nhật realtime từ Firebase)
+    // Fallback: đọc trực tiếp từ localStorage nếu shopConfig chưa kịp cập nhật
+    var config = window.shopConfig || {};
+    var botToken = config.telegramShiftCloseToken;
+    var chatId = config.telegramChatId;
+
+    // Fallback sang localStorage nếu window.shopConfig chưa có
+    if (!botToken) {
+        botToken = localStorage.getItem('telegram_shift_close_token');
+    }
+    if (!chatId) {
+        chatId = localStorage.getItem('telegram_chat_id');
+    }
+
+    // Nếu ko có token shift -> bỏ qua (ko fallback về token chính)
+    // Chỉ gửi qua token chốt ca riêng
+    if (!botToken || !chatId) {
+        return;
+    }
+
+    var icon = isNegative ? '🔴' : (isSurplus ? '⚠️' : '✅');
+    var message = icon + ' NHÂN VIÊN CHỐT NGÀY ' + formatDateDisplay(closeDate) + '\n\n' +
+                '🕐 Thời gian chốt: ' + closedAtTime + '\n' +
+                '📂 Đầu kỳ: ' + formatMoney(data.openingBalance) + '\n' +
+                '💵 Doanh thu TM: ' + formatMoney(data.cashRevenue) + '\n' +
+                '🏦 Chi phí POS: ' + formatMoney(data.posCashExpense) + '\n' +
+                '💰 QL nhận: ' + formatMoney(managerPickupTotal) + '\n' +
+                '📐 Dự kiến còn: ' + formatMoney(expectedAfterPickup) + '\n' +
+                '📊 Đếm được: ' + formatMoney(countedTotal) + '\n' +
+                '📋 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference);
+
+    // Thống kê doanh thu theo phương thức
+    totalRevenue = totalRevenue || 0;
+    cashCount = cashCount || 0;
+    cashAmount = cashAmount || 0;
+    transferCount = transferCount || 0;
+    transferAmount = transferAmount || 0;
+    grabCount = grabCount || 0;
+    grabAmount = grabAmount || 0;
+    var totalOrders = cashCount + transferCount + grabCount;
+
+    message += '\n\n📊 TỔNG DOANH THU: ' + formatMoney(totalRevenue) + ' (' + totalOrders + ' đơn)';
+    message += '\n💵 Tiền mặt: ' + cashCount + ' đơn - ' + formatMoney(cashAmount);
+    message += '\n💳 Chuyển khoản: ' + transferCount + ' đơn - ' + formatMoney(transferAmount);
+    message += '\n🛵 Grab: ' + grabCount + ' đơn - ' + formatMoney(grabAmount);
+
+    if (isNegative) {
+        message += '\n\n🔴 THIẾU ' + formatMoney(Math.abs(difference)) + ' - CẦN KIỂM TRA!';
+    } else if (isSurplus) {
+        message += '\n\n⚠️ DƯ ' + formatMoney(difference) + ' - Cần kiểm tra!';
+    }
+
+    // Gửi trực tiếp qua Telegram Bot API (ko qua ESP32, ko qua telegram.js)
+    // Dùng XMLHttpRequest để tương thích Android 6 (WebView cũ)
+    var url = 'https://api.telegram.org/bot' + botToken + '/sendMessage';
+    var params = JSON.stringify({
+        chat_id: String(chatId),
+        text: message,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    });
+
+    // Cách 1: XMLHttpRequest (ưu tiên)
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.timeout = 10000;
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+            } else {
+                // Fallback: thử gửi bằng Image() nếu XHR lỗi
+                _sendShiftCloseViaImage(url, chatId, message);
+            }
+        };
+        xhr.onerror = function() {
+            _sendShiftCloseViaImage(url, chatId, message);
+        };
+        xhr.ontimeout = function() {
+            _sendShiftCloseViaImage(url, chatId, message);
+        };
+        xhr.send(params);
+    } catch (e) {
+        _sendShiftCloseViaImage(url, chatId, message);
+    }
+}
+
+// Fallback: gửi Telegram bằng Image() (ko bị CORS, tương thích mọi trình duyệt)
+function _sendShiftCloseViaImage(url, chatId, message) {
+    try {
+        // Telegram API hỗ trợ GET method
+        var getUrl = url + '?chat_id=' + encodeURIComponent(String(chatId)) +
+                     '&text=' + encodeURIComponent(message) +
+                     '&parse_mode=HTML&disable_web_page_preview=true';
+        var img = new Image();
+        img.onload = function() { console.log('[ShiftClose] Gửi qua Image thành công'); };
+        img.onerror = function() { console.error('[ShiftClose] Gửi qua Image thất bại'); };
+        img.src = getUrl;
+    } catch (e) {
+    }
+}
+
+// Gửi thông báo hủy chốt qua luồng riêng (token chốt ca)
+function _sendShiftCloseUnlock(closeDate) {
+    var config = window.shopConfig || {};
+    var botToken = config.telegramShiftCloseToken;
+    var chatId = config.telegramChatId;
+
+    // Fallback sang localStorage nếu window.shopConfig chưa có
+    if (!botToken) {
+        botToken = localStorage.getItem('telegram_shift_close_token');
+    }
+    if (!chatId) {
+        chatId = localStorage.getItem('telegram_chat_id');
+    }
+
+    // Nếu ko có token shift -> bỏ qua (ko fallback sang token chính)
+    if (!botToken || !chatId) {
+        return;
+    }
+
+    var dateLabel = formatDateDisplay(closeDate);
+    var message = '🔓 QUẢN LÝ HỦY CHỐT NGÀY ' + dateLabel + '\n\n' +
+                  'Nhân viên có thể chốt lại ngày này.';
+
+    var url = 'https://api.telegram.org/bot' + botToken + '/sendMessage';
+    var params = JSON.stringify({
+        chat_id: String(chatId),
+        text: message,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    });
+
+    // Cách 1: XMLHttpRequest (ưu tiên)
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.timeout = 10000;
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+            } else {
+                _sendShiftCloseViaImage(url, chatId, message);
+            }
+        };
+        xhr.onerror = function() {
+            _sendShiftCloseViaImage(url, chatId, message);
+        };
+        xhr.ontimeout = function() {
+            _sendShiftCloseViaImage(url, chatId, message);
+        };
+        xhr.send(params);
+    } catch (e) {
+        _sendShiftCloseViaImage(url, chatId, message);
+    }
 }
 
 // ========== ADMIN: HỦY CHỐT NGÀY ==========
 // Admin có thể hủy chốt để cho phép nhân viên chốt lại
 function unlockDayClose() {
-    if (!confirm('🔓 Xác nhận hủy chốt ngày hôm nay?\n\nSau khi hủy chốt:\n- Nhân viên có thể chốt lại\n- Hoàn tác/xóa món/xóa bàn sẽ yêu cầu mật khẩu (đã chốt)\n\nTiếp tục?')) return;
+    var closeDate = _selectedCloseDate || (_posCashData && _posCashData.dateKey) || getTodayDateKey();
+    var dateLabel = formatDateDisplay(closeDate);
 
-    var today = new Date().toISOString().slice(0, 10);
+    if (!confirm('🔓 Xác nhận hủy chốt ngày ' + dateLabel + '?\n\nSau khi hủy chốt:\n- Nhân viên có thể chốt lại\n- Hoàn tác/xóa món/xóa bàn sẽ yêu cầu mật khẩu (đã chốt)\n\nTiếp tục?')) return;
 
-    DB.get('daily_balances', today).then(function(existing) {
-        if (!existing) {
-            showToast('❌ Không tìm thấy dữ liệu chốt ngày hôm nay', 'error');
-            return;
-        }
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
 
-        var data = JSON.parse(JSON.stringify(existing));
-        data.isClosed = false;
-        data.closedAt = null;
-        data.closedBy = null;
-        data.updatedAt = Date.now();
-
-        return DB.create('daily_balances', data, today);
+    var dbRef = firebase.database().ref(shopId + '/daily_balances/' + closeDate);
+    dbRef.update({
+        isClosed: false,
+        closedAt: null,
+        closedBy: null,
+        updatedAt: Date.now()
     }).then(function() {
-        showToast('🔓 Đã hủy chốt ngày hôm nay', 'success');
+        showToast('🔓 Đã hủy chốt ngày ' + dateLabel, 'success');
 
-        // Gửi Telegram thông báo admin đã hủy chốt
-        if (typeof sendTelegramMessage === 'function') {
-            var msg = '🔓 QUẢN LÝ HỦY CHỐT NGÀY ' + formatDateDisplay(today) + '\n\n' +
-                      'Nhân viên có thể chốt lại ngày hôm nay.';
-            sendTelegramMessage(msg);
-        }
+        // Gửi thông báo hủy chốt qua luồng riêng (token chốt ca)
+        _sendShiftCloseUnlock(closeDate);
 
-        loadPosCashData(); // Reload
+        // Quay về ngày hôm nay sau khi hủy chốt
+        _selectedCloseDate = null;
+        loadPosCashData();
     }).catch(function(err) {
-        console.error('unlockDayClose error:', err);
         showToast('❌ Lỗi khi hủy chốt!', 'error');
     });
 }
@@ -747,66 +1436,94 @@ function showCloseableToast(message, type) {
 // ============================================================
 
 function initSettingsTab() {
+    try {
     // Phân quyền hiển thị:
-    // - Nhân viên: chỉ thấy "⚙️ Cài đặt ứng dụng" + "💬 Cài đặt Chat"
-    // - Admin: thấy tất cả (Telegram, Thông tin quán, Phân quyền)
+    // - Nhân viên: chỉ thấy "📝 Ghi chú"
+    // - Admin: thấy tất cả (Telegram, ESP32, Thông tin quán, Chat)
+    // Phân quyền nhân viên đã chuyển sang modal employees.js
     var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
-    var appSection = document.getElementById('settingsAppSection');
     var shopSection = document.getElementById('settingsShopSection');
     var telegramSection = document.getElementById('settingsTelegramSection');
     var permSection = document.getElementById('settingsPermissionSection');
     var chatSection = document.getElementById('settingsChatSection');
+    var esp32Section = document.getElementById('settingsEsp32Section');
+    var chatLockField = document.getElementById('chatLockField');
+    var staffNoteSection = document.getElementById('settingsStaffNoteSection');
+    var lockSection = document.getElementById('settingsLockSection');
 
-    // App section: staff thấy, admin ẩn (admin đã có các section khác)
-    if (appSection) appSection.style.display = isAdmin ? 'none' : '';
-    // Shop section: chỉ admin mới thấy
-    if (shopSection) shopSection.style.display = isAdmin ? '' : 'none';
-    // Telegram section: chỉ admin mới thấy
-    if (telegramSection) telegramSection.style.display = isAdmin ? '' : 'none';
-    // Permission section: chỉ admin mới thấy
-    if (permSection) permSection.style.display = isAdmin ? '' : 'none';
-    // Chat section: tất cả đều thấy (để bật/tắt âm thanh)
-    if (chatSection) chatSection.style.display = '';
+    // Admin: hiển thị TOÀN BỘ các section - chỉ ẩn "Ghi chú nhân viên"
+    // Nhân viên: ẩn TOÀN BỘ các section - chỉ hiển thị "Ghi chú nhân viên"
+    if (isAdmin) {
+        // Admin: hiển thị tất cả section cài đặt
+        if (shopSection) shopSection.style.display = '';
+        if (telegramSection) telegramSection.style.display = '';
+        if (esp32Section) esp32Section.style.display = '';
+        if (chatSection) chatSection.style.display = '';
+        if (chatLockField) chatLockField.style.display = '';
+        if (lockSection) lockSection.style.display = '';
+        // Staff note section: ẩn với admin
+        if (staffNoteSection) staffNoteSection.style.display = 'none';
+        // Permission section: luôn ẩn (đã chuyển sang modal employees.js)
+        if (permSection) permSection.style.display = 'none';
+    } else {
+        // Nhân viên: ẩn tất cả section cài đặt, chỉ hiển thị "Ghi chú"
+        if (shopSection) shopSection.style.display = 'none';
+        if (telegramSection) telegramSection.style.display = 'none';
+        if (esp32Section) esp32Section.style.display = 'none';
+        if (chatSection) chatSection.style.display = 'none';
+        if (chatLockField) chatLockField.style.display = 'none';
+        if (lockSection) lockSection.style.display = 'none';
+        if (permSection) permSection.style.display = 'none';
+        // Staff note section: hiển thị cho nhân viên
+        if (staffNoteSection) staffNoteSection.style.display = '';
+    }
 
-    // Load Telegram config nếu có
+    // Load Telegram config từ localStorage
     var savedToken = localStorage.getItem('telegram_bot_token');
+    var savedChatId = localStorage.getItem('telegram_chat_id');
+    var savedBotName = localStorage.getItem('telegram_bot_name');
+    var savedShiftCloseToken = localStorage.getItem('telegram_shift_close_token');
+    var savedWarningToken = localStorage.getItem('telegram_warning_token');
+    var savedExpenseToken = localStorage.getItem('telegram_expense_token');
+
+    // Khởi tạo window.shopConfig để các hàm gửi Telegram (cả chung và chốt ca) đọc được
+    // Ưu tiên giữ giá trị từ Firebase realtime nếu đã có (tránh ghi đè bằng localStorage rỗng)
+    if (!window.shopConfig) {
+        window.shopConfig = {};
+    }
+    // Chỉ ghi đè nếu localStorage có giá trị, nếu không giữ nguyên từ Firebase realtime
+    if (savedToken) window.shopConfig.telegramBotToken = savedToken;
+    if (savedChatId) window.shopConfig.telegramChatId = savedChatId;
+    if (savedShiftCloseToken) window.shopConfig.telegramShiftCloseToken = savedShiftCloseToken;
+    if (savedWarningToken) window.shopConfig.telegramWarningToken = savedWarningToken;
+    if (savedExpenseToken) window.shopConfig.telegramExpenseToken = savedExpenseToken;
+
+    // Load Telegram config vào UI
     var tokenInput = document.getElementById('telegramBotToken');
     if (tokenInput) tokenInput.value = savedToken || '';
-    var savedChatId = localStorage.getItem('telegram_chat_id');
     var chatIdInput = document.getElementById('telegramChatId');
     if (chatIdInput) chatIdInput.value = savedChatId || '';
-    var savedBotName = localStorage.getItem('telegram_bot_name');
     var botNameInput = document.getElementById('telegramBotName');
     if (botNameInput) botNameInput.value = savedBotName || '';
 
-    // Load staff permission list (nếu là admin)
-    if (isAdmin && typeof loadStaffPermissionList === 'function') {
-        loadStaffPermissionList();
-    }
+    // Load shift-close Telegram config vào UI
+    var shiftCloseTokenInput = document.getElementById('telegramShiftCloseToken');
+    if (shiftCloseTokenInput) shiftCloseTokenInput.value = savedShiftCloseToken || '';
+
+    // Load warning Telegram config vào UI
+    var warningTokenInput = document.getElementById('telegramWarningToken');
+    if (warningTokenInput) warningTokenInput.value = savedWarningToken || '';
+
+    // Load expense Telegram config vào UI
+    var expenseTokenInput = document.getElementById('telegramExpenseToken');
+    if (expenseTokenInput) expenseTokenInput.value = savedExpenseToken || '';
+
+    // Load staff permission list (đã chuyển sang modal employees.js)
+    // Giữ lại để tương thích nếu có gọi từ nơi khác
 
     // Khởi tạo Đếm tiền nhanh
     if (typeof initQuickCashCounter === 'function') {
         initQuickCashCounter();
-    }
-
-    // Load token GitHub
-    var savedGithubToken = localStorage.getItem('github_token');
-    var githubTokenInput = document.getElementById('settingsGithubToken');
-    if (githubTokenInput) {
-        githubTokenInput.value = savedGithubToken || '';
-    }
-
-    // Load skipped version
-    var skipped = localStorage.getItem('skip_version');
-    var skippedEl = document.getElementById('settingsSkippedVersion');
-    if (skippedEl) {
-        skippedEl.textContent = skipped || 'Không có';
-    }
-
-    // Load version
-    var versionEl = document.getElementById('settingsCurrentVersion');
-    if (versionEl) {
-        versionEl.textContent = window.APP_VERSION || '1.0.0';
     }
 
     // Load shop info
@@ -814,99 +1531,56 @@ function initSettingsTab() {
         loadShopInfo();
     }
 
-    // Kiểm tra cập nhật
-    if (typeof checkUpdateNow === 'function') {
-        checkUpdateNow();
-    }
-}
-
-function updateSettingsStatus(message, isError) {
-    var statusEl = document.getElementById('settingsUpdateStatus');
-    if (!statusEl) return;
-    statusEl.textContent = message;
-    statusEl.style.color = isError ? '#dc2626' : '#16a34a';
-}
-
-function saveGitHubToken() {
-    var input = document.getElementById('settingsGithubToken');
-    if (!input) return;
-    var token = input.value.trim();
-    if (!token) {
-        showToast('⚠️ Vui lòng nhập token', 'warning');
-        return;
-    }
-    localStorage.setItem('github_token', token);
-    showToast('✅ Đã lưu token', 'success');
-}
-
-function clearGitHubToken() {
-    localStorage.removeItem('github_token');
-    var input = document.getElementById('settingsGithubToken');
-    if (input) input.value = '';
-    showToast('🗑️ Đã xóa token', 'info');
-}
-
-function checkUpdateNow() {
-    updateSettingsStatus('Đang kiểm tra...', false);
-    var token = localStorage.getItem('github_token');
-    if (!token) {
-        updateSettingsStatus('⚠️ Chưa có token GitHub', true);
-        return;
+    // Load ESP32 config
+    if (typeof loadEsp32Config === 'function') {
+        loadEsp32Config();
     }
 
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://api.github.com/repos/cana2/posapp/releases/latest', true);
-    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-    xhr.setRequestHeader('Accept', 'application/vnd.github.v3+json');
-    xhr.timeout = 15000;
+    // Load lock config
+    loadLockConfig();
 
-    xhr.onload = function() {
-        if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-                var data = JSON.parse(xhr.responseText);
-                var latestVersion = (data.tag_name || 'v1.0.0').replace(/^v/, '');
-                var currentVersion = window.APP_VERSION || '1.0.0';
-                var skipped = localStorage.getItem('skip_version');
-
-                if (compareVersions(latestVersion, currentVersion) > 0) {
-                    if (skipped === latestVersion) {
-                        updateSettingsStatus('📌 Phiên bản ' + latestVersion + ' đang bị bỏ qua', false);
-                    } else {
-                        updateSettingsStatus('🎉 Có phiên bản mới: v' + latestVersion, false);
-                        showToast('🎉 Có phiên bản mới v' + latestVersion, 'info', 5000);
-                    }
-                } else {
-                    updateSettingsStatus('✅ Đã là phiên bản mới nhất', false);
-                }
-            } catch (e) {
-                updateSettingsStatus('❌ Lỗi phân tích phản hồi', true);
+    // Đồng bộ trạng thái toggle khóa chat
+    // Sử dụng isChatLocked() từ messages.js (đã đồng bộ qua Firebase realtime)
+    if (isAdmin) {
+        var chatLockToggle = document.getElementById('chatLockToggle');
+        var chatLockLabel = document.getElementById('chatLockStatusLabel');
+        if (chatLockToggle) {
+            var locked = false;
+            if (typeof isChatLocked === 'function') {
+                locked = isChatLocked();
+            } else {
+                // Fallback nếu messages.js chưa load
+                try {
+                    locked = localStorage.getItem('chat_staff_locked') === 'true';
+                } catch(e) {}
             }
-        } else if (xhr.status === 401) {
-            updateSettingsStatus('❌ Token không hợp lệ', true);
-        } else if (xhr.status === 403) {
-            updateSettingsStatus('❌ Đã vượt quá giới hạn API', true);
-        } else {
-            updateSettingsStatus('❌ Lỗi ' + xhr.status, true);
+            chatLockToggle.checked = locked;
+            if (chatLockLabel) {
+                chatLockLabel.textContent = locked ? '🔒 Đã khóa' : '🔓 Đã mở';
+            }
         }
-    };
+    }
 
-    xhr.onerror = function() {
-        updateSettingsStatus('❌ Không thể kết nối', true);
-    };
+    // Load ghi chú nhân viên từ localStorage
+    var staffNoteInput = document.getElementById('staffNoteInput');
+    if (staffNoteInput) {
+        try {
+            var savedNote = localStorage.getItem('staff_note');
+            if (savedNote !== null) {
+                staffNoteInput.value = savedNote;
+            }
+        } catch(e) {}
+    }
 
-    xhr.ontimeout = function() {
-        updateSettingsStatus('❌ Hết thời gian chờ', true);
-    };
-
-    xhr.send();
+    } catch(e) {
+    }
 }
 
-function clearSkipVersion() {
-    localStorage.removeItem('skip_version');
-    var skippedEl = document.getElementById('settingsSkippedVersion');
-    if (skippedEl) skippedEl.textContent = 'Không có';
-    showToast('🔄 Đã bỏ bỏ qua, kiểm tra lại...', 'info');
-    checkUpdateNow();
+// Lưu ghi chú nhân viên vào localStorage (gọi từ oninput)
+function saveStaffNote(value) {
+    try {
+        localStorage.setItem('staff_note', value || '');
+    } catch(e) {}
 }
 
 function savePrinterIp() {
@@ -987,23 +1661,21 @@ function saveShopInfo() {
         updatedAt: new Date().toISOString()
     };
 
-    DB.create('shop_info', data, 'shop_info').then(function() {
+    DB.create('info', data, 'shop_info').then(function() {
         window.shopInfo = data;
         showToast('✅ Đã lưu thông tin quán', 'success');
     }).catch(function(err) {
-        console.error('Save shop info error:', err);
         showToast('❌ Lỗi lưu thông tin quán', 'error');
     });
 }
 
 function clearShopInfo() {
     if (!confirm('Xóa thông tin quán?')) return;
-    DB.remove('shop_info', 'shop_info').then(function() {
+    DB.remove('info', 'shop_info').then(function() {
         window.shopInfo = null;
         loadShopInfo();
         showToast('🗑️ Đã xóa thông tin quán', 'info');
     }).catch(function(err) {
-        console.error('Clear shop info error:', err);
         showToast('❌ Lỗi xóa thông tin quán', 'error');
     });
 }
@@ -1025,13 +1697,107 @@ function toggleTelegramTokenVisibility() {
     }
 }
 
+function toggleShiftCloseTokenVisibility() {
+    var input = document.getElementById('telegramShiftCloseToken');
+    var btn = document.getElementById('settingsToggleShiftCloseToken');
+    if (!input || !btn) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+    }
+}
+
+function toggleWarningTokenVisibility() {
+    var input = document.getElementById('telegramWarningToken');
+    var btn = document.getElementById('settingsToggleWarningToken');
+    if (!input || !btn) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+    }
+}
+
+function toggleExpenseTokenVisibility() {
+    var input = document.getElementById('telegramExpenseToken');
+    var btn = document.getElementById('settingsToggleExpenseToken');
+    if (!input || !btn) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+    }
+}
+
+function testShiftCloseTelegram() {
+    var token = localStorage.getItem('telegram_shift_close_token');
+    var chatId = localStorage.getItem('telegram_chat_id');
+    if (!token) {
+        showToast('⚠️ Chưa có token chốt ca, dùng token chính để thử', 'warning');
+        token = localStorage.getItem('telegram_bot_token');
+        chatId = localStorage.getItem('telegram_chat_id');
+        if (!token || !chatId) {
+            showToast('⚠️ Chưa có cấu hình Telegram nào', 'warning');
+            return;
+        }
+    }
+
+    var statusEl = document.getElementById('telegramConfigStatus');
+    if (statusEl) statusEl.textContent = '📨 Đang gửi tin nhắn thử chốt ca...';
+
+    var message = encodeURIComponent('🔒 *Tin nhắn thử từ POS - Chốt ca* \n\nNếu bạn thấy tin nhắn này, cấu hình Telegram chốt ca đã hoạt động!');
+    var url = 'https://api.telegram.org/bot' + token + '/sendMessage?chat_id=' + chatId + '&text=' + message + '&parse_mode=Markdown';
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.timeout = 10000;
+
+    xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+            if (statusEl) statusEl.textContent = '✅ Gửi thử chốt ca thành công!';
+            showToast('✅ Gửi tin nhắn thử chốt ca thành công', 'success');
+        } else {
+            if (statusEl) statusEl.textContent = '❌ Lỗi: ' + xhr.status;
+            showToast('❌ Gửi thử chốt ca thất bại (HTTP ' + xhr.status + ')', 'error');
+        }
+    };
+
+    xhr.onerror = function() {
+        if (statusEl) statusEl.textContent = '❌ Không thể kết nối Telegram';
+        showToast('❌ Không thể kết nối Telegram API', 'error');
+    };
+
+    xhr.ontimeout = function() {
+        if (statusEl) statusEl.textContent = '❌ Hết thời gian chờ';
+        showToast('❌ Hết thời gian chờ kết nối Telegram', 'error');
+    };
+
+    xhr.send();
+}
+
 function saveTelegramConfig() {
     var token = document.getElementById('telegramBotToken').value.trim();
     var chatId = document.getElementById('telegramChatId').value.trim();
     var botName = document.getElementById('telegramBotName').value.trim();
 
+    // Shift-close token (không bắt buộc)
+    var shiftCloseToken = document.getElementById('telegramShiftCloseToken').value.trim();
+
+    // Warning token (không bắt buộc) - dùng chung Chat ID
+    var warningToken = document.getElementById('telegramWarningToken').value.trim();
+
+    // Expense token (không bắt buộc) - dùng chung Chat ID
+    var expenseToken = document.getElementById('telegramExpenseToken').value.trim();
+
     if (!token || !chatId) {
-        showToast('⚠️ Vui lòng nhập Bot Token và Chat ID', 'warning');
+        showToast('⚠️ Vui lòng nhập Bot Token và Chat ID cho thông báo chung', 'warning');
         return;
     }
 
@@ -1041,6 +1807,27 @@ function saveTelegramConfig() {
         localStorage.setItem('telegram_bot_name', botName);
     }
 
+    // Lưu shift-close token
+    if (shiftCloseToken) {
+        localStorage.setItem('telegram_shift_close_token', shiftCloseToken);
+    } else {
+        localStorage.removeItem('telegram_shift_close_token');
+    }
+
+    // Lưu warning token (dùng chung Chat ID)
+    if (warningToken) {
+        localStorage.setItem('telegram_warning_token', warningToken);
+    } else {
+        localStorage.removeItem('telegram_warning_token');
+    }
+
+    // Lưu expense token (dùng chung Chat ID)
+    if (expenseToken) {
+        localStorage.setItem('telegram_expense_token', expenseToken);
+    } else {
+        localStorage.removeItem('telegram_expense_token');
+    }
+
     // Cập nhật biến global trong telegram.js nếu có
     if (typeof window.TELEGRAM_BOT_TOKEN !== 'undefined') {
         window.TELEGRAM_BOT_TOKEN = token;
@@ -1048,6 +1835,28 @@ function saveTelegramConfig() {
     if (typeof window.TELEGRAM_CHAT_ID !== 'undefined') {
         window.TELEGRAM_CHAT_ID = chatId;
     }
+
+    // Cập nhật shopConfig để _sendShiftCloseTelegram() đọc được
+    if (!window.shopConfig) {
+        window.shopConfig = {};
+    }
+    window.shopConfig.telegramBotToken = token;
+    window.shopConfig.telegramChatId = chatId;
+    window.shopConfig.telegramShiftCloseToken = shiftCloseToken || '';
+    window.shopConfig.telegramWarningToken = warningToken || '';
+    window.shopConfig.telegramExpenseToken = expenseToken || '';
+
+    // Ghi lên Firebase để đồng bộ
+    var shopId = localStorage.getItem('current_shop_id') || 'shop_default';
+    var fbRef = firebase.database().ref(shopId + '/info');
+    fbRef.update({
+        telegramBotToken: token,
+        telegramChatId: chatId,
+        telegramShiftCloseToken: shiftCloseToken || '',
+        telegramWarningToken: warningToken || '',
+        telegramExpenseToken: expenseToken || ''
+    }).catch(function(err) {
+    });
 
     var statusEl = document.getElementById('telegramConfigStatus');
     if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình Telegram';
@@ -1100,10 +1909,16 @@ function clearTelegramConfig() {
     localStorage.removeItem('telegram_bot_token');
     localStorage.removeItem('telegram_chat_id');
     localStorage.removeItem('telegram_bot_name');
+    localStorage.removeItem('telegram_shift_close_token');
+    localStorage.removeItem('telegram_warning_token');
+    localStorage.removeItem('telegram_expense_token');
 
     document.getElementById('telegramBotToken').value = '';
     document.getElementById('telegramChatId').value = '';
     document.getElementById('telegramBotName').value = '';
+    document.getElementById('telegramShiftCloseToken').value = '';
+    document.getElementById('telegramWarningToken').value = '';
+    document.getElementById('telegramExpenseToken').value = '';
 
     var statusEl = document.getElementById('telegramConfigStatus');
     if (statusEl) statusEl.textContent = '🗑️ Đã xóa cấu hình Telegram';
@@ -1111,125 +1926,127 @@ function clearTelegramConfig() {
 }
 
 // ============================================================
-// 6. PHÂN QUYỀN NHÂN VIÊN (Staff Permission)
+// 5b. CẤU HÌNH KHÓA BÀN & THỜI GIAN
 // ============================================================
 
-function loadStaffPermissionList() {
-    var listEl = document.getElementById('staffPermissionList');
-    if (!listEl) return;
+function loadLockConfig() {
+    try {
+        var info = window.shopInfo || {};
+        var startHourInput = document.getElementById('settingsLockStartHour');
+        if (startHourInput) startHourInput.value = info.lockStartHour !== undefined ? info.lockStartHour : '';
 
-    listEl.innerHTML = '<div class="permission-loading">Đang tải...</div>';
+        var endHourInput = document.getElementById('settingsLockEndHour');
+        if (endHourInput) endHourInput.value = info.lockEndHour !== undefined ? info.lockEndHour : '';
 
-    if (typeof DB === 'undefined' || typeof DB.getStaffs !== 'function') {
-        listEl.innerHTML = '<div class="permission-loading">⚠️ Chưa sẵn sàng</div>';
-        return;
+        var endMinuteInput = document.getElementById('settingsLockEndMinute');
+        if (endMinuteInput) endMinuteInput.value = info.lockEndMinute !== undefined ? info.lockEndMinute : '';
+
+        var tableLockInput = document.getElementById('settingsTableLockHours');
+        if (tableLockInput) tableLockInput.value = info.tableLockHours !== undefined ? info.tableLockHours : '';
+
+        var lockPassInput = document.getElementById('settingsLockPassword');
+        if (lockPassInput) lockPassInput.value = info.lockPassword || '';
+    } catch(e) {
     }
+}
 
-    // Ưu tiên đọc từ local cache trước, sau đó mới fetch từ Firebase
-    var localPromise = (typeof DB.getAll === 'function') ? DB.getAll('staffs') : Promise.resolve(null);
-    var fbPromise = DB.getStaffs();
-    Promise.all([localPromise, fbPromise]).then(function(results) {
-        var staffs = results[1] || results[0] || [];
-        if (!staffs || staffs.length === 0) {
-            listEl.innerHTML = '<div class="permission-loading">Chưa có nhân viên nào</div>';
+function saveLockConfig() {
+    var startHour = document.getElementById('settingsLockStartHour').value.trim();
+    var endHour = document.getElementById('settingsLockEndHour').value.trim();
+    var endMinute = document.getElementById('settingsLockEndMinute').value.trim();
+    var tableLockHours = document.getElementById('settingsTableLockHours').value.trim();
+    var lockPassword = document.getElementById('settingsLockPassword').value.trim();
+
+    // Validate
+    if (startHour) {
+        var sh = parseInt(startHour, 10);
+        if (isNaN(sh) || sh < 0 || sh > 23) {
+            showToast('⚠️ Giờ mở quán không hợp lệ (0-23)', 'warning');
             return;
         }
-
-        var currentUser = DB.getCurrentUser();
-        var currentUserId = currentUser ? currentUser.id : null;
-
-        var html = '';
-        for (var i = 0; i < staffs.length; i++) {
-            var staff = staffs[i];
-            if (!staff) continue;
-
-            var name = staff.displayName || staff.username || staff.id || 'Unknown';
-            var username = staff.username || '';
-            var role = staff.role || 'staff';
-            var isSelf = staff.id === currentUserId;
-
-            var roleClass = isSelf ? 'self' : role;
-            var roleLabel = isSelf ? '👤 Chính bạn' : (role === 'admin' ? '🔑 Admin' : '👤 Staff');
-
-            html += '<div class="permission-staff-item" onclick="' + (isSelf ? '' : 'toggleStaffRole(\'' + escapeJsString(staff.id) + '\', \'' + escapeJsString(role) + '\')') + '">' +
-                '<div class="permission-staff-info">' +
-                '<span class="permission-staff-name">' + escapeHtml(name) + '</span>' +
-                (username ? '<span class="permission-staff-username">@' + escapeHtml(username) + '</span>' : '') +
-                '</div>' +
-                '<span class="permission-staff-role ' + roleClass + '">' + roleLabel + '</span>' +
-                '</div>';
+    }
+    if (endHour) {
+        var eh = parseInt(endHour, 10);
+        if (isNaN(eh) || eh < 0 || eh > 23) {
+            showToast('⚠️ Giờ đóng quán không hợp lệ (0-23)', 'warning');
+            return;
         }
+    }
+    if (endMinute) {
+        var em = parseInt(endMinute, 10);
+        if (isNaN(em) || em < 0 || em > 59) {
+            showToast('⚠️ Phút đóng quán không hợp lệ (0-59)', 'warning');
+            return;
+        }
+    }
+    if (tableLockHours) {
+        var tlh = parseInt(tableLockHours, 10);
+        if (isNaN(tlh) || tlh < 1 || tlh > 24) {
+            showToast('⚠️ Thời gian ngồi tối đa không hợp lệ (1-24)', 'warning');
+            return;
+        }
+    }
 
-        listEl.innerHTML = html;
+    // Các key này nằm trực tiếp trong info/{shopId} trên Firebase (cùng cấp với name, code)
+    // Ghi trực tiếp lên Firebase để đảm bảo đúng path
+    var shopId = localStorage.getItem('current_shop_id') || 'shop_default';
+    var fbRef = firebase.database().ref(shopId + '/info');
+    var updates = {};
+    if (startHour) updates.lockStartHour = parseInt(startHour, 10);
+    if (endHour) updates.lockEndHour = parseInt(endHour, 10);
+    if (endMinute) updates.lockEndMinute = parseInt(endMinute, 10);
+    if (tableLockHours) updates.tableLockHours = parseInt(tableLockHours, 10);
+    if (lockPassword) updates.lockPassword = lockPassword;
+
+    fbRef.update(updates).then(function() {
+        // Cập nhật shopInfo và shopConfig ngay lập tức
+        if (window.shopInfo) {
+            for (var k in updates) window.shopInfo[k] = updates[k];
+        }
+        if (window.shopConfig) {
+            for (var k in updates) window.shopConfig[k] = updates[k];
+        }
+        var statusEl = document.getElementById('lockConfigStatus');
+        if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình khóa bàn & thời gian';
+        showToast('✅ Đã lưu cấu hình khóa bàn & thời gian', 'success');
     }).catch(function(err) {
-        listEl.innerHTML = '<div class="permission-loading">❌ Lỗi tải danh sách</div>';
-        console.error('loadStaffPermissionList error:', err);
+        showToast('❌ Lỗi lưu cấu hình', 'error');
     });
+}
+
+// ============================================================
+// 6. PHÂN QUYỀN NHÂN VIÊN (Staff Permission)
+//    Đã chuyển sang employees.js
+//    Các hàm này là wrapper để tránh xung đột tên
+// ============================================================
+
+// employees.js đã định nghĩa và export các hàm:
+//   loadStaffPermissionList, toggleStaffRole, createNewStaff, deleteStaff
+// Settings.js chỉ gọi lại qua window để tránh đệ quy
+
+function loadStaffPermissionList() {
+    // Gọi implementation từ employees.js qua tên khác để tránh đệ quy
+    if (typeof window._empLoadStaffPermList === 'function') {
+        window._empLoadStaffPermList();
+    }
 }
 
 function toggleStaffRole(staffId, currentRole) {
-    if (!staffId) return;
-
-    var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
-    if (!isAdmin) {
-        showToast('⚠️ Chỉ admin mới có thể thay đổi quyền', 'warning');
-        return;
+    if (typeof window._empToggleRole === 'function') {
+        window._empToggleRole(staffId, currentRole);
     }
-
-    var newRole = (currentRole === 'admin') ? 'staff' : 'admin';
-    var confirmMsg = (newRole === 'admin')
-        ? 'Bạn có chắc muốn nâng cấp nhân viên này lên Admin?'
-        : 'Bạn có chắc muốn hạ quyền nhân viên này xuống Staff?';
-
-    if (!confirm(confirmMsg)) return;
-
-    DB.update('staffs', staffId, { role: newRole }).then(function() {
-        showToast('✅ Đã thay đổi quyền thành ' + (newRole === 'admin' ? 'Admin' : 'Staff'), 'success');
-        loadStaffPermissionList();
-    }).catch(function(err) {
-        console.error('toggleStaffRole error:', err);
-        showToast('❌ Lỗi thay đổi quyền', 'error');
-    });
 }
 
 function createNewStaff() {
-    var username = document.getElementById('newStaffUsername').value.trim();
-    var password = document.getElementById('newStaffPassword').value.trim();
-
-    if (!username || !password) {
-        showToast('⚠️ Vui lòng nhập tên đăng nhập và mật khẩu', 'warning');
-        return;
+    if (typeof window._empCreateStaff === 'function') {
+        window._empCreateStaff();
     }
+}
 
-    if (password.length < 4) {
-        showToast('⚠️ Mật khẩu phải có ít nhất 4 ký tự', 'warning');
-        return;
+function deleteStaff(staffId, staffName) {
+    if (typeof window._empDeleteStaff === 'function') {
+        window._empDeleteStaff(staffId, staffName);
     }
-
-    if (typeof DB === 'undefined' || typeof DB.createStaff !== 'function') {
-        showToast('⚠️ Chưa sẵn sàng', 'warning');
-        return;
-    }
-
-    var statusEl = document.getElementById('staffPermissionStatus');
-    if (statusEl) statusEl.textContent = 'Đang tạo...';
-
-    DB.createStaff({
-        username: username,
-        password: password,
-        role: 'staff',
-        displayName: username
-    }).then(function() {
-        document.getElementById('newStaffUsername').value = '';
-        document.getElementById('newStaffPassword').value = '';
-        if (statusEl) statusEl.textContent = '✅ Đã tạo nhân viên ' + username;
-        showToast('✅ Đã tạo nhân viên ' + username, 'success');
-        loadStaffPermissionList();
-    }).catch(function(err) {
-        console.error('createNewStaff error:', err);
-        if (statusEl) statusEl.textContent = '❌ Lỗi: ' + (err.message || 'Không thể tạo');
-        showToast('❌ Lỗi tạo nhân viên', 'error');
-    });
 }
 
 // ============================================================
@@ -1268,4 +2085,324 @@ function compareVersions(v1, v2) {
         if (n1 < n2) return -1;
     }
     return 0;
+}
+
+// ============================================================
+// 6b. TỰ ĐỘNG FIX DỮ LIỆU CŨ: cashKept CHO CÁC NGÀY ĐÃ CHỐT
+// ============================================================
+// Trước đây khi chốt ngày không lưu cashKept, khiến số dư đầu kỳ ngày hôm sau = 0.
+// Hàm này dò tìm các ngày đã chốt nhưng thiếu cashKept và tự động điền.
+// Chạy 1 lần khi khởi tạo, không ảnh hưởng hiệu năng.
+
+function fixMissingCashKept() {
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var dbRef = firebase.database().ref(shopId + '/daily_balances');
+
+        // Đọc tất cả daily_balances để tìm ngày thiếu cashKept
+        dbRef.once('value').then(function(snapshot) {
+            var allBalances = snapshot.val() || {};
+            var fixedCount = 0;
+
+            // Chuyển object thành mảng và sắp xếp theo ngày tăng dần
+            var dates = Object.keys(allBalances).sort();
+
+            for (var di = 0; di < dates.length; di++) {
+                var dateKey = dates[di];
+                var balance = allBalances[dateKey];
+
+                // Chỉ fix những ngày đã chốt (isClosed === true) nhưng thiếu cashKept
+                if (balance && balance.isClosed === true) {
+                    if (balance.cashKept === undefined || balance.cashKept === null) {
+                        // Tính cashKept = expectedClosing (đã lưu) hoặc actualClosing hoặc difference
+                        // expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal
+                        // Nhưng nếu không có expectedClosing, thử dùng actualClosing
+                        var cashKeptValue = null;
+
+                        if (balance.expectedClosing !== undefined && balance.expectedClosing !== null) {
+                            // expectedClosing đã là số tiền dự kiến còn trong két
+                            // Nếu difference = 0 (cân bằng) thì cashKept = expectedClosing
+                            // Nếu difference != 0 thì cashKept = expectedClosing + difference
+                            var diff = (balance.difference !== undefined && balance.difference !== null) ? balance.difference : 0;
+                            cashKeptValue = balance.expectedClosing + diff;
+                        } else if (balance.actualClosing !== undefined && balance.actualClosing !== null) {
+                            cashKeptValue = balance.actualClosing;
+                        } else if (balance.difference !== undefined && balance.difference !== null) {
+                            // Nếu chỉ có difference, không đủ để tính, bỏ qua
+                            continue;
+                        }
+
+                        if (cashKeptValue !== null && cashKeptValue >= 0) {
+                            // Ghi cashKept lên Firebase
+                            var dateRef = dbRef.child(dateKey);
+                            dateRef.update({ cashKept: cashKeptValue });
+                            fixedCount++;
+                        }
+                    }
+                }
+            }
+
+            if (fixedCount > 0) {
+                // Reload lại dữ liệu để UI cập nhật
+                loadPosCashData();
+            } else {
+            }
+        }).catch(function(err) {
+        });
+    } catch(e) {
+    }
+}
+
+// ============================================================
+// 7. CẤU HÌNH ESP32 (KÉT TIỀN)
+// ============================================================
+
+/**
+ * Lấy shopId cho ESP32 config
+ */
+function _getEsp32ShopId() {
+    return localStorage.getItem('current_shop_id') || 'shop_default';
+}
+
+/**
+ * Toggle hiển thị Telegram token trong phần ESP32
+ */
+function toggleEsp32TelegramToken() {
+    var input = document.getElementById('esp32TelegramToken');
+    if (!input) return;
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+/**
+ * Lưu cấu hình ESP32 lên Firebase
+ * ESP32 sẽ đọc cấu hình này khi khởi động thay vì hardcode
+ */
+function saveEsp32Config() {
+    var ssid = document.getElementById('esp32WifiSsid').value.trim();
+    var password = document.getElementById('esp32WifiPassword').value.trim();
+    var fbHost = document.getElementById('esp32FirebaseHost').value.trim();
+    var shopId = document.getElementById('esp32ShopId').value.trim();
+    var tgToken = document.getElementById('esp32TelegramToken').value.trim();
+    var tgChatId = document.getElementById('esp32TelegramChatId').value.trim();
+
+    if (!ssid) {
+        showToast('⚠️ Vui lòng nhập WiFi SSID', 'warning');
+        return;
+    }
+    if (!password) {
+        showToast('⚠️ Vui lòng nhập WiFi Password', 'warning');
+        return;
+    }
+    if (!fbHost) {
+        showToast('⚠️ Vui lòng nhập Firebase Host', 'warning');
+        return;
+    }
+
+    var config = {
+        wifi: {
+            ssid: ssid,
+            password: password
+        },
+        firebase: {
+            host: fbHost,
+            shopId: shopId || 'shop_default'
+        },
+        telegram: {
+            token: tgToken || '',
+            chatId: tgChatId || ''
+        },
+        updatedAt: new Date().toISOString(),
+        updatedBy: (function() {
+            try {
+                var s = localStorage.getItem('pos_session');
+                if (s) {
+                    var u = JSON.parse(s);
+                    return u.displayName || u.username || 'admin';
+                }
+            } catch(e) {}
+            return 'admin';
+        })()
+    };
+
+    var statusEl = document.getElementById('esp32ConfigStatus');
+    if (statusEl) statusEl.textContent = '⏳ Đang lưu...';
+
+    var currentShopId = _getEsp32ShopId();
+    var dbRef = firebase.database().ref(currentShopId + '/esp32_config');
+
+    dbRef.set(config).then(function() {
+        if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình ESP32';
+        showToast('✅ Đã lưu cấu hình ESP32', 'success');
+    }).catch(function(err) {
+        if (statusEl) statusEl.textContent = '❌ Lỗi: ' + err.message;
+        showToast('❌ Lỗi lưu cấu hình ESP32', 'error');
+    });
+}
+
+/**
+ * Tải cấu hình ESP32 từ Firebase và điền vào form
+ */
+function loadEsp32Config() {
+    var statusEl = document.getElementById('esp32ConfigStatus');
+    if (statusEl) statusEl.textContent = '⏳ Đang tải...';
+
+    var currentShopId = _getEsp32ShopId();
+    var dbRef = firebase.database().ref(currentShopId + '/esp32_config');
+
+    dbRef.once('value').then(function(snapshot) {
+        var config = snapshot.val();
+        if (!config) {
+            if (statusEl) statusEl.textContent = 'ℹ️ Chưa có cấu hình ESP32';
+            return;
+        }
+
+        // Điền WiFi
+        var ssidEl = document.getElementById('esp32WifiSsid');
+        if (ssidEl && config.wifi) ssidEl.value = config.wifi.ssid || '';
+
+        var passEl = document.getElementById('esp32WifiPassword');
+        if (passEl && config.wifi) passEl.value = config.wifi.password || '';
+
+        // Điền Firebase
+        var fbHostEl = document.getElementById('esp32FirebaseHost');
+        if (fbHostEl && config.firebase) fbHostEl.value = config.firebase.host || '';
+
+        var shopIdEl = document.getElementById('esp32ShopId');
+        if (shopIdEl && config.firebase) shopIdEl.value = config.firebase.shopId || '';
+
+        // Điền Telegram
+        var tgTokenEl = document.getElementById('esp32TelegramToken');
+        if (tgTokenEl && config.telegram) tgTokenEl.value = config.telegram.token || '';
+
+        var tgChatIdEl = document.getElementById('esp32TelegramChatId');
+        if (tgChatIdEl && config.telegram) tgChatIdEl.value = config.telegram.chatId || '';
+
+        if (statusEl) {
+            var updated = config.updatedAt ? ' (cập nhật: ' + new Date(config.updatedAt).toLocaleString('vi-VN') + ')' : '';
+            statusEl.textContent = '✅ Đã tải cấu hình' + updated;
+        }
+        showToast('✅ Đã tải cấu hình ESP32', 'success');
+    }).catch(function(err) {
+        if (statusEl) statusEl.textContent = '❌ Lỗi: ' + err.message;
+        showToast('❌ Lỗi tải cấu hình ESP32', 'error');
+    });
+}
+
+/**
+ * Xóa cấu hình ESP32 khỏi Firebase
+ */
+function clearEsp32Config() {
+    if (!confirm('Xóa cấu hình ESP32? ESP32 sẽ không thể kết nối nếu chưa có cấu hình mới.')) return;
+
+    var statusEl = document.getElementById('esp32ConfigStatus');
+    if (statusEl) statusEl.textContent = '⏳ Đang xóa...';
+
+    var currentShopId = _getEsp32ShopId();
+    var dbRef = firebase.database().ref(currentShopId + '/esp32_config');
+
+    dbRef.remove().then(function() {
+        // Xóa các field trên form
+        var ids = ['esp32WifiSsid', 'esp32WifiPassword', 'esp32FirebaseHost',
+                   'esp32ShopId', 'esp32TelegramToken', 'esp32TelegramChatId'];
+        ids.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+
+        if (statusEl) statusEl.textContent = '🗑️ Đã xóa cấu hình ESP32';
+        showToast('🗑️ Đã xóa cấu hình ESP32', 'info');
+    }).catch(function(err) {
+        if (statusEl) statusEl.textContent = '❌ Lỗi: ' + err.message;
+        showToast('❌ Lỗi xóa cấu hình ESP32', 'error');
+    });
+}
+
+/**
+ * Xóa toàn bộ IndexedDB và tải lại trang từ Firebase
+ * Dùng khi dữ liệu cache hiển thị không chính xác
+ */
+function clearIndexedDB() {
+    if (!confirm('⚠️ Xóa toàn bộ dữ liệu cache trên trình duyệt?\n\n' +
+                 '• Dữ liệu trên Firebase KHÔNG bị ảnh hưởng\n' +
+                 '• Trang sẽ tự động tải lại để đồng bộ từ Firebase\n\n' +
+                 'Tiếp tục?')) return;
+
+    showToast('⏳ Đang xóa cache...', 'info', 0);
+
+    // Xóa IndexedDB
+    if (window.indexedDB && indexedDB.databases) {
+        indexedDB.databases().then(function(list) {
+            list.forEach(function(db) {
+                if (db.name) {
+                    indexedDB.deleteDatabase(db.name);
+                }
+            });
+            // Force reload sau khi xóa
+            setTimeout(function() {
+                location.reload(true);
+            }, 500);
+        }).catch(function() {
+            // Fallback: xóa các database phổ biến của POS
+            var names = ['posDB', 'PosDB', 'pos_db', 'firebase', 'firebase-db'];
+            names.forEach(function(n) {
+                indexedDB.deleteDatabase(n);
+            });
+            setTimeout(function() {
+                location.reload(true);
+            }, 500);
+        });
+    } else {
+        // Fallback cho trình duyệt cũ không hỗ trợ indexedDB.databases()
+        var names = ['posDB', 'PosDB', 'pos_db', 'firebase', 'firebase-db'];
+        names.forEach(function(n) {
+            indexedDB.deleteDatabase(n);
+        });
+        setTimeout(function() {
+            location.reload(true);
+        }, 500);
+    }
+}
+
+// ========== MODAL BÀN ĐANG HOẠT ĐỘNG (copy từ report.js) ==========
+function showActiveTablesModal() {
+    DB.getAll('tables').then(function(allTables) {
+        var activeTables = allTables.filter(function(t) { return (t.items && t.items.length) || t.total > 0; });
+        
+        var modalId = 'activeTablesModal_' + Date.now();
+        var html = '<div class="modal" id="' + modalId + '">' +
+            '<div class="modal-content">' +
+                '<div class="modal-header">' +
+                    '<span class="modal-title">🪑 Bàn đang hoạt động</span>' +
+                    '<span class="modal-close" onclick="closeModal(\'' + modalId + '\')">&times;</span>' +
+                '</div>' +
+                '<div class="modal-body" style="max-height:60vh;overflow-y:auto;">';
+        
+        if (activeTables.length === 0) {
+            html += '<div class="empty-state">✅ Không có bàn nào đang hoạt động</div>';
+        } else {
+            var total = 0;
+            for (var i = 0; i < activeTables.length; i++) {
+                var t = activeTables[i];
+                total += t.total || 0;
+                var displayName = t.customerName ? t.customerName : ((t.name && t.name.trim()) ? t.name : 'Bàn ' + t.id);
+                html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">' +
+                            '<span>🪑 ' + escapeHtml(displayName) + '</span>' +
+                            '<span>' + formatMoney(t.total || 0) + '</span>' +
+                        '</div>';
+            }
+            html += '<div style="display:flex;justify-content:space-between;padding:10px 0 0;margin-top:4px;font-weight:700;border-top:2px solid var(--border);">' +
+                        '<span>Tổng tiền bàn</span>' +
+                        '<span>' + formatMoney(total) + '</span>' +
+                    '</div>';
+        }
+        
+        html += '    </div>' +
+            '</div>' +
+        '</div>';
+        
+        var div = document.createElement('div');
+        div.innerHTML = html;
+        document.body.appendChild(div.firstElementChild);
+        openBottomSheet(modalId);
+    });
 }

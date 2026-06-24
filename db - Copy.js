@@ -28,6 +28,10 @@
 
     // Constants
     var STORE_NAME = 'pos_data';
+    // Äá»c shopId tá»« localStorage, máº·c Ä‘á»‹nh 'shop_default' náº¿u chÆ°a cÃ³
+    var CURRENT_SHOP_ID = localStorage.getItem('current_shop_id') || 'shop_default';
+    var CURRENT_DEVICE_ID = localStorage.getItem('device_id') || ('device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
+    localStorage.setItem('device_id', CURRENT_DEVICE_ID);
     
     // Biáº¿n lÆ°u thÃ´ng tin user hiá»‡n táº¡i
     var currentUser = null;
@@ -36,63 +40,12 @@
     if (savedSession) {
         try { currentUser = JSON.parse(savedSession); } catch(e) { localStorage.removeItem('pos_session'); }
     }
-    
-    // Äá»c shopId tá»« localStorage, máº·c Ä‘á»‹nh 'shop_default' náº¿u chÆ°a cÃ³
-    // FIX: Náº¿u current_shop_id khÃ´ng cÃ³ trong localStorage (do xÃ³a browser DB)
-    // nhÆ°ng pos_session váº«n cÃ²n, khÃ´i phá»¥c shopId tá»« session
-    var CURRENT_SHOP_ID = localStorage.getItem('current_shop_id');
-    if (!CURRENT_SHOP_ID) {
-        if (currentUser && currentUser.shopId) {
-            CURRENT_SHOP_ID = currentUser.shopId;
-            localStorage.setItem('current_shop_id', CURRENT_SHOP_ID);
-        } else {
-            CURRENT_SHOP_ID = 'shop_default';
-        }
-    }
-    var CURRENT_DEVICE_ID = localStorage.getItem('device_id') || ('device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
-    localStorage.setItem('device_id', CURRENT_DEVICE_ID);
 
     var localDB = null;
     var dbReady = null;
     var syncQueue = [];
     var isOnline = navigator.onLine;
     var listeners = {};
-    
-    // ========== SYNC META ==========
-    // sync_meta lưu trong IndexedDB để biết trạng thái đồng bộ của từng collection
-    // Cấu trúc: { collection: 'transactions', lastSyncAt: timestamp, maxVersion: 42, dateKeys: ['2026-06-01','2026-06-02',...] }
-    var SYNC_META_STORE = 'sync_meta';
-    var syncMetaCache = {}; // memory cache cho sync_meta
-    
-    // Hằng số: 30 ngày tính bằng milliseconds
-    var THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-    
-    // Danh sách collection có dateKey (cần giới hạn 30 ngày khi fullSync)
-    var DATE_BASED_COLLECTIONS = {
-        transactions: true,
-        daily_balances: true,
-        cost_transactions: true,
-        inventory_transactions: true,
-        ingredient_transactions: true,
-        manager_cash_pickups: true,
-        employee_attendance: true,
-        employee_salaries: true,
-        delete_logs: true,
-        drawer_sessions: true,
-        notifications: true
-    };
-    
-    // Danh sách collection master (tải toàn bộ khi fullSync)
-    var MASTER_COLLECTIONS = {
-        tables: true,
-        customers: true,
-        menu: true,
-        menu_categories: true,
-        ingredients: true,
-        staffs: true,
-        cost_categories: true,
-        info: true
-    };
     
     // OPTIMIZE: Debounce processSyncQueue - trÃ¡nh gá»i sync sau má»—i DB.update riÃªng láº»
     var _syncTimer = null;
@@ -171,10 +124,7 @@
     }
 
     // FIX: Notify local subscribers ngay láº­p tá»©c tá»« memoryCache
-    // OPTIMIZE: Callback nháº­n full data array (tÆ°Æ¡ng thÃ­ch ngÆ°á»£c)
-    // NgoÃ i ra, changeInfo Ä‘Æ°á»£c lÆ°u vÃ o _lastChangeInfo Ä‘á»ƒ UI cÃ³ thá»ƒ dÃ¹ng náº¿u cáº§n
-    var _lastChangeInfo = {};
-    function _notifyLocal(collection, changeInfo) {
+    function _notifyLocal(collection) {
         // OPTIMIZE: Náº¿u Ä‘ang suppress, ghi nháº­n collection cáº§n notify sau
         if (_suppressRealtime > 0) {
             _pendingNotifyCollections[collection] = true;
@@ -190,11 +140,6 @@
                 }
             }
         }
-        // LÆ°u changeInfo Ä‘á»ƒ UI cÃ³ thá»ƒ tra cá»©u sau (tÆ°Æ¡ng thÃ­ch ngÆ°á»£c)
-        if (changeInfo) {
-            _lastChangeInfo[collection] = changeInfo;
-        }
-        // Gá»i callback vá»›i full data array (giá»¯ nguyÃªn tÆ°Æ¡ng thÃ­ch ngÆ°á»£c)
         for (var i = 0; i < cbs.length; i++) {
             try { cbs[i](data); } catch(e) { console.error('Local callback error:', e); }
         }
@@ -220,19 +165,16 @@
     }
 
     // IndexedDB operations
-    function saveToLocal(collection, data, changeType) {
+    function saveToLocal(collection, data) {
         return dbReady.then(function() {
             if (!localDB) throw new Error('DB not ready');
             if (!localDB.objectStoreNames.contains(collection)) throw new Error('Store ' + collection + ' not found');
             // Cáº­p nháº­t memory cache ngay láº­p tá»©c (dÃ¹ng normalized data Ä‘á»ƒ cÃ³ dateKey, dateTypeKey)
             if (!memoryCache[collection]) memoryCache[collection] = {};
-            var isNew = !memoryCache[collection][data.id];
             memoryCache[collection][data.id] = normalizeIndexedFields(collection, data);
             cacheVersion[collection] = (cacheVersion[collection] || 0) + 1;
             // FIX: Notify local subscribers ngay, khÃ´ng chá» Firebase
-            // OPTIMIZE: Truyá»n thÃ´ng tin item thay Ä‘á»•i Ä‘á»ƒ UI khÃ´ng cáº§n xá»­ lÃ½ toÃ n bá»™
-            var type = changeType || (isNew ? 'added' : 'changed');
-            _notifyLocal(collection, { type: type, item: data, collection: collection });
+            _notifyLocal(collection);
             return new Promise(function(resolve, reject) {
                 var tx = localDB.transaction([collection], 'readwrite');
                 var store = tx.objectStore(collection);
@@ -305,8 +247,7 @@
                 cacheVersion[collection] = (cacheVersion[collection] || 0) + 1;
             }
             // FIX: Notify local subscribers ngay, khÃ´ng chá» Firebase
-            // OPTIMIZE: Truyá»n thÃ´ng tin item bá»‹ xÃ³a
-            _notifyLocal(collection, { type: 'removed', item: { id: id }, collection: collection });
+            _notifyLocal(collection);
             return new Promise(function(resolve, reject) {
                 var tx = localDB.transaction([collection], 'readwrite');
                 var store = tx.objectStore(collection);
@@ -655,9 +596,7 @@
         var type = options.type || 'all';
         return dbReady.then(function() {
             if (!localDB || !localDB.objectStoreNames.contains('transactions')) return [];
-            
-            // Bước 1: Đọc từ local (memory cache hoặc IndexedDB)
-            var localPromise;
+            // OPTIMIZE: Memory cache - trÃ¡nh Ä‘á»c IndexedDB
             if (memoryCache.transactions) {
                 var allTx = [];
                 for (var key in memoryCache.transactions) {
@@ -665,95 +604,53 @@
                         allTx.push(memoryCache.transactions[key]);
                     }
                 }
+                // FIX: Tá»± Ä‘á»™ng sá»­a dateKey cho dá»¯ liá»‡u cÅ© bá»‹ sai UTC
                 for (var i = 0; i < allTx.length; i++) {
                     _fixDateKeyIfNeeded(allTx[i]);
                 }
                 var filtered = allTx.filter(function(t) { return t.dateKey === dateKey; });
                 if (type !== 'all') filtered = filtered.filter(function(t) { return t.type === type; });
-                localPromise = Promise.resolve(filtered);
-            } else {
-                localPromise = new Promise(function(resolve, reject) {
-                    var tx = localDB.transaction(['transactions'], 'readonly');
-                    var store = tx.objectStore('transactions');
-                    var req;
-                    if (type !== 'all' && store.indexNames.contains('dateTypeKey')) {
-                        req = store.index('dateTypeKey').getAll(dateKey + '|' + type);
-                    } else if (store.indexNames.contains('dateKey')) {
-                        req = store.index('dateKey').getAll(dateKey);
-                    } else {
-                        req = store.getAll();
-                    }
-                    req.onsuccess = function() {
-                        var rows = req.result || [];
-                        if (!store.indexNames.contains('dateKey')) {
-                            rows = rows.filter(function(r) { return toDateKey(r.date) === dateKey; });
-                            if (type !== 'all') rows = rows.filter(function(r) { return r.type === type; });
-                        }
-                        for (var i = 0; i < rows.length; i++) {
-                            _fixDateKeyIfNeeded(rows[i]);
-                        }
-                        if (!memoryCache.transactions) memoryCache.transactions = {};
-                        for (var i = 0; i < rows.length; i++) {
-                            memoryCache.transactions[rows[i].id] = rows[i];
-                        }
-                        resolve(rows);
-                    };
-                    req.onerror = function() { reject(req.error); };
-                });
+                return filtered;
             }
-            
-            // Bước 2: Nếu local không có dữ liệu cho ngày này, auto-fetch từ Firebase
-            return localPromise.then(function(localData) {
-                if (localData && localData.length > 0) {
-                    return localData; // Đã có local, trả về ngay
+            return new Promise(function(resolve, reject) {
+                var tx = localDB.transaction(['transactions'], 'readonly');
+                var store = tx.objectStore('transactions');
+                var req;
+                if (type !== 'all' && store.indexNames.contains('dateTypeKey')) {
+                    req = store.index('dateTypeKey').getAll(dateKey + '|' + type);
+                } else if (store.indexNames.contains('dateKey')) {
+                    req = store.index('dateKey').getAll(dateKey);
+                } else {
+                    req = store.getAll();
                 }
-                
-                // Không có local data → fetch từ Firebase
-                if (!isOnline) return [];
-                
-                console.log('📡 Auto-fetching transactions for date:', dateKey);
-                return syncCollectionByDate('transactions', dateKey).then(function(fetched) {
-                    if (type !== 'all' && fetched) {
-                        fetched = fetched.filter(function(t) { return t.type === type; });
+                req.onsuccess = function() {
+                    var rows = req.result || [];
+                    if (!store.indexNames.contains('dateKey')) {
+                        rows = rows.filter(function(r) { return toDateKey(r.date) === dateKey; });
+                        if (type !== 'all') rows = rows.filter(function(r) { return r.type === type; });
                     }
-                    return fetched || [];
-                });
+                    // FIX: Tá»± Ä‘á»™ng sá»­a dateKey cho dá»¯ liá»‡u cÅ© bá»‹ sai UTC
+                    for (var i = 0; i < rows.length; i++) {
+                        _fixDateKeyIfNeeded(rows[i]);
+                    }
+                    // FIX: Load vÃ o memoryCache Ä‘á»ƒ láº§n sau khÃ´ng pháº£i Ä‘á»c IndexedDB
+                    if (!memoryCache.transactions) memoryCache.transactions = {};
+                    for (var i = 0; i < rows.length; i++) {
+                        memoryCache.transactions[rows[i].id] = rows[i];
+                    }
+                    resolve(rows);
+                };
+                req.onerror = function() { reject(req.error); };
             });
         });
     }
 
-    // Deduplication cho getTransactionsByDateRange: tránh fetch cùng range nhiều lần
-    var _fetchingRange = null;
-    
     function getTransactionsByDateRange(startDateKey, endDateKey, options) {
         options = options || {};
         var type = options.type || 'all';
-        
-        // Nếu đang fetch range khác, đợi nó xong rồi thử lại (dùng sync_meta để biết đã có data chưa)
-        if (_fetchingRange) {
-            return _fetchingRange.then(function() {
-                // Sau khi range trước xong, thử lại (lần này sẽ ít missing hơn hoặc hết)
-                return _doGetTransactionsByDateRange(startDateKey, endDateKey, type);
-            });
-        }
-        
-        var promise = _doGetTransactionsByDateRange(startDateKey, endDateKey, type);
-        _fetchingRange = promise;
-        return promise.then(function(result) {
-            _fetchingRange = null;
-            return result;
-        }).catch(function(err) {
-            _fetchingRange = null;
-            throw err;
-        });
-    }
-    
-    function _doGetTransactionsByDateRange(startDateKey, endDateKey, type) {
         return dbReady.then(function() {
             if (!localDB || !localDB.objectStoreNames.contains('transactions')) return [];
-            
-            // Bước 1: Đọc từ local (memory cache hoặc IndexedDB)
-            var localPromise;
+            // Ưu tiên memory cache
             if (memoryCache.transactions) {
                 var allTx = [];
                 for (var key in memoryCache.transactions) {
@@ -761,6 +658,7 @@
                         allTx.push(memoryCache.transactions[key]);
                     }
                 }
+                // FIX: Tá»± Ä‘á»™ng sá»­a dateKey cho dá»¯ liá»‡u cÅ© bá»‹ sai UTC
                 for (var i = 0; i < allTx.length; i++) {
                     _fixDateKeyIfNeeded(allTx[i]);
                 }
@@ -768,119 +666,50 @@
                     return t.dateKey >= startDateKey && t.dateKey <= endDateKey;
                 });
                 if (type !== 'all') filtered = filtered.filter(function(t) { return t.type === type; });
-                localPromise = Promise.resolve(filtered);
-            } else {
-                localPromise = new Promise(function(resolve, reject) {
-                    var tx = localDB.transaction(['transactions'], 'readonly');
-                    var store = tx.objectStore('transactions');
-                    var req;
-                    if (store.indexNames.contains('dateKey')) {
-                        req = store.index('dateKey').getAll();
-                    } else {
-                        req = store.getAll();
-                    }
-                    req.onsuccess = function() {
-                        var rows = req.result || [];
-                        for (var i = 0; i < rows.length; i++) {
-                            _fixDateKeyIfNeeded(rows[i]);
-                        }
-                        var filtered = rows.filter(function(r) {
-                            var dk = toDateKey(r.date);
-                            return dk >= startDateKey && dk <= endDateKey;
-                        });
-                        if (type !== 'all') filtered = filtered.filter(function(r) { return r.type === type; });
-                        if (!memoryCache.transactions) memoryCache.transactions = {};
-                        for (var i = 0; i < rows.length; i++) {
-                            memoryCache.transactions[rows[i].id] = rows[i];
-                        }
-                        resolve(filtered);
-                    };
-                    req.onerror = function() { reject(req.error); };
-                });
+                return filtered;
             }
-            
-            // Bước 2: Kiểm tra ngày nào còn thiếu, fetch từ Firebase
-            // Dùng sync_meta.dateKeys để biết ngày nào đã được fetch (kể cả ko có data)
-            return localPromise.then(function(localData) {
-                // Thu thập dateKeys đã có trong local data
-                var localDateKeys = {};
-                for (var i = 0; i < localData.length; i++) {
-                    if (localData[i].dateKey) {
-                        localDateKeys[localData[i].dateKey] = true;
-                    }
+            // Fallback: đọc từ IndexedDB theo dateKey index
+            return new Promise(function(resolve, reject) {
+                var tx = localDB.transaction(['transactions'], 'readonly');
+                var store = tx.objectStore('transactions');
+                var req;
+                if (store.indexNames.contains('dateKey')) {
+                    // Lấy tất cả transactions và filter trong memory
+                    req = store.index('dateKey').getAll();
+                } else {
+                    req = store.getAll();
                 }
-                
-                // Kiểm tra sync_meta để biết ngày nào đã fetch rồi (dù ko có giao dịch)
-                return getSyncMeta('transactions').then(function(meta) {
-                    var fetchedDateKeys = (meta && meta.dateKeys) || [];
-                    for (var i = 0; i < fetchedDateKeys.length; i++) {
-                        localDateKeys[fetchedDateKeys[i]] = true;
+                req.onsuccess = function() {
+                    var rows = req.result || [];
+                    // FIX: Tá»± Ä‘á»™ng sá»­a dateKey cho dá»¯ liá»‡u cÅ© bá»‹ sai UTC
+                    for (var i = 0; i < rows.length; i++) {
+                        _fixDateKeyIfNeeded(rows[i]);
                     }
-                    
-                    // Tìm ngày thiếu trong khoảng
-                    var allDateKeys = getDateKeysBetween(startDateKey, endDateKey);
-                    var missingDateKeys = [];
-                    for (var i = 0; i < allDateKeys.length; i++) {
-                        if (!localDateKeys[allDateKeys[i]]) {
-                            missingDateKeys.push(allDateKeys[i]);
-                        }
-                    }
-                    
-                    if (missingDateKeys.length === 0 || !isOnline) {
-                        return localData; // Đã có đủ dữ liệu
-                    }
-                    
-                    // Fetch từng ngày thiếu từ Firebase
-                    console.log('📡 Auto-fetching missing dates:', missingDateKeys.length, 'days');
-                    
-                    var chain = Promise.resolve();
-                    for (var i = 0; i < missingDateKeys.length; i++) {
-                        chain = chain.then((function(dateKey) {
-                            return function() {
-                                return syncCollectionByDate('transactions', dateKey);
-                            };
-                        })(missingDateKeys[i]));
-                    }
-                    
-                    return chain.then(function() {
-                        // Đọc lại từ local sau khi đã fetch
-                        return loadFromLocal('transactions').then(function(allData) {
-                            var result = [];
-                            for (var i = 0; i < allData.length; i++) {
-                                var dk = allData[i].dateKey;
-                                if (dk >= startDateKey && dk <= endDateKey) {
-                                    if (type === 'all' || allData[i].type === type) {
-                                        result.push(allData[i]);
-                                    }
-                                }
-                            }
-                            return result;
-                        });
+                    var filtered = rows.filter(function(r) {
+                        var dk = toDateKey(r.date);
+                        return dk >= startDateKey && dk <= endDateKey;
                     });
-                });
+                    if (type !== 'all') filtered = filtered.filter(function(r) { return r.type === type; });
+                    // FIX: Load vÃ o memoryCache Ä‘á»ƒ láº§n sau khÃ´ng pháº£i Ä‘á»c IndexedDB
+                    if (!memoryCache.transactions) memoryCache.transactions = {};
+                    for (var i = 0; i < rows.length; i++) {
+                        memoryCache.transactions[rows[i].id] = rows[i];
+                    }
+                    resolve(filtered);
+                };
+                req.onerror = function() { reject(req.error); };
             });
         });
     }
 
-   function subscribeToCollection(collection, callback, options) {
+   function subscribeToCollection(collection, callback) {
     // FIX: ÄÄƒng kÃ½ local callback Ä‘á»ƒ UI nháº­n notify ngay sau ghi local
     if (callback) {
         if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
         _localCallbacks[collection].push(callback);
     }
     
-    // OPTIMIZE: Há»— trá»£ query options (limitToLast, orderByChild) Ä‘á»ƒ giáº£m dung lÆ°á»£ng download
-    // VÃ­ dá»¥: { limitToLast: 200, orderByChild: 'createdAt' } chá»‰ láº¥y 200 item má»›i nháº¥t
     var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-    if (options && options.orderByChild) {
-        var queryRef = ref.orderByChild(options.orderByChild);
-        if (options.limitToLast) {
-            queryRef = queryRef.limitToLast(options.limitToLast);
-        }
-        ref = queryRef;
-    } else if (options && options.limitToLast) {
-        ref = ref.limitToLast(options.limitToLast);
-    }
     
     // FIX: Collection 'info' lÃ  special - chá»‰ cÃ³ 1 item config duy nháº¥t (shop_config)
     // DÃ¹ng on('value') thay vÃ¬ child_* Ä‘á»ƒ nháº­n toÃ n bá»™ object, trÃ¡nh bá»‹ tÃ¡ch thÃ nh nhiá»u item riÃªng láº»
@@ -939,12 +768,6 @@
         var item = { id: key };
         for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
         
-        // OPTIMIZE: Kiểm tra _version — nếu local đã có version >= remote, bỏ qua
-        var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-        if (localItem && (localItem._version || 0) >= (item._version || 0)) {
-            return;
-        }
-        
         // FIX: Chá»‘ng trÃ¹ng transaction tá»« Firebase realtime
         // Náº¿u transaction nÃ y Ä‘Ã£ tá»“n táº¡i trong local (do chÃ­nh mÃ¡y nÃ y táº¡o khi offline),
         // thÃ¬ khÃ´ng ghi Ä‘Ã¨ - giá»¯ nguyÃªn báº£n local (cÃ³ _idempotencyKey vÃ  _version Ä‘áº§y Ä‘á»§)
@@ -992,13 +815,6 @@
         var src = snapshot.val() || {};
         var item = { id: key };
         for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-        
-        // OPTIMIZE: Kiểm tra _version — nếu local đã có version >= remote, bỏ qua
-        var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-        if (localItem && (localItem._version || 0) >= (item._version || 0)) {
-            return;
-        }
-        
         saveToLocal(collection, item).then(emitUpdate);
     };
     var onRemoved = function(snapshot) {
@@ -1016,126 +832,6 @@
         ref.off('child_removed', onRemoved);
     };
 }
-
-    // OPTIMIZE: Subscribe dùng once('value') + polling định kỳ cho collections ít thay đổi
-    // Giảm download dữ liệu: không giữ kết nối realtime, chỉ refresh mỗi X giây
-    // FIX: Chỉ load lần đầu + tạo pollTimer nếu chưa có (tránh trùng lặp)
-    var _pollingTimers = {};
-    function subscribeWithPolling(collection, callback, intervalSeconds) {
-        intervalSeconds = intervalSeconds || 60; // Mặc định 60 giây
-        // Đăng ký local callback
-        if (callback) {
-            if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-            _localCallbacks[collection].push(callback);
-        }
-        
-        // FIX: Nếu đã có pollTimer cho collection này, không tạo mới
-        // Nhưng gọi callback ngay với data hiện có để UI không phải chờ
-        // Nếu chưa có data (initial load chưa hoàn thành), đăng ký callback để chờ
-        if (_pollingTimers[collection]) {
-            if (callback) {
-                if (memoryCache[collection]) {
-                    var data = [];
-                    for (var key in memoryCache[collection]) {
-                        if (memoryCache[collection].hasOwnProperty(key)) {
-                            data.push(memoryCache[collection][key]);
-                        }
-                    }
-                    if (data.length > 0) {
-                        try { callback(data); } catch(e) { console.error('Polling callback error:', e); }
-                    } else {
-                        // FIX: memoryCache rỗng (initial load chưa hoàn thành)
-                        // Đăng ký callback để được gọi khi initial load hoàn thành qua _notifyLocal
-                        console.log('⏳ Polling ' + collection + ': memoryCache empty, registering callback for later');
-                        if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-                        _localCallbacks[collection].push(callback);
-                    }
-                } else {
-                    // FIX: memoryCache chưa được khởi tạo, đăng ký callback để chờ
-                    console.log('⏳ Polling ' + collection + ': memoryCache not ready, registering callback for later');
-                    if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-                    _localCallbacks[collection].push(callback);
-                }
-            }
-            return function() {
-                clearInterval(_pollingTimers[collection]);
-                delete _pollingTimers[collection];
-            };
-        }
-        
-        var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-        
-        // Load lần đầu (chỉ 1 lần) — dùng deltaSync nếu đã có sync_meta
-        getSyncMeta(collection).then(function(meta) {
-            if (meta && meta.maxVersion > 0) {
-                // Đã có dữ liệu cũ, chỉ tải delta
-                deltaSync(collection);
-            } else {
-                // Chưa có dữ liệu, tải toàn bộ
-                ref.once('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var remote = snapshot.val() || {};
-                    var count = 0;
-                    var maxVersion = 0;
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            var src = remote[key];
-                            var item = { id: key };
-                            for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                            if (item._version === undefined) item._version = 1;
-                            if (item._version > maxVersion) maxVersion = item._version;
-                            saveToLocal(collection, item, 'added');
-                            count++;
-                        }
-                    }
-                    saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: [] });
-                    console.log('📥 Polling loaded ' + collection + ': ' + count + ' items');
-                });
-            }
-        });
-        
-        // Polling định kỳ — dùng delta query theo _version
-        _pollingTimers[collection] = setInterval(function() {
-            if (!isOnline) return;
-            
-            getSyncMeta(collection).then(function(meta) {
-                var localMaxVersion = (meta && meta.maxVersion) || 0;
-                var queryRef = ref.orderByChild('_version').startAt(localMaxVersion + 1);
-                
-                queryRef.once('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var remote = snapshot.val() || {};
-                    var count = 0;
-                    var newMaxVersion = localMaxVersion;
-                    
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            var src = remote[key];
-                            var item = { id: key };
-                            for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                            if (item._version === undefined) item._version = 1;
-                            if (item._version > newMaxVersion) newMaxVersion = item._version;
-                            
-                            var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-                            saveToLocal(collection, item, localItem ? 'changed' : 'added');
-                            count++;
-                        }
-                    }
-                    
-                    if (count > 0) {
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                        console.log('📥 Polling delta ' + collection + ': ' + count + ' new items');
-                    }
-                });
-            });
-        }, intervalSeconds * 1000);
-        
-        return function() {
-            clearInterval(_pollingTimers[collection]);
-            delete _pollingTimers[collection];
-        };
-    }
-    
     // Network listener
     function initNetwork() {
         window.addEventListener('online', function() {
@@ -1150,497 +846,9 @@
         isOnline = navigator.onLine;
     }
 
-    // ========== SYNC META OPERATIONS ==========
-    
-    // Key prefix cho localStorage
-    var LS_SYNC_META_PREFIX = 'sync_meta_';
-    
-    // Đọc sync_meta cho 1 collection từ localStorage (có memory cache)
-    // Dùng localStorage thay vì IndexedDB để đảm bảo dữ liệu không bị mất khi F5
-    function getSyncMeta(collection) {
-        if (syncMetaCache[collection]) {
-            return Promise.resolve(syncMetaCache[collection]);
-        }
-        // Đọc từ localStorage (synchronous, không bị mất khi F5)
-        try {
-            var lsKey = LS_SYNC_META_PREFIX + CURRENT_SHOP_ID + '_' + collection;
-            var stored = localStorage.getItem(lsKey);
-            if (stored) {
-                var meta = JSON.parse(stored);
-                if (meta && meta.lastSyncAt) {
-                    syncMetaCache[collection] = meta;
-                    return Promise.resolve(meta);
-                }
-            }
-        } catch (e) {
-            // localStorage không khả dụng, bỏ qua
-        }
-        // Fallback: đọc từ IndexedDB (nếu localStorage không có)
-        if (!dbReady) {
-            return Promise.resolve(null);
-        }
-        return dbReady.then(function() {
-            if (!localDB || !localDB.objectStoreNames.contains(SYNC_META_STORE)) {
-                return null;
-            }
-            return new Promise(function(resolve, reject) {
-                var tx = localDB.transaction([SYNC_META_STORE], 'readonly');
-                var store = tx.objectStore(SYNC_META_STORE);
-                var req = store.get(collection);
-                req.onsuccess = function() {
-                    var meta = req.result || null;
-                    if (meta) {
-                        syncMetaCache[collection] = meta;
-                        // Sync lên localStorage cho lần sau
-                        try {
-                            var lsKey = LS_SYNC_META_PREFIX + CURRENT_SHOP_ID + '_' + collection;
-                            localStorage.setItem(lsKey, JSON.stringify(meta));
-                        } catch (e) {}
-                    }
-                    resolve(meta);
-                };
-                req.onerror = function() { reject(req.error); };
-            });
-        });
-    }
-    
-    // Ghi sync_meta cho 1 collection vào localStorage (synchronous) + IndexedDB (async fallback)
-    function saveSyncMeta(collection, meta) {
-        syncMetaCache[collection] = meta;
-        // Ghi vào localStorage ngay lập tức (synchronous, không bị mất khi F5)
-        try {
-            var lsKey = LS_SYNC_META_PREFIX + CURRENT_SHOP_ID + '_' + collection;
-            localStorage.setItem(lsKey, JSON.stringify({
-                id: collection,
-                lastSyncAt: meta.lastSyncAt,
-                maxVersion: meta.maxVersion,
-                dateKeys: meta.dateKeys || []
-            }));
-        } catch (e) {
-            // localStorage không khả dụng, bỏ qua
-        }
-        // Ghi vào IndexedDB (async, fallback)
-        if (!dbReady) return Promise.resolve();
-        return dbReady.then(function() {
-            if (!localDB || !localDB.objectStoreNames.contains(SYNC_META_STORE)) return;
-            return new Promise(function(resolve, reject) {
-                var tx = localDB.transaction([SYNC_META_STORE], 'readwrite');
-                var store = tx.objectStore(SYNC_META_STORE);
-                store.put({ id: collection, lastSyncAt: meta.lastSyncAt, maxVersion: meta.maxVersion, dateKeys: meta.dateKeys || [] });
-                tx.oncomplete = function() { resolve(); };
-                tx.onerror = function() { resolve(); }; // Không reject để tránh lỗi lan truyền
-            });
-        });
-    }
-    
-    // Lấy maxVersion của 1 collection từ Firebase _meta node
-    function getMaxVersionFromFirebase(collection) {
-        if (!isOnline) return Promise.resolve(0);
-        return db.ref(CURRENT_SHOP_ID + '/_meta/' + collection + '/maxVersion').once('value').then(function(snapshot) {
-            return snapshot.val() || 0;
-        }).catch(function() { return 0; });
-    }
-    
-    // Cập nhật maxVersion lên Firebase _meta node
-    function updateMetaOnFirebase(collection, maxVersion) {
-        if (!isOnline) return Promise.resolve();
-        return db.ref(CURRENT_SHOP_ID + '/_meta/' + collection).update({
-            maxVersion: maxVersion,
-            lastUpdatedAt: firebase.database.ServerValue.TIMESTAMP
-        }).catch(function(err) {
-            console.warn('⚠️ Could not update _meta for', collection, err);
-        });
-    }
-    
-    // ========== SMART SYNC ==========
-    
-    // Promise toàn cục để các component có thể đợi smartSync hoàn thành
-    var _syncPromise = null;
-    
-    // Trả về promise để component đợi sync hoàn thành
-    function whenSyncComplete() {
-        if (_syncPromise) return _syncPromise;
-        return Promise.resolve();
-    }
-    
-    // Xác định trạng thái thiết bị và thực hiện đồng bộ phù hợp
-    function smartSync() {
-        if (!isOnline) {
-            _syncPromise = Promise.resolve();
-            return _syncPromise;
-        }
-        
-        console.log('🔄 Smart sync started...');
-        
-        // FIX: Chạy master collections TRƯỚC (tuần tự) để đảm bảo menu, ingredients được load ngay
-        // Sau đó mới chạy date-based collections (song song) để tránh quá tải IndexedDB
-        var masterKeys = Object.keys(MASTER_COLLECTIONS);
-        var dateKeys = Object.keys(DATE_BASED_COLLECTIONS);
-        
-        var syncResults = { full: [], delta: [], skipped: [] };
-        
-        // Helper: sync một collection (fullSync hoặc deltaSync tùy theo sync_meta)
-        function syncCollection(collection) {
-            return getSyncMeta(collection).then(function(meta) {
-                if (!meta) {
-                    console.log('  📦 New device, full sync:', collection);
-                    syncResults.full.push(collection);
-                    return fullSync(collection);
-                }
-                
-                var now = Date.now();
-                var timeSinceLastSync = now - (meta.lastSyncAt || 0);
-                
-                if (timeSinceLastSync > THIRTY_DAYS_MS) {
-                    console.log('  📦 Stale device (>30d), full sync:', collection);
-                    syncResults.full.push(collection);
-                    return fullSync(collection);
-                }
-                
-                console.log('  🔄 Recent device, delta sync:', collection);
-                syncResults.delta.push(collection);
-                return deltaSync(collection);
-            });
-        }
-        
-        // Bước 1: Chạy master collections tuần tự (quan trọng: menu, ingredients, tables, customers)
-        var masterChain = Promise.resolve();
-        for (var m = 0; m < masterKeys.length; m++) {
-            (function(collection) {
-                masterChain = masterChain.then(function() {
-                    return syncCollection(collection);
-                });
-            })(masterKeys[m]);
-        }
-        
-        // Bước 2: Sau khi master collections hoàn thành, chạy date-based collections song song
-        var datePromises = [];
-        for (var d = 0; d < dateKeys.length; d++) {
-            (function(collection) {
-                datePromises.push(syncCollection(collection));
-            })(dateKeys[d]);
-        }
-        
-        // Lưu promise để các component có thể đợi smartSync hoàn thành
-        _syncPromise = masterChain.then(function() {
-            return Promise.all(datePromises);
-        }).then(function() {
-            console.log('✅ Smart sync completed. Full:', syncResults.full.length, 'Delta:', syncResults.delta.length, 'Skipped:', syncResults.skipped.length);
-            return syncResults;
-        });
-        return _syncPromise;
-    }
-    
-    // FULL SYNC: Tải toàn bộ dữ liệu từ Firebase
-    // - Master collections: tải tất cả
-    // - Date-based collections: chỉ tải 30 ngày gần nhất
-    function fullSync(collection) {
-        if (!isOnline) return Promise.resolve();
-        
-        // FIX: Kiểm tra collection hợp lệ (master hoặc date-based)
-        var isDateBased = DATE_BASED_COLLECTIONS[collection];
-        var isMaster = MASTER_COLLECTIONS[collection];
-        if (!isMaster && !isDateBased) {
-            console.warn('  ⚠️ Unknown collection, skipping fullSync:', collection);
-            return Promise.resolve();
-        }
-        
-        return new Promise(function(resolve, reject) {
-            var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-            
-            // Nếu là date-based, chỉ lấy 30 ngày gần nhất
-            if (isDateBased) {
-                var thirtyDaysAgo = Date.now() - THIRTY_DAYS_MS;
-                ref = ref.orderByChild('createdAt').startAt(thirtyDaysAgo);
-            }
-            
-            ref.once('value', function(snapshot) {
-                if (!snapshot.exists()) {
-                    // Ghi sync_meta với maxVersion = 0
-                    saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: 0, dateKeys: [] });
-                    resolve();
-                    return;
-                }
-                
-                var remote = snapshot.val() || {};
-                var count = 0;
-                var maxVersion = 0;
-                var dateKeys = [];
-                
-                // Xóa local cache trước (chỉ cho master collections)
-                if (isMaster && memoryCache[collection]) {
-                    memoryCache[collection] = {};
-                }
-                
-                // Collection 'info' là special
-                if (collection === 'info') {
-                    var infoItem = { id: 'shop_config' };
-                    for (var pk in remote) {
-                        if (remote.hasOwnProperty(pk)) {
-                            infoItem[pk] = remote[pk];
-                        }
-                    }
-                    if (infoItem._version === undefined) infoItem._version = 1;
-                    saveToLocal(collection, infoItem).then(function() {
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: infoItem._version || 1, dateKeys: [] });
-                        console.log('  📥 Full synced info: 1 item');
-                        resolve();
-                    });
-                    return;
-                }
-                
-                // Ghi từng item từ Firebase vào local
-                var saveChain = Promise.resolve();
-                for (var key in remote) {
-                    if (remote.hasOwnProperty(key)) {
-                        (function(itemKey) {
-                            saveChain = saveChain.then(function() {
-                                var src = remote[itemKey];
-                                var item = { id: itemKey };
-                                for (var p in src) {
-                                    if (src.hasOwnProperty(p)) {
-                                        item[p] = src[p];
-                                    }
-                                }
-                                if (item._version === undefined) item._version = 1;
-                                if (item._version > maxVersion) maxVersion = item._version;
-                                
-                                // Thu thập dateKeys cho date-based collections
-                                if (isDateBased && item.dateKey && dateKeys.indexOf(item.dateKey) < 0) {
-                                    dateKeys.push(item.dateKey);
-                                }
-                                
-                                count++;
-                                return saveToLocal(collection, item);
-                            });
-                        })(key);
-                    }
-                }
-                
-                return saveChain.then(function() {
-                    // Ghi sync_meta
-                    saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
-                    // Cập nhật maxVersion lên Firebase _meta
-                    updateMetaOnFirebase(collection, maxVersion);
-                    console.log('  📥 Full synced ' + collection + ': ' + count + ' items, maxVersion=' + maxVersion);
-                    resolve();
-                }).catch(function(err) {
-                    console.error('  ❌ Error full syncing ' + collection + ': ', err);
-                    resolve();
-                });
-            }, function(err) {
-                console.error('  ❌ Firebase read error for ' + collection + ': ', err);
-                resolve();
-            });
-        });
-    }
-    
-    // DELTA SYNC: Chỉ tải những item có _version > localMaxVersion
-    function deltaSync(collection) {
-        if (!isOnline) return Promise.resolve();
-        
-        return getSyncMeta(collection).then(function(meta) {
-            var localMaxVersion = (meta && meta.maxVersion) || 0;
-            
-            return new Promise(function(resolve, reject) {
-                // Query Firebase: lấy items có _version > localMaxVersion
-                var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-                var queryRef = ref.orderByChild('_version').startAt(localMaxVersion + 1);
-                
-                queryRef.once('value', function(snapshot) {
-                    if (!snapshot.exists()) {
-                        // Cập nhật lastSyncAt
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: localMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                        resolve();
-                        return;
-                    }
-                    
-                    var remote = snapshot.val() || {};
-                    var count = 0;
-                    var newMaxVersion = localMaxVersion;
-                    var dateKeys = (meta && meta.dateKeys) || [];
-                    var isDateBased = DATE_BASED_COLLECTIONS[collection];
-                    
-                    // Collection 'info' là special
-                    if (collection === 'info') {
-                        var infoItem = { id: 'shop_config' };
-                        for (var pk in remote) {
-                            if (remote.hasOwnProperty(pk)) {
-                                infoItem[pk] = remote[pk];
-                            }
-                        }
-                        if (infoItem._version === undefined) infoItem._version = 1;
-                        saveToLocal(collection, infoItem).then(function() {
-                            saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: infoItem._version || 1, dateKeys: [] });
-                            resolve();
-                        });
-                        return;
-                    }
-                    
-                    var saveChain = Promise.resolve();
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            (function(itemKey) {
-                                saveChain = saveChain.then(function() {
-                                    var src = remote[itemKey];
-                                    var item = { id: itemKey };
-                                    for (var p in src) {
-                                        if (src.hasOwnProperty(p)) {
-                                            item[p] = src[p];
-                                        }
-                                    }
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    
-                                    // Thu thập dateKeys
-                                    if (isDateBased && item.dateKey && dateKeys.indexOf(item.dateKey) < 0) {
-                                        dateKeys.push(item.dateKey);
-                                    }
-                                    
-                                    count++;
-                                    return saveToLocal(collection, item);
-                                });
-                            })(key);
-                        }
-                    }
-                    
-                    return saveChain.then(function() {
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: dateKeys });
-                        updateMetaOnFirebase(collection, newMaxVersion);
-                        console.log('  🔄 Delta synced ' + collection + ': ' + count + ' new items, maxVersion=' + newMaxVersion);
-                        resolve();
-                    }).catch(function(err) {
-                        console.error('  ❌ Error delta syncing ' + collection + ': ', err);
-                        resolve();
-                    });
-                }, function(err) {
-                    console.error('  ❌ Firebase query error for ' + collection + ': ', err);
-                    resolve();
-                });
-            });
-        });
-    }
-    
-    // Deduplication: tránh fetch cùng 1 dateKey nhiều lần khi nhiều component cùng gọi
-    var _fetchingDateKeys = {};
-    
-    // SYNC COLLECTION BY DATE: Tải transactions cho 1 ngày cụ thể từ Firebase
-    function syncCollectionByDate(collection, dateKey) {
-        if (!isOnline) return Promise.resolve([]);
-        
-        // Nếu đang fetch dateKey này rồi, đợi nó hoàn thành
-        var fetchKey = collection + '|' + dateKey;
-        if (_fetchingDateKeys[fetchKey]) {
-            return _fetchingDateKeys[fetchKey];
-        }
-        
-        var promise = _doSyncCollectionByDate(collection, dateKey);
-        _fetchingDateKeys[fetchKey] = promise;
-        
-        // Xóa khỏi dedup cache sau khi hoàn thành
-        return promise.then(function(result) {
-            delete _fetchingDateKeys[fetchKey];
-            return result;
-        }).catch(function(err) {
-            delete _fetchingDateKeys[fetchKey];
-            throw err;
-        });
-    }
-    
-    function _doSyncCollectionByDate(collection, dateKey) {
-        return getSyncMeta(collection).then(function(meta) {
-            var dateKeys = (meta && meta.dateKeys) || [];
-            
-            // Nếu đã có dateKey này trong sync_meta, không cần tải lại
-            if (dateKeys.indexOf(dateKey) >= 0) {
-                // Nhưng vẫn đọc từ local để trả về
-                return loadFromLocal(collection).then(function(data) {
-                    var filtered = [];
-                    for (var i = 0; i < data.length; i++) {
-                        if (data[i].dateKey === dateKey) filtered.push(data[i]);
-                    }
-                    return filtered;
-                });
-            }
-            
-            // Chưa có dateKey → tải từ Firebase
-            console.log('  📥 Fetching', collection, 'for date:', dateKey);
-            
-            return new Promise(function(resolve, reject) {
-                var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-                ref.orderByChild('dateKey').equalTo(dateKey).once('value', function(snapshot) {
-                    if (!snapshot.exists()) {
-                        // Không có dữ liệu cho ngày này, nhưng vẫn lưu dateKey vào sync_meta
-                        // để lần sau không fetch lại ngày này nữa
-                        if (dateKeys.indexOf(dateKey) < 0) {
-                            dateKeys.push(dateKey);
-                        }
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: (meta && meta.maxVersion) || 0, dateKeys: dateKeys });
-                        console.log('  📥 Fetched', collection, 'for', dateKey, ': 0 items (no data)');
-                        resolve([]);
-                        return;
-                    }
-                    
-                    var remote = snapshot.val() || {};
-                    var items = [];
-                    var maxVersion = (meta && meta.maxVersion) || 0;
-                    
-                    var saveChain = Promise.resolve();
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            (function(itemKey) {
-                                saveChain = saveChain.then(function() {
-                                    var src = remote[itemKey];
-                                    var item = { id: itemKey };
-                                    for (var p in src) {
-                                        if (src.hasOwnProperty(p)) {
-                                            item[p] = src[p];
-                                        }
-                                    }
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > maxVersion) maxVersion = item._version;
-                                    items.push(item);
-                                    return saveToLocal(collection, item);
-                                });
-                            })(key);
-                        }
-                    }
-                    
-                    return saveChain.then(function() {
-                        // Cập nhật dateKeys
-                        if (dateKeys.indexOf(dateKey) < 0) {
-                            dateKeys.push(dateKey);
-                        }
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
-                        updateMetaOnFirebase(collection, maxVersion);
-                        console.log('  📥 Fetched', collection, 'for', dateKey, ':', items.length, 'items');
-                        resolve(items);
-                    }).catch(function(err) {
-                        console.error('  ❌ Error fetching', collection, 'by date:', err);
-                        resolve([]);
-                    });
-                }, function(err) {
-                    console.error('  ❌ Firebase query error:', err);
-                    resolve([]);
-                });
-            });
-        });
-    }
-    
-    // Lấy danh sách dateKeys giữa 2 ngày (dùng để kiểm tra thiếu ngày nào)
-    function getDateKeysBetween(startDateKey, endDateKey) {
-        var keys = [];
-        var start = new Date(startDateKey + 'T00:00:00');
-        var end = new Date(endDateKey + 'T00:00:00');
-        var current = new Date(start);
-        while (current <= end) {
-            var y = current.getFullYear();
-            var m = ('0' + (current.getMonth() + 1)).slice(-2);
-            var d = ('0' + current.getDate()).slice(-2);
-            keys.push(y + '-' + m + '-' + d);
-            current.setDate(current.getDate() + 1);
-        }
-        return keys;
+    // Historical sync (simplified, only if needed)
+    function syncHistorical() {
+        return Promise.resolve(); // bá» qua historical sync cho gá»n, váº«n realtime
     }
 
     // Init IndexedDB
@@ -1665,8 +873,7 @@
     'ingredient_transactions', 'notifications',
     'info',
     'messages',
-    'delete_logs',
-    'sync_meta'
+    'delete_logs'
 ];
                 for (var i = 0; i < stores.length; i++) {
                     if (!db.objectStoreNames.contains(stores[i])) {
@@ -1805,61 +1012,18 @@
         });
     }
 
-    
-    // ========== ENSURE COLLECTION ==========
-    // Kiá»ƒm tra náº¿u collection trá»‘ng trong local thÃ¬ force sync tá»« Firebase
-    // DÃ¹ng khi component cáº§n Ä‘áº£m báº£o dá»¯ liá»‡u Ä‘Ã£ Ä‘Æ°á»£c load trÆ°á»›c khi render
-    function ensureCollection(collection) {
-        if (!isOnline) return Promise.resolve([]);
-        return loadFromLocal(collection).then(function(localData) {
-            if (localData && Object.keys(localData).length > 0) {
-                // ÄÃ£ cÃ³ dá»¯ liá»‡u, tráº£ vá» dáº¡ng array
-                var arr = [];
-                for (var k in localData) {
-                    if (localData.hasOwnProperty(k)) arr.push(localData[k]);
-                }
-                return arr;
-            }
-            // Local trá»‘ng, cáº§n sync tá»« Firebase
-            console.log('  ðŸ“¦ Local empty for', collection, '- syncing from Firebase...');
-            return getSyncMeta(collection).then(function(meta) {
-                if (!meta) {
-                    return fullSync(collection).then(function() {
-                        return loadFromLocal(collection).then(function(data) {
-                            var arr = [];
-                            for (var k in data) {
-                                if (data.hasOwnProperty(k)) arr.push(data[k]);
-                            }
-                            return arr;
-                        });
-                    });
-                }
-                return deltaSync(collection).then(function() {
-                    return loadFromLocal(collection).then(function(data) {
-                        var arr = [];
-                        for (var k in data) {
-                            if (data.hasOwnProperty(k)) arr.push(data[k]);
-                        }
-                        return arr;
-                    });
-                });
-            });
-        });
-    }
-// ========== FORCE SYNC Tá»ª FIREBASE ==========
+    // ========== FORCE SYNC Tá»ª FIREBASE ==========
     // DÃ¹ng khi phÃ¡t hiá»‡n IndexedDB bá»‹ xÃ³a (local rá»—ng) - force táº£i láº¡i tá»« Firebase
     function forceSyncFromFirebase() {
         if (!isOnline) {
             console.warn('âš ï¸ Offline, cannot force sync from Firebase');
             return Promise.reject(new Error('Offline'));
         }
-        // OPTIMIZE: Chỉ sync các collection thực sự tồn tại trong Firebase
-        // Bỏ: reports, cost_transactions_admin, admin_cost_categories (không tồn tại)
         var collections = [
             'tables', 'customers', 'menu', 'menu_categories',
-            'ingredients', 'transactions',
-            'cost_categories', 'cost_transactions',
-            'daily_balances',
+            'ingredients', 'transactions', 'reports',
+            'cost_categories', 'cost_transactions', 'cost_transactions_admin',
+            'admin_cost_categories', 'daily_balances',
             'inventory_transactions', 'manager_cash_pickups',
             'ingredient_transactions', 'notifications',
             'info',
@@ -1868,34 +1032,92 @@
         
         console.log('ðŸ”„ Force syncing all collections from Firebase...');
         
-        // XÃ³a sync_meta cache Ä‘á»ƒ fullSync cháº¡y láº¡i tá»« Ä‘áº§u
-        syncMetaCache = {};
-        
         var chain = Promise.resolve();
         for (var c = 0; c < collections.length; c++) {
             chain = chain.then((function(collection) {
                 return function() {
-                    // XÃ³a local cache trÆ°á»›c khi fullSync
-                    if (memoryCache[collection]) {
-                        memoryCache[collection] = {};
-                    }
-                    return fullSync(collection);
+                    return _forceSyncCollection(collection);
                 };
             })(collections[c]));
         }
         
-        // LÆ°u promise Ä‘á»ƒ cÃ¡c component cÃ³ thá»ƒ Ä‘á»£i force sync hoÃ n thÃ nh
-        _syncPromise = chain.then(function() {
+        return chain.then(function() {
             console.log('âœ… Force sync completed');
         });
-        return _syncPromise;
+    }
+    
+    function _forceSyncCollection(collection) {
+        return new Promise(function(resolve, reject) {
+            var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
+            ref.once('value', function(snapshot) {
+                var remote = snapshot.val() || {};
+                var count = 0;
+                
+                // XÃ³a toÃ n bá»™ local cache trÆ°á»›c
+                if (memoryCache[collection]) {
+                    memoryCache[collection] = {};
+                }
+                
+                // FIX: Collection 'info' lÃ  special - gá»™p toÃ n bá»™ object thÃ nh 1 item
+                if (collection === 'info') {
+                    var infoItem = { id: 'shop_config' };
+                    for (var pk in remote) {
+                        if (remote.hasOwnProperty(pk)) {
+                            infoItem[pk] = remote[pk];
+                        }
+                    }
+                    if (infoItem._version === undefined) infoItem._version = 1;
+                    saveToLocal(collection, infoItem).then(function() {
+                        console.log('  ðŸ“¥ Synced info: 1 item (shop_config)');
+                        resolve();
+                    }).catch(function(err) {
+                        console.error('  âŒ Error syncing info: ', err);
+                        resolve();
+                    });
+                    return;
+                }
+                
+                // Ghi tá»«ng item tá»« Firebase vÃ o local
+                var saveChain = Promise.resolve();
+                for (var key in remote) {
+                    if (remote.hasOwnProperty(key)) {
+                        (function(itemKey) {
+                            saveChain = saveChain.then(function() {
+                                var src = remote[itemKey];
+                                var item = { id: itemKey };
+                                for (var p in src) {
+                                    if (src.hasOwnProperty(p)) {
+                                        item[p] = src[p];
+                                    }
+                                }
+                                // Äáº£m báº£o _version tá»“n táº¡i
+                                if (item._version === undefined) item._version = 1;
+                                count++;
+                                return saveToLocal(collection, item);
+                            });
+                        })(key);
+                    }
+                }
+                
+                saveChain.then(function() {
+                    console.log('  ðŸ“¥ Synced ' + collection + ': ' + count + ' items');
+                    resolve();
+                }).catch(function(err) {
+                    console.error('  âŒ Error syncing ' + collection + ': ', err);
+                    resolve(); // KhÃ´ng reject Ä‘á»ƒ tiáº¿p tá»¥c collection khÃ¡c
+                });
+            }, function(err) {
+                console.error('  âŒ Firebase read error for ' + collection + ': ', err);
+                resolve(); // KhÃ´ng reject Ä‘á»ƒ tiáº¿p tá»¥c collection khÃ¡c
+            });
+        });
     }
 
     // Init Database
     function initDatabase() {
         return initLocalDB().then(function() {
             initNetwork();
-            if (isOnline) return smartSync();
+            if (isOnline) return syncHistorical();
             return Promise.resolve();
         }).then(function() {
             // Seed dá»¯ liá»‡u máº·c Ä‘á»‹nh náº¿u chÆ°a cÃ³
@@ -1908,141 +1130,16 @@
             // tables, customers, menu, menu_categories, transactions, notifications
             // Bá»: ingredients, cost_categories, cost_transactions, cost_transactions_admin,
             //      admin_cost_categories, reports
-            // OPTIMIZE: transactions dÃ¹ng limitToLast(200) Ä‘á»ƒ chá»‰ láº¥y 200 giao dá»‹ch gáº§n nháº¥t
-            // Giáº£m dung lÆ°á»£ng download tá»« hÃ ng ngÃ n item xuá»‘ng 200 item
             subscribeToCollection('tables');
             subscribeToCollection('customers');
-            subscribeToCollection('transactions', null, { orderByChild: 'createdAt', limitToLast: 200 });
+            subscribeToCollection('menu');
+            subscribeToCollection('menu_categories');
+            subscribeToCollection('transactions');
             subscribeToCollection('notifications');
             subscribeToCollection('info');
+            subscribeToCollection('messages');
             subscribeToCollection('daily_balances');
-            // FIX: ThÃªm subscribe cho cost_categories vÃ  cost_transactions
-            // Ä‘á»ƒ loadExpenseData() vÃ  managerApplyFilter() cÃ³ dá»¯ liá»‡u
-            subscribeToCollection('cost_categories');
-            subscribeToCollection('cost_transactions');
-            // OPTIMIZE: CÃ¡c collection Ã­t thay Ä‘á»•i dÃ¹ng polling thay vÃ¬ realtime
-            // menu, menu_categories, ingredients, messages: refresh má»—i 60s
-            // FIX: KhÃ´ng gá»i subscribeWithPolling vá»›i callback null á»Ÿ Ä‘Ã¢y
-            // VÃ¬ subscribeWithPolling sáº½ Ä‘Æ°á»£c gá»i tá»« initRealtime() vá»›i callback tháº­t
-            // Náº¿u gá»i vá»›i null trÆ°á»›c, láº§n gá»i sau tá»« initRealtime() sáº½ hit early return
-            // vÃ  cÃ³ thá»ƒ bá» lá»¡ callback náº¿u memoryCache chÆ°a sáºµn sÃ ng
-            // Thay vÃ o Ä‘Ã³, chá»‰ khá»Ÿi táº¡o polling timer náº¿u chÆ°a cÃ³
-            if (!_pollingTimers['menu']) {
-                _pollingTimers['menu'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/menu');
-                    getSyncMeta('menu').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['menu'] ? memoryCache['menu'][key] : null;
-                                    saveToLocal('menu', item, localItem ? 'changed' : 'added');
-                                    count++;
-                                }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('menu', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                        });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['menu_categories']) {
-                _pollingTimers['menu_categories'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/menu_categories');
-                    getSyncMeta('menu_categories').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['menu_categories'] ? memoryCache['menu_categories'][key] : null;
-                                    saveToLocal('menu_categories', item, localItem ? 'changed' : 'added');
-                                    count++;
-                                }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('menu_categories', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                        });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['ingredients']) {
-                _pollingTimers['ingredients'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/ingredients');
-                    getSyncMeta('ingredients').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['ingredients'] ? memoryCache['ingredients'][key] : null;
-                                    saveToLocal('ingredients', item, localItem ? 'changed' : 'added');
-                                    count++;
-                                }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('ingredients', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                        });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['messages']) {
-                _pollingTimers['messages'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/messages');
-                    getSyncMeta('messages').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['messages'] ? memoryCache['messages'][key] : null;
-                                    saveToLocal('messages', item, localItem ? 'changed' : 'added');
-                                    count++;
-                                }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('messages', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                        });
-                    });
-                }, 60000);
-            }
+            subscribeToCollection('ingredients');
             console.log('âœ… Database ready, device:', CURRENT_DEVICE_ID);
             return { isOnline: isOnline, deviceId: CURRENT_DEVICE_ID };
         });
@@ -2061,27 +1158,11 @@
 
     // ========== AUTH METHODS ==========
     
-    // XÃ³a toÃ n bá»™ dá»¯ liá»‡u local (IndexedDB + localStorage + memory cache) khi chuyá»ƒn POS
+    // XÃ³a toÃ n bá»™ dá»¯ liá»‡u local (IndexedDB + memory cache) khi chuyá»ƒn POS
     function clearLocalData() {
         // XÃ³a memory cache
         memoryCache = {};
         cacheVersion = {};
-        syncMetaCache = {};
-        
-        // XÃ³a sync_meta trong localStorage
-        try {
-            var lsPrefix = LS_SYNC_META_PREFIX + CURRENT_SHOP_ID + '_';
-            var keysToRemove = [];
-            for (var i = 0; i < localStorage.length; i++) {
-                var key = localStorage.key(i);
-                if (key && key.indexOf(lsPrefix) === 0) {
-                    keysToRemove.push(key);
-                }
-            }
-            for (var i = 0; i < keysToRemove.length; i++) {
-                localStorage.removeItem(keysToRemove[i]);
-            }
-        } catch (e) {}
         
         // XÃ³a táº¥t cáº£ object stores trong IndexedDB
         if (!localDB) return Promise.resolve();
@@ -2357,21 +1438,6 @@
         });
     }
 
-    // OPTIMIZE: getMemoryCache - đọc trực tiếp từ memory cache thay vì IndexedDB
-    // Trả về array các items trong collection, hoặc null nếu collection chưa được cache
-    function getMemoryCache(collection) {
-        if (memoryCache[collection]) {
-            var arr = [];
-            for (var key in memoryCache[collection]) {
-                if (memoryCache[collection].hasOwnProperty(key)) {
-                    arr.push(memoryCache[collection][key]);
-                }
-            }
-            return arr.length > 0 ? arr : null;
-        }
-        return null;
-    }
-
     // Export
     window.DB = {
         init: initDatabase,
@@ -2383,7 +1449,6 @@
         getTransactionsByDate: getTransactionsByDate,
         getTransactionsByDateRange: getTransactionsByDateRange,
         subscribe: subscribeToCollection,
-        subscribeWithPolling: subscribeWithPolling,
         isOnline: function() { return isOnline; },
         getDeviceId: function() { return CURRENT_DEVICE_ID; },
         processSyncQueue: processSyncQueue,
@@ -2391,8 +1456,6 @@
         // OPTIMIZE: Suppress realtime notifications cho batch operations
         suppressRealtime: function() { _setSuppressRealtime(true); },
         flushRealtime: function() { _setSuppressRealtime(false); },
-        // OPTIMIZE: getMemoryCache - đọc trực tiếp từ memory cache
-        getMemoryCache: getMemoryCache,
         // Auth methods
         setShopId: setShopId,
         getShopId: getShopId,
@@ -2406,15 +1469,10 @@
         isAdmin: isAdmin,
         clearLocalData: clearLocalData,
         forceSyncFromFirebase: forceSyncFromFirebase,
-        ensureCollection: ensureCollection,
-        whenSyncComplete: whenSyncComplete,
         batchUpdateSortOrder: batchUpdateSortOrder,
         getShopConfig: getShopConfig
     };
 })();
-
-
-
 
 
 

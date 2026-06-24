@@ -55,7 +55,8 @@ function restoreRecentToastState() {
 
 // ========== UPDATE RECENT TOAST ==========
 function updateRecentToast() {
-    var todayStr = new Date().toISOString().slice(0, 10);
+    var now = new Date();
+    var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
     DB.getTransactionsByDate(todayStr).then(function(transactions) {
         // FIX: Hiển thị cả giao dịch hủy (refund) trong recentToast
         // Chỉ lọc bỏ các transaction bị đánh dấu trùng lặp tự động (có note chứa 'Tự động')
@@ -89,42 +90,56 @@ function updateRecentToast() {
             else if (timeDiff < 60) timeText = timeDiff + 'p';
             else timeText = Math.floor(timeDiff / 60) + 'h';
             
-            var shortInfo = '';
+            // Xác định icon chính dựa trên loại giao dịch
+            var mainIcon = '';
+            var labelSuffix = '';
             if (tx.refunded) {
-                shortInfo = '↩️ Hoàn tác';
+                mainIcon = '↩️';
             } else if (tx.type === 'debt_payment') {
-                shortInfo = '💢 Thanh toán nợ';
+                mainIcon = tx.paymentMethod === 'debt' ? '📝' : '💢';
             } else if (tx.type === 'credit') {
-                shortInfo = '💰 Tiền dư';
+                mainIcon = '💰';
             } else if (tx.tableName) {
-                var displayLabel = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
-                shortInfo = '🍽️ ' + displayLabel;
+                mainIcon = '🍽️';
+                labelSuffix = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
             } else if (tx.type === 'takeaway') {
-                shortInfo = '🛵 Mang đi';
+                mainIcon = '🛵';
             } else if (tx.type === 'grab') {
-                shortInfo = '🚕 Grab';
+                mainIcon = '🚕';
             } else {
-                shortInfo = '🍽️ Tại chỗ';
+                mainIcon = '🍽️';
             }
             
+            // Icon phương thức thanh toán (nếu không phải refund)
+            var methodIcon = '';
+            if (!tx.refunded) {
+                if (tx.paymentMethod === 'cash') methodIcon = '💰';
+                else if (tx.paymentMethod === 'transfer') methodIcon = '💳';
+                else if (tx.paymentMethod === 'debt') methodIcon = '📝';
+                else if (tx.paymentMethod === 'grab') methodIcon = '🚕';
+                else methodIcon = '💵';
+            }
+            
+            // Đếm tổng số món
             var totalItems = 0;
             if (tx.items && tx.items.length) {
                 for (var j = 0; j < tx.items.length; j++) totalItems += tx.items[j].qty;
             }
-            var itemInfo = totalItems > 0 ? ' (' + totalItems + ' món)' : '';
+            var itemInfo = totalItems > 0 ? totalItems + ' món' : '';
             
-            var methodIcon = '';
-            if (tx.refunded) {
-                methodIcon = '↩️';
-            } else if (tx.paymentMethod === 'cash') methodIcon = '💰';
-            else if (tx.paymentMethod === 'transfer') methodIcon = '💳';
-            else if (tx.paymentMethod === 'debt') methodIcon = '💢';
-            else if (tx.paymentMethod === 'grab') methodIcon = '🚕';
-            else methodIcon = '💵';
+            var staffHtml = tx.createdByName ? ' <span class="toast-staff">👤 ' + escapeHtml(tx.createdByName) + '</span>' : '';
+            
+            // Gom các phần tử lại: icon + nhãn + số món + staff
+            var infoParts = [];
+            infoParts.push(mainIcon);
+            if (labelSuffix) infoParts.push(labelSuffix);
+            if (itemInfo) infoParts.push(itemInfo);
+            if (methodIcon && methodIcon !== mainIcon) infoParts.push(methodIcon);
+            var infoText = infoParts.join(' ');
             
             html += '<div class="recent-toast-item" onclick="showTransactionDetail(\'' + tx.id + '\')" data-tx-time="' + txTime + '">' +
                 '<span class="toast-time">' + timeText + '</span>' +
-                '<span class="toast-info">' + shortInfo + itemInfo + ' ' + methodIcon + '</span>' +
+                '<span class="toast-info">' + infoText + staffHtml + '</span>' +
                 '<span class="toast-amount">' + formatMoney(tx.amount) + '</span>' +
             '</div>';
         }
@@ -193,27 +208,38 @@ function createTableCard(table) {
     div.setAttribute('data-start-time', table.startTime || '');
     div.onclick = function(id) { return function() { showTableDetail(id); }; }(table.id);
     
-    // FIX: Luôn hiển thị nút Thêm món, kể cả khi bàn chưa có startTime hoặc bị khóa
+    // FIX: Luôn hiển thị nút Thêm món, kể cả khi bàn chưa có startTime
     // Nút thanh toán chỉ hiện khi bàn có items
     var actionBtnsHtml = '';
     var hasItems = itemCount > 0;
     
-    // Nút Thêm món - luôn hiện
-    actionBtnsHtml +=
-        '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
-    
-    // Nếu bàn có items và không bị khóa -> hiện thêm nút in và thanh toán
-    if (hasItems && !isLocked) {
+    // Nếu bàn bị khóa: chỉ ẩn nút Thêm món, vẫn hiện In + Tiền mặt + Chuyển khoản
+    if (isLocked) {
+        // Khi khóa: chỉ hiện nút thanh toán nếu có items
+        if (hasItems) {
+            actionBtnsHtml +=
+                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+        }
+    } else {
+        // Không khóa: hiện Thêm món + In + thanh toán (nếu có items)
         actionBtnsHtml +=
-            '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
-            '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-            '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+            '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
+        if (hasItems) {
+            actionBtnsHtml +=
+                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+        }
     }
     
     // Bọc trong table-act-row nếu có action buttons
     if (actionBtnsHtml) {
         actionBtnsHtml = '<span class="table-act-row">' + actionBtnsHtml + '</span>';
     }
+    
+    var creatorHtml = table.createdByName ? '<span class="table-creator">👤 ' + escapeHtml(table.createdByName) + '</span>' : '';
     
     div.innerHTML =
         '<div class="table-header">' +
@@ -223,6 +249,7 @@ function createTableCard(table) {
         '<div class="table-stats">' +
             '<span class="table-item-count">📦 ' + itemCount + ' món</span>' +
             '<span class="table-total">' + formatMoney(table.total) + '</span>' +
+            creatorHtml +
         '</div>' +
         '<div class="table-actions">' +
             _renderRecentAddsHtml(table.recentAdds) +
@@ -291,16 +318,25 @@ function updateTableCard(card, table) {
         var hasItems = itemCount > 0;
         var newActionBtns = '';
         
-        // Nút Thêm món - luôn hiện
-        newActionBtns +=
-            '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
-        
-        // Nếu bàn có items và không bị khóa -> hiện thêm nút in và thanh toán
-        if (hasItems && !isLocked) {
+        // Nếu bàn bị khóa: chỉ ẩn nút Thêm món, vẫn hiện In + Tiền mặt + Chuyển khoản
+        if (isLocked) {
+            // Khi khóa: chỉ hiện nút thanh toán nếu có items
+            if (hasItems) {
+                newActionBtns +=
+                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                    '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+                    '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+            }
+        } else {
+            // Không khóa: hiện Thêm món + In + thanh toán (nếu có items)
             newActionBtns +=
-                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
-                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+                '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
+            if (hasItems) {
+                newActionBtns +=
+                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                    '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+                    '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
+            }
         }
         
         if (newActionBtns) {
@@ -522,11 +558,15 @@ function _updateRecentToastTimes() {
 
 // ========== INIT REALTIME (RÚT GỌN) ==========
 function initRealtime() {
-    // Tables - cập nhật bàn realtime
+    // Tables - cập nhật bàn realtime + doanh thu
     DB.subscribe('tables', function(newTables) {
         if (!newTables) return;
         cachedTables = newTables;
         tablesCacheTime = Date.now();
+        // Cập nhật doanh thu pos-cash-info khi bàn thay đổi (clear bàn, gộp bàn...)
+        if (typeof loadPosCashData === 'function') {
+            loadPosCashData();
+        }
         if (currentTab !== 'tables') return;
         _renderNow('tables_render', function() {
             updateTablesDiff(newTables);
@@ -550,8 +590,8 @@ function initRealtime() {
         }, 200);
     });
 
-    // Menu - cập nhật thực đơn
-    DB.subscribe('menu', function(data) {
+    // Menu - cập nhật thực đơn (dùng polling 60s thay vì realtime)
+    DB.subscribeWithPolling('menu', function(data) {
         if (!data) return;
         _debounceRealtime('menu', function() {
             DB.getAll('menu').then(function(list) {
@@ -570,10 +610,10 @@ function initRealtime() {
                 }
             });
         }, 200);
-    });
+    }, 60);
 
-    // Menu categories - cập nhật danh mục
-    DB.subscribe('menu_categories', function(data) {
+    // Menu categories - cập nhật danh mục (dùng polling 60s thay vì realtime)
+    DB.subscribeWithPolling('menu_categories', function(data) {
         if (!data) return;
         _debounceRealtime('menu_categories', function() {
             DB.getAll('menu_categories').then(function(list) {
@@ -585,12 +625,98 @@ function initRealtime() {
                 }
             });
         }, 200);
+    }, 60);
+
+    // Cost categories - cập nhật realtime danh mục chi phí
+    DB.subscribe('cost_categories', function(data) {
+        if (typeof costCategories !== 'undefined') {
+            costCategories = data || [];
+        }
+        _debounceRealtime('cost_categories', function() {
+            // Luôn refresh cache expenseData
+            if (typeof loadExpenseData === 'function') {
+                loadExpenseData().then(function() {
+                    // Render nếu đang ở tab cost hoặc manager
+                    if (currentTab === 'cost') {
+                        if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                        if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                        managerApplyFilter();
+                    }
+                });
+            }
+        }, 100);
     });
 
-    // Transactions - cập nhật lịch sử và recent toast
+    // Cost transactions - cập nhật realtime giao dịch chi phí
+    DB.subscribe('cost_transactions', function(data) {
+        if (typeof costTransactions !== 'undefined') {
+            costTransactions = data || [];
+        }
+        _debounceRealtime('cost_transactions', function() {
+            // Luôn refresh cache expenseData
+            if (typeof loadExpenseData === 'function') {
+                loadExpenseData().then(function() {
+                    // Render nếu đang ở tab cost hoặc manager
+                    if (currentTab === 'cost') {
+                        if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                        if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                        managerApplyFilter();
+                    }
+                });
+            }
+        }, 100);
+    });
+
+// Manager cash pickups - cập nhật realtime tiền quản lý nhận (cho report.js)
+DB.subscribe('manager_cash_pickups', function(data) {
+    window.managerCashPickups = data || [];
+    _debounceRealtime('manager_cash_pickups', function() {
+        if (currentTab === 'report') {
+            renderReport(currentReportDate);
+        }
+    }, 100);
+});
+
+// Daily balances - cập nhật realtime cash counter (settings + staff view)
+// Khi nhân viên chốt ngày ở máy khác, máy quản lý tự động cập nhật số tiền thực tế
+DB.subscribe('daily_balances', function() {
+    _debounceRealtime('daily_balances', function() {
+        if (typeof loadPosCashData === 'function') {
+            loadPosCashData();
+        }
+    }, 200);
+});
+
+    // Ingredients - cập nhật tồn kho nguyên liệu (dùng polling 60s thay vì realtime)
+    DB.subscribeWithPolling('ingredients', function(data) {
+        if (!data) return;
+        _debounceRealtime('ingredients', function() {
+            DB.getAll('ingredients').then(function(list) {
+                window.ingredients = list;
+                // Invalidate lookup maps trong ingredients.js
+                if (typeof _invalidateLookups === 'function') _invalidateLookups();
+                // Nếu đang ở tab cost, render lại danh sách nguyên liệu trong modal
+                if (currentTab === 'cost') {
+                    if (typeof renderIngredientList === 'function') renderIngredientList();
+                }
+                // Nếu đang ở tab inventory, render lại tồn kho
+                if (currentTab === 'inventory') {
+                    if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
+                }
+            });
+        }, 200);
+    }, 60);
+    
+        // Transactions - cập nhật lịch sử, recent toast và doanh thu pos-cash-info
     DB.subscribe('transactions', function() {
         _debounceRealtime('transactions', function() {
             updateRecentToast();
+            // Cập nhật doanh thu pos-cash-info realtime (settings + staff view)
+            if (typeof loadPosCashData === 'function') {
+                loadPosCashData();
+            }
             if (currentTab === 'history') {
                 renderHistoryByDate(currentHistoryDate);
             }
@@ -611,16 +737,26 @@ function initRealtime() {
             }
             if (!infoItem) return;
             
-            // Cập nhật window.shopConfig với dữ liệu mới từ Firebase
+            // Kiểm tra: nếu infoItem không có bất kỳ field lock nào (local cache rỗng),
+            // thì giữ nguyên oldConfig để tránh ghi đè bằng undefined
+            var hasLockData = (infoItem.lockStartHour !== undefined ||
+                               infoItem.lockEndHour !== undefined ||
+                               infoItem.lockEndMinute !== undefined ||
+                               infoItem.tableLockHours !== undefined ||
+                               infoItem.lockPassword !== undefined);
+            
             var oldConfig = window.shopConfig || {};
             window.shopConfig = {
                 telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
                 telegramChatId: infoItem.telegramChatId || oldConfig.telegramChatId || '6372876364',
-                lockPassword: infoItem.lockPassword || oldConfig.lockPassword || '28122020',
-                lockStartHour: infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 17),
-                lockEndHour: infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
-                lockEndMinute: infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
-                tableLockHours: infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
+                telegramShiftCloseToken: infoItem.telegramShiftCloseToken || oldConfig.telegramShiftCloseToken || '',
+                telegramWarningToken: infoItem.telegramWarningToken || oldConfig.telegramWarningToken || '',
+                telegramExpenseToken: infoItem.telegramExpenseToken || oldConfig.telegramExpenseToken || '',
+                lockPassword: hasLockData && infoItem.lockPassword ? infoItem.lockPassword : (oldConfig.lockPassword || '28122020'),
+                lockStartHour: hasLockData && infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 22),
+                lockEndHour: hasLockData && infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
+                lockEndMinute: hasLockData && infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
+                tableLockHours: hasLockData && infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
             };
             
             // Cập nhật tên quán trên header nếu có
@@ -631,12 +767,12 @@ function initRealtime() {
                 if (shopNameEl) shopNameEl.textContent = infoItem.name;
             }
             
-            console.log('🔄 Shop config updated realtime:', JSON.stringify(window.shopConfig));
         }, 200);
     });
     
-    // Messages - cập nhật chat realtime
-    DB.subscribe('messages', function(data) {
+    // Messages - cập nhật chat (dùng polling 30s thay vì realtime)
+    // Chat cần polling nhanh hơn để nhận tin nhắn mới kịp thời
+    DB.subscribeWithPolling('messages', function(data) {
         if (!data) return;
         _debounceRealtime('messages', function() {
             // Cập nhật badge
@@ -654,5 +790,5 @@ function initRealtime() {
                 checkNewMessages();
             }
         }, 200);
-    });
+    }, 30);
 }

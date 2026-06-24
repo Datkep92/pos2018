@@ -6,6 +6,7 @@ var currentTab = 'tables';
 var tempOrder = [];
 var selectedCustomer = null;
 var currentHistoryDate = new Date();
+var currentReportDate = new Date();
 var menuItems = [];
 var menuCategories = [];
 var ingredients = [];
@@ -27,17 +28,36 @@ var tablesCacheTime = 0;
 var CACHE_TTL = 2000;
 var renderScheduled = false;
 var shopInfo = null; // Thông tin quán
+// Khởi tạo window.shopConfig với giá trị mặc định (sẽ được cập nhật từ Firebase sau)
+window.shopConfig = {
+    lockStartHour: 22,
+    lockEndHour: 5,
+    lockEndMinute: 30,
+    tableLockHours: 5,
+    lockPassword: '28122020',
+    telegramBotToken: '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+    telegramChatId: '6372876364',
+    telegramShiftCloseToken: '',
+    telegramWarningToken: '',
+    telegramExpenseToken: ''
+};
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Khởi tạo realtime TRƯỚC DB.init()
-    initRealtime();
-
+    // OPTIMIZE: Khôi phục UI từ sessionStorage ngay lập tức (nếu có)
+    // Giúp UI hiển thị ngay trong khi chờ DB.init() và loadData() hoàn tất
+    _restoreFromSessionCache();
+    
+    // FIX: Gọi DB.init() TRƯỚC, sau đó mới initRealtime()
+    // Đảm bảo database đã sẵn sàng trước khi đăng ký subscriptions
     DB.init().then(function() {
         if (typeof initAuth === 'function') {
             initAuth();
         }
         return loadData();
     }).then(function() {
+        // OPTIMIZE: Lưu vào sessionCache sau khi loadData thành công
+        _saveToSessionCache();
+        
         // FIX: Kiểm tra nếu dữ liệu rỗng (IndexedDB bị xóa) -> force sync từ Firebase
         if (_isDataEmpty()) {
             console.log('⚠️ Local data empty, forcing sync from Firebase...');
@@ -53,6 +73,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }).then(function() {
         return loadDraftOrders();
     }).then(function() {
+        // FIX: Khởi tạo realtime subscriptions SAU KHI DB đã sẵn sàng và data đã load
+        // Tránh race condition: subscribeWithPolling gọi callback khi memoryCache còn rỗng
+        initRealtime();
+        
+        // OPTIMIZE: Gọi renderTables() và updateRecentToast() SAU initRealtime()
+        // để subscription callbacks có thể render UI, tránh render 2 lần
+        renderTables();
+        updateRecentToast();
+        
         initEventListeners();
         // Khôi phục trạng thái recentToast (thu gọn/mở rộng)
         if (typeof restoreRecentToastState === 'function') {
@@ -98,11 +127,69 @@ function _isDataEmpty() {
 }
 
 function loadData() {
+    // OPTIMIZE: Đọc từ memoryCache trước (nếu có), fallback về IndexedDB
+    // memoryCache được populate bởi smartSync() trong DB.init(), nhanh hơn IndexedDB rất nhiều
+    var menuFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('menu') : null;
+    var menuCatFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('menu_categories') : null;
+    var customersFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('customers') : null;
+    var ingredientsFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('ingredients') : null;
+    
+    // Nếu memoryCache có đủ menu + customers -> dùng luôn, không cần đợi IndexedDB
+    if (menuFromCache && customersFromCache) {
+        menuItems = menuFromCache;
+        menuItems.sort(function(a, b) {
+            var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
+            var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
+            return orderA - orderB;
+        });
+        menuCategories = menuCatFromCache || [];
+        customers = customersFromCache;
+        ingredients = ingredientsFromCache || [];
+        window.menuItems = menuItems;
+        window.customers = customers;
+        window.ingredients = ingredients;
+        
+        // Vẫn cần load info và shopConfig từ IndexedDB/Firebase
+        return Promise.all([
+            DB.getAll('info'),
+            DB.getShopConfig()
+        ]).then(function(results) {
+            var shopInfoList = results[0] || [];
+            if (shopInfoList.length > 0) {
+                shopInfo = shopInfoList[0];
+            } else {
+                shopInfo = null;
+            }
+            window.shopInfo = shopInfo;
+            var shopNameEl = document.getElementById('shopNameHeader');
+            if (shopNameEl && shopInfo && shopInfo.name) {
+                shopNameEl.textContent = shopInfo.name;
+            }
+            var fbConfig = results[1] || {};
+            window.shopConfig = {
+                telegramBotToken: fbConfig.telegramBotToken || (shopInfo && shopInfo.telegramBotToken) || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+                telegramChatId: fbConfig.telegramChatId || (shopInfo && shopInfo.telegramChatId) || '6372876364',
+                telegramShiftCloseToken: fbConfig.telegramShiftCloseToken || (shopInfo && shopInfo.telegramShiftCloseToken) || '',
+                telegramWarningToken: fbConfig.telegramWarningToken || (shopInfo && shopInfo.telegramWarningToken) || '',
+                telegramExpenseToken: fbConfig.telegramExpenseToken || (shopInfo && shopInfo.telegramExpenseToken) || '',
+                lockPassword: fbConfig.lockPassword || (shopInfo && shopInfo.lockPassword) || '28122020',
+                lockStartHour: fbConfig.lockStartHour !== undefined ? fbConfig.lockStartHour : (shopInfo && shopInfo.lockStartHour !== undefined ? shopInfo.lockStartHour : 22),
+                lockEndHour: fbConfig.lockEndHour !== undefined ? fbConfig.lockEndHour : (shopInfo && shopInfo.lockEndHour !== undefined ? shopInfo.lockEndHour : 5),
+                lockEndMinute: fbConfig.lockEndMinute !== undefined ? fbConfig.lockEndMinute : (shopInfo && shopInfo.lockEndMinute !== undefined ? shopInfo.lockEndMinute : 30),
+                tableLockHours: fbConfig.tableLockHours !== undefined ? fbConfig.tableLockHours : (shopInfo && shopInfo.tableLockHours !== undefined ? shopInfo.tableLockHours : 5)
+            };
+            renderCustomerList();
+            renderHistoryByDate(currentHistoryDate);
+        });
+    }
+    
+    // Fallback: đọc từ IndexedDB như cũ
     return Promise.all([
         DB.getAll('menu'),
         DB.getAll('menu_categories'),
         DB.getAll('customers'),
         DB.getAll('info'),
+        DB.getAll('ingredients'),
         // Đọc trực tiếp từ Firebase để đảm bảo shopConfig luôn đúng
         DB.getShopConfig()
     ]).then(function(results) {
@@ -128,13 +215,18 @@ function loadData() {
         if (shopNameEl && shopInfo && shopInfo.name) {
             shopNameEl.textContent = shopInfo.name;
         }
-        // Shop config: ưu tiên dữ liệu từ Firebase (results[4]), fallback về IndexedDB, rồi hardcode
-        var fbConfig = results[4] || {};
+        // Load ingredients
+        ingredients = results[4] || [];
+        // Shop config: ưu tiên dữ liệu từ Firebase (results[5]), fallback về IndexedDB (shopInfo), rồi hardcode
+        var fbConfig = results[5] || {};
         window.shopConfig = {
             telegramBotToken: fbConfig.telegramBotToken || (shopInfo && shopInfo.telegramBotToken) || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
             telegramChatId: fbConfig.telegramChatId || (shopInfo && shopInfo.telegramChatId) || '6372876364',
+            telegramShiftCloseToken: fbConfig.telegramShiftCloseToken || (shopInfo && shopInfo.telegramShiftCloseToken) || '',
+            telegramWarningToken: fbConfig.telegramWarningToken || (shopInfo && shopInfo.telegramWarningToken) || '',
+            telegramExpenseToken: fbConfig.telegramExpenseToken || (shopInfo && shopInfo.telegramExpenseToken) || '',
             lockPassword: fbConfig.lockPassword || (shopInfo && shopInfo.lockPassword) || '28122020',
-            lockStartHour: fbConfig.lockStartHour !== undefined ? fbConfig.lockStartHour : (shopInfo && shopInfo.lockStartHour !== undefined ? shopInfo.lockStartHour : 17),
+            lockStartHour: fbConfig.lockStartHour !== undefined ? fbConfig.lockStartHour : (shopInfo && shopInfo.lockStartHour !== undefined ? shopInfo.lockStartHour : 22),
             lockEndHour: fbConfig.lockEndHour !== undefined ? fbConfig.lockEndHour : (shopInfo && shopInfo.lockEndHour !== undefined ? shopInfo.lockEndHour : 5),
             lockEndMinute: fbConfig.lockEndMinute !== undefined ? fbConfig.lockEndMinute : (shopInfo && shopInfo.lockEndMinute !== undefined ? shopInfo.lockEndMinute : 30),
             tableLockHours: fbConfig.tableLockHours !== undefined ? fbConfig.tableLockHours : (shopInfo && shopInfo.tableLockHours !== undefined ? shopInfo.tableLockHours : 5)
@@ -142,8 +234,9 @@ function loadData() {
         window.menuItems = menuItems;
         window.customers = customers;
         window.ingredients = ingredients;
-        renderTables();
-        updateRecentToast();
+        // OPTIMIZE: Chuyển renderTables() và updateRecentToast() ra sau initRealtime()
+        // để tránh render 2 lần (lần 1 ở đây, lần 2 khi subscription callback chạy)
+        // renderTables() và updateRecentToast() sẽ được gọi trong .then() sau initRealtime()
     }).then(function() {
         renderCustomerList();
         renderHistoryByDate(currentHistoryDate);
@@ -151,7 +244,7 @@ function loadData() {
 }
 
 function renderRecentTransactions() {
-    var todayStr = new Date().toISOString().slice(0, 10);
+    var todayStr = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
     DB.getTransactionsByDate(todayStr).then(function(transactions) {
         var validTx = transactions.filter(function(tx) { return !tx.refunded; });
         validTx.sort(function(a, b) {
@@ -232,6 +325,12 @@ function initEventListeners() {
     var historyFilter = document.getElementById('historyFilter');
     if (historyFilter) historyFilter.onchange = function() { renderHistoryByDate(currentHistoryDate); };
 
+    var reportPrevDayBtn = document.getElementById('reportPrevDayBtn');
+    if (reportPrevDayBtn) reportPrevDayBtn.onclick = function() { changeReportDate(-1); };
+
+    var reportNextDayBtn = document.getElementById('reportNextDayBtn');
+    if (reportNextDayBtn) reportNextDayBtn.onclick = function() { changeReportDate(1); };
+
     var quickAddCustomerBtn = document.getElementById('quickAddCustomerBtn');
     if (quickAddCustomerBtn) quickAddCustomerBtn.onclick = quickAddCustomer;
 
@@ -258,6 +357,9 @@ function initEventListeners() {
 
     var confirmDelete = document.getElementById('confirmDeleteTableBtn');
     if (confirmDelete) confirmDelete.onclick = confirmDeleteTable;
+
+    // Khởi tạo offline indicator
+    updateOfflineIndicator();
 }
 
 function switchTab(tabId) {
@@ -293,6 +395,23 @@ function switchTab(tabId) {
             renderHistoryByDate(currentHistoryDate);
         } else if (tabId === 'customers') {
             renderCustomerList();
+        } else if (tabId === 'report') {
+            if (typeof renderReport === 'function') {
+                renderReport(currentReportDate);
+            }
+        } else if (tabId === 'inventory') {
+            if (typeof renderInventoryMenu === 'function') renderInventoryMenu();
+            if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
+            if (typeof renderInventoryCategoryFilter === 'function') renderInventoryCategoryFilter();
+        } else if (tabId === 'cost') {
+            if (typeof initExpense === 'function') initExpense();
+            // renderTodayExpenses đã gọi renderExpensesByDate bên trong
+            if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+            if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+            // Áp dụng phân quyền: ẩn nguồn tiền QL TT cho staff
+            if (typeof applyExpenseRoleRestrictions === 'function') applyExpenseRoleRestrictions();
+        } else if (tabId === 'manager') {
+            if (typeof managerApplyFilter === 'function') managerApplyFilter();
         } else if (tabId === 'settings') {
             if (typeof initSettingsTab === 'function') {
                 initSettingsTab();
@@ -365,7 +484,17 @@ function renderCurrentTime() {
     var dateEl = document.getElementById('headerDate');
     if (dateEl) {
         var dayNames = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-        dateEl.innerText = dayNames[now.getDay()] + ', ' + now.toLocaleDateString('vi-VN');
+        var solarStr = dayNames[now.getDay()] + ', ' + now.toLocaleDateString('vi-VN');
+        var lunarStr = '';
+        if (typeof Lunar !== 'undefined') {
+            try {
+                var lunar = Lunar.fromDate(now);
+                var day = lunar.getDay();
+                var month = lunar.getMonth();
+                lunarStr = '  🏮 ' + day + '/' + month;
+            } catch(e) {}
+        }
+        dateEl.innerText = solarStr + lunarStr;
     }
 }
 
@@ -409,34 +538,116 @@ document.querySelectorAll('.modal').forEach(function(modal) {
     });
 });
 
-// ========== TOAST ==========
-var _toastCounter = 0;
-var _toastMap = {};
+// ========== SESSION STORAGE CACHE (Tối ưu tốc độ F5) ==========
+// OPTIMIZE: Lưu menuItems, customers, cachedTables vào sessionStorage
+// để khôi phục UI ngay lập tức khi F5, không cần đợi IndexedDB
+// Cache tự động hết hạn sau 24h
 
-function showToast(message, type, duration) {
-    if (duration === undefined) duration = 2500;
-    var toast = document.createElement('div');
-    toast.className = 'toast ' + type;
-    toast.innerText = message;
-    document.getElementById('toastContainer').appendChild(toast);
-    var id = 'toast_' + (++_toastCounter);
-    toast.setAttribute('data-toast-id', id);
-    if (duration > 0) {
-        var timer = setTimeout(function() { toast.remove(); delete _toastMap[id]; }, duration);
-        _toastMap[id] = { element: toast, timer: timer };
-    } else {
-        _toastMap[id] = { element: toast, timer: null };
+var _SESSION_CACHE_TTL = 86400000; // 24h
+
+function _saveToSessionCache() {
+    try {
+        sessionStorage.setItem('pos_menuItems', JSON.stringify(menuItems));
+        sessionStorage.setItem('pos_customers', JSON.stringify(customers));
+        sessionStorage.setItem('pos_cachedTables', JSON.stringify(cachedTables));
+        sessionStorage.setItem('pos_cacheTime', Date.now().toString());
+    } catch(e) {
+        // sessionStorage đầy hoặc không khả dụng, bỏ qua
     }
-    return id;
 }
 
-function hideToast(id) {
-    var entry = _toastMap[id];
-    if (entry) {
-        if (entry.timer) clearTimeout(entry.timer);
-        if (entry.element && entry.element.parentNode) entry.element.remove();
-        delete _toastMap[id];
+function _restoreFromSessionCache() {
+    try {
+        var cacheTime = sessionStorage.getItem('pos_cacheTime');
+        if (!cacheTime) return;
+        
+        // Cache hết hạn sau 24h
+        if (Date.now() - parseInt(cacheTime) > _SESSION_CACHE_TTL) {
+            sessionStorage.clear();
+            return;
+        }
+        
+        var menuData = sessionStorage.getItem('pos_menuItems');
+        var customersData = sessionStorage.getItem('pos_customers');
+        var tablesData = sessionStorage.getItem('pos_cachedTables');
+        
+        if (menuData) {
+            menuItems = JSON.parse(menuData);
+            window.menuItems = menuItems;
+        }
+        if (customersData) {
+            customers = JSON.parse(customersData);
+            window.customers = customers;
+        }
+        if (tablesData) {
+            cachedTables = JSON.parse(tablesData);
+            tablesCacheTime = Date.now();
+        }
+        
+        // Render UI ngay lập tức từ cache
+        renderTables();
+        updateRecentToast();
+    } catch(e) {
+        // Lỗi parse JSON hoặc sessionStorage không khả dụng
+        sessionStorage.clear();
     }
 }
 
 // Settings code moved to settings.js
+
+// ========== OFFLINE INDICATOR ==========
+function updateOfflineIndicator() {
+    var indicator = document.getElementById('offlineIndicator');
+    if (!indicator) return;
+    var isOnline = typeof DB.isOnline === 'function' ? DB.isOnline() : navigator.onLine;
+    if (isOnline) {
+        indicator.style.display = 'none';
+    } else {
+        indicator.style.display = 'flex';
+    }
+}
+
+// Gọi updateOfflineIndicator khi online/offline event
+window.addEventListener('online', function() {
+    setTimeout(updateOfflineIndicator, 500);
+});
+window.addEventListener('offline', function() {
+    setTimeout(updateOfflineIndicator, 100);
+});
+
+// ========== LOADING OVERLAY ==========
+var _loadingOverlay = null;
+
+function _ensureLoadingOverlay() {
+    if (!_loadingOverlay) {
+        _loadingOverlay = document.createElement('div');
+        _loadingOverlay.className = 'loading-overlay';
+        _loadingOverlay.id = 'globalLoadingOverlay';
+        _loadingOverlay.innerHTML = '<div class="loading-spinner"></div>';
+        document.body.appendChild(_loadingOverlay);
+    }
+    return _loadingOverlay;
+}
+
+function showLoadingOverlay() {
+    var overlay = _ensureLoadingOverlay();
+    overlay.classList.add('active');
+}
+
+function hideLoadingOverlay() {
+    if (_loadingOverlay) {
+        _loadingOverlay.classList.remove('active');
+    }
+}
+
+// ========== BUTTON LOADING STATE ==========
+function setButtonLoading(btn, loading) {
+    if (!btn) return;
+    if (loading) {
+        btn.classList.add('btn-loading');
+        btn.disabled = true;
+    } else {
+        btn.classList.remove('btn-loading');
+        btn.disabled = false;
+    }
+}

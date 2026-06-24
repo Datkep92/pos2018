@@ -101,7 +101,7 @@ function getLunarDate(dateStr) {
 
 function checkLunarNotification() {
     var now = new Date();
-    var dateStr = now.toISOString().slice(0, 10);
+    var dateStr = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
     var lunar = getLunarDate(dateStr);
     if (!lunar) {
         hideLunarBanner();
@@ -145,7 +145,7 @@ function hideLunarBanner() {
 
 function dismissLunarNotification() {
     var now = new Date();
-    var dateStr = now.toISOString().slice(0, 10);
+    var dateStr = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
     localStorage.setItem(LUNAR_DISMISS_KEY, dateStr);
     hideLunarBanner();
     showToast('✅ Đã ghi nhận!', 'success');

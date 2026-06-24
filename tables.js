@@ -1,6 +1,17 @@
 // tables.js - Quản lý bàn
 // Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 
+// Helper: Dispatch event để settings.js reload doanh thu pos-cash-info
+// Được gọi sau khi thanh toán thành công để cập nhật realtime trên cùng máy
+function _dispatchPosCashUpdate() {
+    try {
+        var evt = document.createEvent('CustomEvent');
+        evt.initCustomEvent('pos_cash_update', true, true, {});
+        window.dispatchEvent(evt);
+    } catch (e) {
+    }
+}
+
 // ========== HẰNG SỐ KHÓA BÀN (đọc từ shopConfig, fallback hardcode) ==========
 function _getTableLockHours() {
     return (window.shopConfig && window.shopConfig.tableLockHours !== undefined) ? window.shopConfig.tableLockHours : 5;
@@ -12,7 +23,7 @@ function _getLockPassword() {
     return (window.shopConfig && window.shopConfig.lockPassword) ? window.shopConfig.lockPassword : '28122020';
 }
 function _getLockStartHour() {
-    return (window.shopConfig && window.shopConfig.lockStartHour !== undefined) ? window.shopConfig.lockStartHour : 17;
+    return (window.shopConfig && window.shopConfig.lockStartHour !== undefined) ? window.shopConfig.lockStartHour : 22;
 }
 function _getLockEndHour() {
     return (window.shopConfig && window.shopConfig.lockEndHour !== undefined) ? window.shopConfig.lockEndHour : 5;
@@ -23,6 +34,25 @@ function _getLockEndMinute() {
 
 // Biến global lưu ID toast thanh toán để có thể ẩn sau khi xử lý xong
 var _paymentToastId = null;
+
+// FIX: Flag để tránh kiểm tra credit 2 lần khi qua _changeToastPay
+// _changeToastPay lưu tiền dư vào credit, sau đó gọi paymentAtTableWithCredit
+// và _processPaymentDirect - cả 2 đều kiểm tra credit, gây trừ credit 2 lần
+var _skipCreditCheck = false;
+
+// ========== HELPER: LẤY BÀN TỪ CACHE (ưu tiên) HOẶC DB ==========
+function _getTableFromCache(tableId) {
+    // Dùng cachedTables từ app.js nếu có
+    if (window.cachedTables && Array.isArray(window.cachedTables)) {
+        for (var i = 0; i < window.cachedTables.length; i++) {
+            if (String(window.cachedTables[i].id) === String(tableId)) {
+                return Promise.resolve(window.cachedTables[i]);
+            }
+        }
+    }
+    // Fallback: query DB
+    return DB.get('tables', String(tableId));
+}
 
 function isInLockPeriod() {
     var now = new Date();
@@ -86,12 +116,50 @@ function getTableLockInfo(table) {
 
 // ========== YÊU CẦU MẬT KHẨU ==========
 function requirePassword(action, callback) {
-    var pwd = prompt('🔒 Nhập mật khẩu để ' + action + ':');
-    if (pwd === _getLockPassword()) {
-        callback();
-    } else if (pwd !== null) {
-        showToast('❌ Sai mật khẩu!', 'error');
+    // Tạo overlay modal động (thay thế prompt() - không hoạt động trên mobile)
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:16px;padding:24px;width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+    modal.innerHTML =
+        '<div style="font-size:18px;font-weight:700;margin-bottom:16px;text-align:center;">🔒 Nhập mật khẩu</div>' +
+        '<div style="font-size:14px;color:#64748b;margin-bottom:16px;text-align:center;">Cần mật khẩu để ' + action + '</div>' +
+        '<input type="password" id="requirePasswordInput" style="width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;font-size:16px;text-align:center;box-sizing:border-box;-webkit-appearance:none;" placeholder="Nhập mật khẩu..." inputmode="numeric">' +
+        '<div style="display:flex;gap:8px;margin-top:16px;">' +
+            '<button id="requirePasswordCancelBtn" style="flex:1;padding:12px;border-radius:40px;border:2px solid #e2e8f0;background:#fff;color:#475569;font-weight:600;font-size:14px;cursor:pointer;-webkit-appearance:none;">Hủy</button>' +
+            '<button id="requirePasswordConfirmBtn" style="flex:1;padding:12px;border-radius:40px;border:none;background:#f97316;color:#fff;font-weight:700;font-size:14px;cursor:pointer;-webkit-appearance:none;">Xác nhận</button>' +
+        '</div>';
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    var input = document.getElementById('requirePasswordInput');
+    var confirmBtn = document.getElementById('requirePasswordConfirmBtn');
+    var cancelBtn = document.getElementById('requirePasswordCancelBtn');
+    
+    function closeModal() {
+        if (overlay.parentNode) overlay.remove();
     }
+    
+    function doSubmit() {
+        var pwd = input.value;
+        closeModal();
+        if (pwd === _getLockPassword()) {
+            callback();
+        } else {
+            showToast('❌ Sai mật khẩu!', 'error');
+        }
+    }
+    
+    confirmBtn.onclick = doSubmit;
+    cancelBtn.onclick = closeModal;
+    input.onkeydown = function(e) {
+        if (e.key === 'Enter') doSubmit();
+    };
+    
+    setTimeout(function() { input.focus(); }, 100);
 }
 
 // ========== LOG XÓA VÀO FIREBASE ==========
@@ -105,13 +173,99 @@ function logDelete(action, details) {
         deviceId: localStorage.getItem('device_id') || 'unknown',
         details: details
     };
-    // Ghi vào Firebase qua DB.create (lưu local + sync lên Firebase)
-    return DB.create('delete_logs', logEntry);
+    
+    // Gửi thông báo Telegram NGAY LẬP TỨC, không đợi Firebase
+    try {
+        var user = DB.getCurrentUser();
+        var staffName = user ? user.displayName : 'Nhân viên';
+        var now = new Date();
+        var timeStr = now.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+        var msg = '';
+        if (action === 'delete_table') {
+            var tableName = details.tableName || 'không tên';
+            var items = details.items || [];
+            var total = 0;
+            var itemLines = '';
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                var line = '  ' + (i + 1) + '. ' + (it.name || '?') + ' x' + (it.qty || 0) + ' = ' + formatMoney((it.price || 0) * (it.qty || 0));
+                itemLines += line + '\n';
+                total += (it.price || 0) * (it.qty || 0);
+            }
+            // Thời gian tạo bàn & nhân viên tạo
+            var createdByName = details.createdByName || '?';
+            var startTimeStr = '?';
+            if (details.startTime) {
+                var st = new Date(details.startTime);
+                startTimeStr = st.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+            // Thời gian hoạt động
+            var durationStr = '?';
+            if (details.startTime) {
+                var elapsed = Math.floor((now.getTime() - new Date(details.startTime).getTime()) / 60000);
+                if (elapsed < 60) durationStr = elapsed + ' phút';
+                else durationStr = Math.floor(elapsed / 60) + 'h' + (elapsed % 60) + 'p';
+            }
+            msg = '🗑️ <b>XÓA BÀN: ' + tableName + '</b>\n';
+            msg += '────────────────\n';
+            msg += '🕐 ' + timeStr + '\n';
+            msg += '👤 Người xóa: ' + staffName + '\n';
+            msg += '👤 Người tạo: ' + createdByName + '\n';
+            msg += '🕐 Tạo lúc: ' + startTimeStr + '\n';
+            msg += '⏱ Hoạt động: ' + durationStr + '\n';
+            if (details.customerName) msg += '👤 Khách: ' + details.customerName + '\n';
+            msg += '────────────────\n';
+            msg += '<b>CHI TIẾT MÓN:</b>\n';
+            msg += itemLines;
+            msg += '────────────────\n';
+            msg += '<b>TỔNG: ' + formatMoney(total) + '</b>';
+        } else if (action === 'delete_item') {
+            var tableName = details.tableName || 'không tên';
+            var item = details.item || {};
+            var itemTotal = (item.price || 0) * (item.qty || 0);
+            // Thông tin bàn hiện tại
+            var tableInfo = details.tableInfo || {};
+            var createdByName = tableInfo.createdByName || '?';
+            var startTimeStr = '?';
+            if (tableInfo.startTime) {
+                var st = new Date(tableInfo.startTime);
+                startTimeStr = st.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+            var durationStr = '?';
+            if (tableInfo.startTime) {
+                var elapsed = Math.floor((now.getTime() - new Date(tableInfo.startTime).getTime()) / 60000);
+                if (elapsed < 60) durationStr = elapsed + ' phút';
+                else durationStr = Math.floor(elapsed / 60) + 'h' + (elapsed % 60) + 'p';
+            }
+            msg = '🗑️ <b>XÓA MÓN: ' + tableName + '</b>\n';
+            msg += '────────────────\n';
+            msg += '🕐 ' + timeStr + '\n';
+            msg += '👤 Người xóa: ' + staffName + '\n';
+            msg += '👤 Người tạo bàn: ' + createdByName + '\n';
+            msg += '🕐 Bàn tạo lúc: ' + startTimeStr + '\n';
+            msg += '⏱ Bàn hoạt động: ' + durationStr + '\n';
+            if (tableInfo.customerName) msg += '👤 Khách: ' + tableInfo.customerName + '\n';
+            msg += '────────────────\n';
+            msg += '🍽️ <b>' + (item.name || 'không tên') + ' x' + (item.qty || 0) + '</b>\n';
+            msg += '💰 Đơn giá: ' + formatMoney(item.price || 0) + '\n';
+            msg += '💵 Thành tiền: ' + formatMoney(itemTotal);
+        }
+        if (msg && typeof notifyTelegramWarning === 'function') {
+            notifyTelegramWarning(msg);
+        }
+    } catch(e) {
+        console.error('[logDelete] Lỗi gửi Telegram:', e);
+    }
+    
+    // Ghi vào Firebase qua DB.create (lưu local + sync lên Firebase) - không chặn UI
+    DB.create('delete_logs', logEntry).catch(function(err) {
+        console.error('[logDelete] Lỗi ghi delete_logs:', err);
+    });
 }
 
 // ========== XÓA MÓN TRÊN BÀN ==========
 function deleteTableItem(tableId, itemIndex) {
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length) return;
         if (itemIndex < 0 || itemIndex >= table.items.length) return;
 
@@ -169,6 +323,11 @@ function doDeleteTableItem(table, itemIndex, removedItem) {
                 qty: removedItem.qty,
                 price: removedItem.price,
                 addedTime: removedItem.addedTime
+            },
+            tableInfo: {
+                createdByName: table.createdByName || '',
+                startTime: table.startTime || null,
+                customerName: table.customerName || null
             }
         };
         logDelete('delete_item', details);
@@ -182,7 +341,7 @@ function doDeleteTableItem(table, itemIndex, removedItem) {
 // ========== CHI TIẾT BÀN ==========
 function showTableDetail(tableId) {
     currentTableDetailId = tableId;
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table) return;
         var tableName = escapeHtml(table.name);
         var customerName = table.customerName ? ' (' + escapeHtml(table.customerName) + ')' : '';
@@ -220,43 +379,44 @@ function showTableDetail(tableId) {
         // Nút in thủ công
         var printBtn = '<button class="cart-action-btn" style="background:#f1f5f9;" onclick="printTableBill(\'' + table.id + '\')">🖨️ In hóa đơn</button>';
         
+        // === PHẦN CHUNG: Nút mệnh giá thanh toán nhanh + Nút thanh toán ===
+        var total = table.total || 0;
+        var denoms = [
+            { value: 50000, label: '50.000đ' },
+            { value: 100000, label: '100.000đ' },
+            { value: 200000, label: '200.000đ' },
+            { value: 500000, label: '500.000đ' }
+        ];
+        var denomHtml = '<div class="cart-actions denom-actions">';
+        denomHtml += '<button class="denom-btn denom-custom" onclick="showCustomDenomInput(\'' + table.id + '\')">✏️ Tùy chỉnh</button>';
+        for (var d = 0; d < denoms.length; d++) {
+            if (denoms[d].value >= total) {
+                denomHtml += '<button class="denom-btn" onclick="cashPayWithDenom(\'' + table.id + '\',' + denoms[d].value + '); closeModal(\'tableDetailModal\')">' + denoms[d].label + '</button>';
+            }
+        }
+        denomHtml += '</div>';
+
+        var paymentButtonsHtml =
+            '<div class="cart-actions payment-actions">' +
+                '<button class="cart-action-btn cash" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'cash\'); closeModal(\'tableDetailModal\')">💰 Tiền mặt</button>' +
+                '<button class="cart-action-btn transfer" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'transfer\'); closeModal(\'tableDetailModal\')">💳 Chuyển khoản</button>' +
+                '<button class="cart-action-btn debt" onclick="debtAtTable(\'' + table.id + '\'); closeModal(\'tableDetailModal\')">💢 Ghi nợ</button>' +
+            '</div>';
+
+        // === PHẦN KHÁC BIỆT: Locked vs Unlocked ===
         if (isLocked) {
             var editButtonsHtml =
-                '<div class="cart-actions edit-actions" style="opacity:0.5;pointer-events:none;">' +
-                    '<button class="cart-action-btn" style="background:#f1f5f9;">➕ Thêm món</button>' +
-                    '<button class="cart-action-btn" style="background:#f1f5f9;">🧾 Chia hóa đơn</button>' +
-                    '<button class="cart-action-btn" style="background:#f1f5f9;">🔄 Chuyển món</button>' +
-                    '<button class="cart-action-btn" style="background:#f1f5f9;">🔗 Gộp bàn</button>' +
+                '<div class="cart-actions edit-actions">' +
+                    '<button class="cart-action-btn" style="background:#f1f5f9;" onclick="openAddMenuForTable(\'' + table.id + '\'); closeModal(\'tableDetailModal\')">➕ Thêm món</button>' +
+                    '<div style="display:flex;gap:8px;opacity:0.5;pointer-events:none;">' +
+                        '<button class="cart-action-btn" style="background:#f1f5f9;flex:1;">🧾 Chia hóa đơn</button>' +
+                        '<button class="cart-action-btn" style="background:#f1f5f9;flex:1;">🔄 Chuyển món</button>' +
+                        '<button class="cart-action-btn" style="background:#f1f5f9;flex:1;">🔗 Gộp bàn</button>' +
+                    '</div>' +
                     printBtn +
                     '<button class="cart-action-btn" style="background:#f1f5f9;" onclick="requirePassword(\'xóa bàn\', function(){ showDeleteTableConfirm(\'' + table.id + '\'); closeModal(\'tableDetailModal\'); })">🗑️ Xóa bàn (🔒)</button>' +
                 '</div>' +
                 '<div style="text-align:center;color:#dc2626;font-size:12px;margin-bottom:8px;">🔒 ' + lockInfo.reason + ' - Chỉ được thanh toán/ghi nợ</div>';
-
-            // Nút mệnh giá thanh toán nhanh (chỉ hiển thị mệnh giá >= tổng tiền)
-            var total = table.total || 0;
-            var denoms = [
-                { value: 50000, label: '50.000đ' },
-                { value: 100000, label: '100.000đ' },
-                { value: 200000, label: '200.000đ' },
-                { value: 500000, label: '500.000đ' }
-            ];
-            var denomHtml = '<div class="cart-actions denom-actions">';
-            denomHtml += '<button class="denom-btn denom-custom" onclick="showCustomDenomInput(\'' + table.id + '\')">✏️ Tùy chỉnh</button>';
-            for (var d = 0; d < denoms.length; d++) {
-                if (denoms[d].value >= total) {
-                    denomHtml += '<button class="denom-btn" onclick="cashPayWithDenom(\'' + table.id + '\',' + denoms[d].value + '); closeModal(\'tableDetailModal\')">' + denoms[d].label + '</button>';
-                }
-            }
-            denomHtml += '</div>';
-
-            // Thanh toán trực tiếp - không popup
-            var paymentButtonsHtml =
-                '<div class="cart-actions payment-actions">' +
-                    '<button class="cart-action-btn cash" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'cash\'); closeModal(\'tableDetailModal\')">💰 Tiền mặt</button>' +
-                    '<button class="cart-action-btn transfer" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'transfer\'); closeModal(\'tableDetailModal\')">💳 Chuyển khoản</button>' +
-                    '<button class="cart-action-btn debt" onclick="debtAtTable(\'' + table.id + '\'); closeModal(\'tableDetailModal\')">💢 Ghi nợ</button>' +
-                '</div>';
-
             document.getElementById('detailActions').innerHTML = editButtonsHtml + denomHtml + paymentButtonsHtml;
         } else {
             var editButtonsHtml =
@@ -268,32 +428,6 @@ function showTableDetail(tableId) {
                     printBtn +
                     '<button class="cart-action-btn" style="background:#f1f5f9;" onclick="showDeleteTableConfirm(\'' + table.id + '\'); closeModal(\'tableDetailModal\')">🗑️ Xóa bàn</button>' +
                 '</div>';
-
-            // Nút mệnh giá thanh toán nhanh (chỉ hiển thị mệnh giá >= tổng tiền)
-            var total = table.total || 0;
-            var denoms = [
-                { value: 50000, label: '50.000đ' },
-                { value: 100000, label: '100.000đ' },
-                { value: 200000, label: '200.000đ' },
-                { value: 500000, label: '500.000đ' }
-            ];
-            var denomHtml = '<div class="cart-actions denom-actions">';
-            denomHtml += '<button class="denom-btn denom-custom" onclick="showCustomDenomInput(\'' + table.id + '\')">✏️ Tùy chỉnh</button>';
-            for (var d = 0; d < denoms.length; d++) {
-                if (denoms[d].value >= total) {
-                    denomHtml += '<button class="denom-btn" onclick="cashPayWithDenom(\'' + table.id + '\',' + denoms[d].value + '); closeModal(\'tableDetailModal\')">' + denoms[d].label + '</button>';
-                }
-            }
-            denomHtml += '</div>';
-
-            // Thanh toán trực tiếp - không popup
-            var paymentButtonsHtml =
-                '<div class="cart-actions payment-actions">' +
-                    '<button class="cart-action-btn cash" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'cash\'); closeModal(\'tableDetailModal\')">💰 Tiền mặt</button>' +
-                    '<button class="cart-action-btn transfer" onclick="paymentAtTableWithCredit(\'' + table.id + '\',\'transfer\'); closeModal(\'tableDetailModal\')">💳 Chuyển khoản</button>' +
-                    '<button class="cart-action-btn debt" onclick="debtAtTable(\'' + table.id + '\'); closeModal(\'tableDetailModal\')">💢 Ghi nợ</button>' +
-                '</div>';
-
             document.getElementById('detailActions').innerHTML = editButtonsHtml + denomHtml + paymentButtonsHtml;
         }
         
@@ -303,7 +437,14 @@ function showTableDetail(tableId) {
 
 // ========== IN HÓA ĐƠN THỦ CÔNG ==========
 function printTableBill(tableId) {
-    DB.get('tables', String(tableId)).then(function(table) {
+    // Kiểm tra nếu là màn hình dọc (điện thoại) -> yêu cầu xác nhận
+    var isPortrait = window.matchMedia && window.matchMedia('(orientation: portrait)').matches;
+    if (isPortrait) {
+        if (!confirm('Xác nhận in hóa đơn?')) {
+            return;
+        }
+    }
+    _getTableFromCache(tableId).then(function(table) {
         if (!table) return;
         if (typeof printAfterPayment === 'function') {
             var now = new Date();
@@ -344,6 +485,13 @@ function _calcTableTime(startTime) {
 // tables.js - Phần sửa hàm openAddMenuForTable
 
 function openAddMenuForTable(tableId) {
+    // Kiểm tra nếu là màn hình dọc (điện thoại) -> yêu cầu xác nhận
+    var isPortrait = window.matchMedia && window.matchMedia('(orientation: portrait)').matches;
+    if (isPortrait) {
+        if (!confirm('Xác nhận thêm món?')) {
+            return;
+        }
+    }
     currentAddToTableId = tableId;
     tempOrder = [];
     selectedCustomer = null;
@@ -360,14 +508,24 @@ function showPaymentForTable(tableId) {
 }
 
 function paymentAtTable(tableId, method) {
-    if (method === 'cash') {
-        // Tiền mặt: ẩn toast tiền dư (nếu có) rồi thanh toán luôn
-        _hideChangeToast();
-        _processPaymentDirect(tableId, 'cash');
-    } else {
-        // Chuyển khoản / Ghi nợ -> thanh toán ngay
-        _processPaymentDirect(tableId, method);
-    }
+    // Luôn yêu cầu xác nhận trước khi thanh toán
+    _getTableFromCache(tableId).then(function(table) {
+        if (!table) return;
+        var total = table.total || 0;
+        var methodLabels = { cash: 'Tiền mặt', transfer: 'Chuyển khoản', debt: 'Ghi nợ' };
+        var label = methodLabels[method] || method;
+        if (!confirm('💳 Xác nhận thanh toán bằng ' + label + '?\n💰 Tổng tiền: ' + formatMoney(total))) {
+            return;
+        }
+        if (method === 'cash') {
+            // Tiền mặt: ẩn toast tiền dư (nếu có) rồi thanh toán luôn
+            _hideChangeToast();
+            _processPaymentDirect(tableId, 'cash');
+        } else {
+            // Chuyển khoản / Ghi nợ -> thanh toán ngay
+            _processPaymentDirect(tableId, method);
+        }
+    });
 }
 
 // OPTIMIZE: paymentAtTableWithCredit - đóng modal ngay, xử lý credit nhanh hơn
@@ -375,11 +533,23 @@ function paymentAtTableWithCredit(tableId, method) {
     // OPTIMIZE: Đóng modal ngay lập tức
     if (currentTableDetailId === tableId) closeModal('tableDetailModal');
     
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length) return;
         
-        // Kiểm tra credit từ memory cache (customers global) - không cần DB.get
-        if (table.customerId) {
+        // Kiểm tra nếu là màn hình dọc (điện thoại) -> yêu cầu xác nhận với số tiền
+        var isPortrait = window.matchMedia && window.matchMedia('(orientation: portrait)').matches;
+        if (isPortrait) {
+            var total = table.total || 0;
+            var methodLabels = { cash: 'Tiền mặt', transfer: 'Chuyển khoản', debt: 'Ghi nợ' };
+            var label = methodLabels[method] || method;
+            if (!confirm('💳 Xác nhận thanh toán bằng ' + label + '?\n💰 Tổng tiền: ' + formatMoney(total))) {
+                return;
+            }
+        }
+        
+        // FIX: Nếu đã qua _changeToastPay (tiền dư đã được lưu), bỏ qua kiểm tra credit
+        // để tránh trừ credit 2 lần
+        if (!_skipCreditCheck && table.customerId) {
             for (var i = 0; i < customers.length; i++) {
                 if (customers[i].id === table.customerId) {
                     if ((customers[i].creditBalance || 0) > 0) {
@@ -408,7 +578,7 @@ function paymentAtTableWithCredit(tableId, method) {
 
 // OPTIMIZE: _processPaymentDirect - đóng modal ngay, song song hóa Promise, dùng _checkAndDeductIngredients
 function _processPaymentDirect(tableId, method) {
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length) return;
         
         // OPTIMIZE: Đóng modal ngay lập tức để UI không bị đơ
@@ -437,12 +607,13 @@ function _processPaymentDirect(tableId, method) {
             tableTime = hours > 0 ? hours + 'h' + (mins > 0 ? mins + 'p' : '') : mins + 'p';
         }
         
-        // Kiểm tra credit của khách
+        // FIX: Kiểm tra credit của khách - chỉ kiểm tra nếu chưa qua _changeToastPay
+        // (vì _changeToastPay đã lưu tiền dư và set _skipCreditCheck = true)
         var finalAmount = total;
         var creditUsed = 0;
         var customerInfo = customerName ? { name: customerName } : null;
         
-        if (customerId) {
+        if (!_skipCreditCheck && customerId) {
             for (var i = 0; i < customers.length; i++) {
                 if (customers[i].id === customerId) {
                     if ((customers[i].creditBalance || 0) > 0) {
@@ -456,13 +627,16 @@ function _processPaymentDirect(tableId, method) {
                 }
             }
         }
+        // Reset flag sau khi đã xử lý
+        _skipCreditCheck = false;
         
         // OPTIMIZE: Gộp checkStock + deductIngredients thành 1 lần duyệt
+        // Cho phép âm kho - không chặn giao dịch khi hết nguyên liệu
         var stockAndDeductPromise = _checkAndDeductIngredients(items).then(function() {
             return true;
         }).catch(function(err) {
-            showToast('⚠️ ' + (err.message || 'Hết nguyên liệu'), 'error');
-            return false;
+            console.warn('⚠️ Nguyên liệu không đủ (cho phép âm kho):', err.message);
+            return true; // Vẫn cho phép giao dịch tiếp tục
         });
         
         stockAndDeductPromise.then(function(stockOk) {
@@ -502,6 +676,14 @@ function _processPaymentDirect(tableId, method) {
                     // OPTIMIZE: Flush realtime sau khi tất cả operations hoàn tất
                     DB.flushRealtime();
                     
+                    // AUDIT: Nếu thanh toán tiền mặt, kiểm tra két
+                    // handleCashPayment luôn tồn tại (định nghĩa trong pos.html)
+                    if (method === 'cash') {
+                        handleCashPayment(finalAmount, null, {type: 'dinein', tableName: tableName, customer: customerInfo}).catch(function(err) {
+                            console.error('[AUDIT] handleCashPayment lỗi:', err);
+                        });
+                    }
+                    
                     // Gửi thông báo Telegram (fire-and-forget, không chờ)
                     if (typeof notifyPaymentToTelegram === 'function') {
                         notifyPaymentToTelegram({
@@ -519,6 +701,8 @@ function _processPaymentDirect(tableId, method) {
                     var msg = '✅ Thanh toán ' + formatMoney(finalAmount) + ' thành công';
                     if (creditUsed > 0) msg += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)';
                     showToast(msg, 'success');
+                    // Cập nhật doanh thu pos-cash-info realtime
+                    _dispatchPosCashUpdate();
                 });
             }).catch(function(err) {
                 hideToast(_paymentToastId);
@@ -538,7 +722,7 @@ var _changeToastTableId = null;
 // Click TM hoặc nút trong toast → thanh toán và ẩn toast
 // Click ✕ → đóng toast (đổi PTTT)
 function cashPayWithDenom(tableId, givenAmount) {
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length) return;
         var total = table.total;
         if (givenAmount < total) {
@@ -548,8 +732,9 @@ function cashPayWithDenom(tableId, givenAmount) {
         var change = givenAmount - total;
         // Xóa toast cũ nếu có
         _hideChangeToast();
-        // Lưu tableId để nút thanh toán trong toast có thể dùng
+        // Lưu tableId và số tiền khách đưa để nút thanh toán trong toast có thể dùng
         _changeToastTableId = tableId;
+        _changeToastGivenAmount = givenAmount;
         
         // Kiểm tra nếu bàn có gán khách hàng và có tiền dư
         var creditNote = '';
@@ -657,7 +842,7 @@ function _changeToastPay() {
     _hideChangeToast();
     if (tid) {
         // Lưu tiền dư vào credit của khách nếu bàn có gán khách
-        DB.get('tables', String(tid)).then(function(table) {
+        _getTableFromCache(tid).then(function(table) {
             if (!table) {
                 paymentAtTableWithCredit(tid, 'cash');
                 return;
@@ -675,6 +860,9 @@ function _changeToastPay() {
                 if (customer) {
                     addCustomerCredit(customer.id, change, 'Trả dư khi thanh toán bàn ' + table.name).then(function() {
                         showToast('💰 Đã lưu ' + formatMoney(change) + ' tiền dư cho ' + customer.name, 'success');
+                        // FIX: Đánh dấu đã qua _changeToastPay để paymentAtTableWithCredit
+                        // và _processPaymentDirect không kiểm tra credit thêm lần nữa
+                        _skipCreditCheck = true;
                         paymentAtTableWithCredit(tid, 'cash');
                     });
                     return;
@@ -703,10 +891,13 @@ function debtAtTable(tableId) {
     // OPTIMIZE: Suppress realtime notifications trong quá trình batch operations
     DB.suppressRealtime();
     
-    DB.get('tables', String(tableId)).then(function(table) {
-        if (!table || !table.items || !table.items.length) {
+    _getTableFromCache(tableId).then(function(table) {
+        if (!table || !table.items || !table.items.length || !table.total || table.total <= 0) {
             hideToast(_paymentToastId);
             DB.flushRealtime();
+            if (table && (!table.total || table.total <= 0)) {
+                showToast('❌ Bàn chưa có món hoặc tổng tiền = 0, không thể ghi nợ!', 'warning');
+            }
             return;
         }
         showCustomerSelector(function(customer) {
@@ -728,6 +919,7 @@ function debtAtTable(tableId) {
             }
             
             // OPTIMIZE: Gộp checkStock + deductIngredients thành 1 lần duyệt
+            // Cho phép âm kho - không chặn giao dịch khi hết nguyên liệu
             var stockAndDeductPromise = new Promise(function(resolve, reject) {
                 _buildLookups();
                 var updates = [];
@@ -735,20 +927,16 @@ function debtAtTable(tableId) {
                     var orderItem = table.items[i];
                     var baseName = orderItem.name.replace(/\s*\([^)]*\)/g, '').trim();
                     var menuItem = _menuLookup[orderItem.id] || _menuLookup[baseName];
-                    if (menuItem && menuItem.ingredients) {
-                        for (var k = 0; k < menuItem.ingredients.length; k++) {
-                            var req = menuItem.ingredients[k];
+                    if (menuItem) {
+                        var ings = _getIngredientsForItem(menuItem, orderItem);
+                        for (var k = 0; k < ings.length; k++) {
+                            var req = ings[k];
                             var ing = _ingredientLookup[req.ingredientId];
                             if (ing) {
-                                var needed = _getConvertedQuantity(ing, req.quantity * orderItem.qty);
-                                // Check stock
-                                if (ing.stock < needed) {
-                                    showToast('⚠️ Nguyên liệu "' + ing.name + '" không đủ cho món ' + baseName, 'error');
-                                    resolve(false);
-                                    return;
-                                }
+                                var needed = _getConvertedQuantity(ing, req.quantity * orderItem.qty, req.unit);
+                                // Cho phép âm kho - không chặn giao dịch khi hết nguyên liệu
                                 // Deduct
-                                ing.stock = Math.max(0, (ing.stock || 0) - needed);
+                                ing.stock = (ing.stock || 0) - needed;
                                 updates.push(DB.update('ingredients', ing.id, { stock: ing.stock }));
                                 
                                 var unit = ing.unit || '';
@@ -771,7 +959,7 @@ function debtAtTable(tableId) {
                 }
                 
                 // OPTIMIZE: Chạy song song addCustomerDebt + (result là Promise.all đã resolve)
-                var debtPromise = addCustomerDebt(customer.id, table.total, 'Mua tai ' + table.name);
+                var debtPromise = addCustomerDebt(customer.id, table.total, 'Mua tai ' + table.name, table.items);
                 
                 debtPromise.then(function(debtResult) {
                     var debtAmount = debtResult.debtAmount;
@@ -799,6 +987,20 @@ function debtAtTable(tableId) {
                     Promise.all([historyPromise, removePromise]).then(function() {
                         // OPTIMIZE: Flush realtime sau khi tất cả operations hoàn tất
                         DB.flushRealtime();
+                        
+                        // Gửi thông báo Telegram giao dịch ghi nợ
+                        // FIX: Sửa type từ 'dinein' thành 'debt_payment' để phân biệt với thanh toán tại bàn
+                        if (typeof notifyPaymentToTelegram === 'function') {
+                            notifyPaymentToTelegram({
+                                type: 'debt_payment',
+                                amount: debtAmount,
+                                paymentMethod: 'debt',
+                                items: table.items,
+                                tableName: table.name,
+                                customer: { id: customer.id, name: customer.name },
+                                createdAt: now.toISOString()
+                            });
+                        }
                         
                         hideToast(_paymentToastId);
                         var msg = '💰 Đã ghi nợ ' + formatMoney(debtAmount) + ' cho ' + customer.name;
@@ -851,7 +1053,7 @@ function confirmSplitPaymentWithMethod(method, customer) {
     var tableId = pendingSplitTableId;
     if (!tableId) return;
     
-    DB.get('tables', String(tableId)).then(function(table) {
+    _getTableFromCache(tableId).then(function(table) {
         if (!table) return;
         
         // Lấy các món đã chọn để thanh toán (giống logic cũ)
@@ -892,37 +1094,35 @@ function confirmSplitPaymentWithMethod(method, customer) {
         var finalItems = remainingItems.filter(function(i) { return i.qty > 0; });
         var newTotal = finalItems.reduce(function(s, i) { return s + i.price * i.qty; }, 0);
         
-        // Trừ nguyên liệu (kiểm tra stock trước)
-        checkStock(splitItems).then(function(ok) {
-            if (!ok) return;
-            deductIngredients(splitItems).then(function() {
-                // Nếu là ghi nợ, cần có customer
-                if (method === 'debt' && !customer) {
-                    showToast('Cần chọn khách hàng để ghi nợ!', 'warning');
-                    return;
-                }
-                
-                // Cập nhật bàn: giảm số lượng món đã thanh toán
-                DB.update('tables', String(tableId), { items: finalItems, total: newTotal }).then(function() {
-                    // Tính thời gian khách ngồi
-                    var tableTime = '';
-                    if (table.startTime) {
-                        var startTime = new Date(table.startTime);
-                        var endTime = new Date();
-                        var elapsed = endTime.getTime() - startTime.getTime();
-                        var hours = Math.floor(elapsed / 3600000);
-                        var mins = Math.floor((elapsed % 3600000) / 60000);
-                        if (hours > 0) {
-                            tableTime = hours + 'h' + (mins > 0 ? mins + 'p' : '');
-                        } else {
-                            tableTime = mins + 'p';
-                        }
+        // Trừ nguyên liệu (cho phép âm kho - không chặn giao dịch khi hết nguyên liệu)
+        deductIngredients(splitItems).then(function() {
+            // Nếu là ghi nợ, cần có customer
+            if (method === 'debt' && !customer) {
+                showToast('Cần chọn khách hàng để ghi nợ!', 'warning');
+                return;
+            }
+            
+            // Cập nhật bàn: giảm số lượng món đã thanh toán
+            DB.update('tables', String(tableId), { items: finalItems, total: newTotal }).then(function() {
+                // Tính thời gian khách ngồi
+                var tableTime = '';
+                if (table.startTime) {
+                    var startTime = new Date(table.startTime);
+                    var endTime = new Date();
+                    var elapsed = endTime.getTime() - startTime.getTime();
+                    var hours = Math.floor(elapsed / 3600000);
+                    var mins = Math.floor((elapsed % 3600000) / 60000);
+                    if (hours > 0) {
+                        tableTime = hours + 'h' + (mins > 0 ? mins + 'p' : '');
+                    } else {
+                        tableTime = mins + 'p';
                     }
-                    // Lưu lịch sử giao dịch
-                    var historyPromise;
-                    if (method === 'debt') {
+                }
+                // Lưu lịch sử giao dịch
+                var historyPromise;
+                if (method === 'debt') {
                         // Ghi nợ: cộng nợ cho khách
-                        addCustomerDebt(customer.id, splitTotal, 'Chia hóa đơn tại bàn ' + table.name).then(function() {
+                        addCustomerDebt(customer.id, splitTotal, 'Chia hóa đơn tại bàn ' + table.name, splitItems).then(function() {
                             historyPromise = addHistory({
                                 type: 'debt_payment',
                                 amount: splitTotal,
@@ -950,11 +1150,31 @@ function confirmSplitPaymentWithMethod(method, customer) {
                     }
                     
                     Promise.resolve(historyPromise).then(function() {
+                        // AUDIT: Nếu thanh toán tiền mặt, kiểm tra két
+                        if (method === 'cash') {
+                            handleCashPayment(splitTotal, null, {type: 'dinein', tableName: table.name, customer: null}).catch(function(err) {
+                                console.error('[AUDIT] handleCashPayment lỗi:', err);
+                            });
+                        }
+                        
+                        // Gửi thông báo Telegram giao dịch chia hóa đơn
+                        // FIX: Sửa type đúng: 'dinein' cho cash/transfer, 'debt_payment' cho debt
+                        if (typeof notifyPaymentToTelegram === 'function') {
+                            notifyPaymentToTelegram({
+                                type: method === 'debt' ? 'debt_payment' : 'dinein',
+                                amount: splitTotal,
+                                paymentMethod: method,
+                                items: splitItems,
+                                tableName: table.name,
+                                customer: method === 'debt' && customer ? { id: customer.id, name: customer.name } : null,
+                                createdAt: new Date().toISOString()
+                            });
+                        }
+                        
                         // Realtime subscription sẽ tự động cập nhật tables, history, report
                         if (currentTableDetailId === tableId) showTableDetail(tableId);
                         closeModal('splitBillModal');
                         showToast('✅ Đã thanh toán phần chia ' + formatMoney(splitTotal) + (method === 'debt' ? ' (ghi nợ)' : ''), 'success');
-                    });
                 });
             });
         });
@@ -963,9 +1183,9 @@ function confirmSplitPaymentWithMethod(method, customer) {
 
 function showSplitBillModal(tableId) {
     pendingSplitTableId = tableId;
-    DB.get('tables', String(tableId)).then(function(table) {
-        if (!table || !table.items || !table.items.length) {
-            showToast('Không có món để chia!', 'warning');
+    _getTableFromCache(tableId).then(function(table) {
+        if (!table || !table.items || table.items.length < 2) {
+            showToast('Cần ít nhất 2 món để chia hóa đơn!', 'warning');
             return;
         }
         var container = document.getElementById('splitItemsList');
@@ -1070,66 +1290,10 @@ function updateSplitTotal() {
     if (totalSpan) totalSpan.innerText = formatMoney(total);
 }
 
-function confirmSplitPayment() {
-    var tableId = pendingSplitTableId;
-    if (!tableId) return;
-    DB.get('tables', String(tableId)).then(function(table) {
-        if (!table) return;
-        var splitItems = [];
-        var remainingItems = [];
-        for (var i = 0; i < table.items.length; i++) {
-            remainingItems.push({ name: table.items[i].name, price: table.items[i].price, qty: table.items[i].qty });
-        }
-        var rows = document.querySelectorAll('.split-item-row');
-        for (var i = 0; i < rows.length; i++) {
-            var row = rows[i];
-            var idx = parseInt(row.getAttribute('data-idx'));
-            var input = document.getElementById('split-qty-' + idx);
-            var qty = input ? parseInt(input.value) : 0;
-            if (qty > 0) {
-                var item = remainingItems[idx];
-                if (qty > item.qty) qty = item.qty;
-                splitItems.push({ name: item.name, price: item.price, qty: qty });
-                item.qty -= qty;
-            }
-        }
-        if (splitItems.length === 0) { showToast('Chưa chọn món để thanh toán!', 'warning'); return; }
-        var splitTotal = splitItems.reduce(function(s, i) { return s + i.price * i.qty; }, 0);
-        var finalItems = remainingItems.filter(function(i) { return i.qty > 0; });
-        var newTotal = finalItems.reduce(function(s, i) { return s + i.price * i.qty; }, 0);
-        DB.update('tables', String(tableId), { items: finalItems, total: newTotal }).then(function() {
-            checkStock(splitItems).then(function(ok) {
-                if (!ok) return;
-                deductIngredients(splitItems).then(function() {
-                    // Tính thời gian khách ngồi
-                    var tableTime = '';
-                    if (table.startTime) {
-                        var startTime = new Date(table.startTime);
-                        var endTime = new Date();
-                        var elapsed = endTime.getTime() - startTime.getTime();
-                        var hours = Math.floor(elapsed / 3600000);
-                        var mins = Math.floor((elapsed % 3600000) / 60000);
-                        if (hours > 0) {
-                            tableTime = hours + 'h' + (mins > 0 ? mins + 'p' : '');
-                        } else {
-                            tableTime = mins + 'p';
-                        }
-                    }
-                    addHistory({ type: 'dinein', amount: splitTotal, paymentMethod: 'cash', items: splitItems, customer: null, tableName: table.name, tableId: tableId, note: 'Chia hóa đơn', tableTime: tableTime }).then(function() {
-                        // Realtime subscription sẽ tự động cập nhật tables, history, report
-                        if (currentTableDetailId === tableId) showTableDetail(tableId);
-                        closeModal('splitBillModal');
-                        showToast('✅ Đã thanh toán phần chia ' + formatMoney(splitTotal), 'success');
-                    });
-                });
-            });
-        });
-    });
-}
 
 // ========== CHUYỂN MÓN ==========
 function showTransferItemsModal(sourceId) {
-    DB.get('tables', String(sourceId)).then(function(table) {
+    _getTableFromCache(sourceId).then(function(table) {
         if (!table || !table.items || !table.items.length) { showToast('Không có món để chuyển!', 'warning'); return; }
         pendingTransferSourceTable = table;
         var container = document.getElementById('transferItemsList');
@@ -1208,7 +1372,11 @@ function confirmTransferItems() {
     if (selectedItems.length === 0) { showToast('Chưa chọn món để chuyển!', 'warning'); return; }
     var targetName = document.getElementById('transferTargetTable').value.trim();
     if (!targetName) { showToast('Nhập tên bàn đích!', 'warning'); return; }
-    DB.getAll('tables').then(function(allTables) {
+    // Dùng cachedTables nếu có, fallback DB.getAll
+    var allTablesPromise = (window.cachedTables && Array.isArray(window.cachedTables) && window.cachedTables.length > 0)
+        ? Promise.resolve(window.cachedTables)
+        : DB.getAll('tables');
+    allTablesPromise.then(function(allTables) {
         var targetTable = null;
         for (var i = 0; i < allTables.length; i++) {
             if (allTables[i].name === targetName) { targetTable = allTables[i]; break; }
@@ -1267,9 +1435,13 @@ function confirmTransferItems() {
 // ========== GỘP BÀN ==========
 function showMergeTableModal(sourceId) {
     pendingMergeSourceId = sourceId;
-    DB.get('tables', String(sourceId)).then(function(source) {
+    _getTableFromCache(sourceId).then(function(source) {
         if (!source || !source.items || !source.items.length) { showToast('Bàn nguồn không có món!', 'warning'); return; }
-        DB.getAll('tables').then(function(allTables) {
+        // Dùng cachedTables nếu có, fallback DB.getAll
+        var allTablesPromise = (window.cachedTables && Array.isArray(window.cachedTables) && window.cachedTables.length > 0)
+            ? Promise.resolve(window.cachedTables)
+            : DB.getAll('tables');
+        allTablesPromise.then(function(allTables) {
             var targets = allTables.filter(function(t) { return t.id !== sourceId && (t.items && t.items.length) && t.total > 0; });
             if (targets.length === 0) { showToast('Không có bàn nào để gộp!', 'warning'); return; }
             var container = document.getElementById('mergeTablesList');
@@ -1296,7 +1468,12 @@ function showMergeTableModal(sourceId) {
 }
 
 function mergeTables(sourceId, targetId) {
-    Promise.all([DB.get('tables', String(sourceId)), DB.get('tables', String(targetId))]).then(function(results) {
+    // Kiểm tra không merge cùng bàn
+    if (String(sourceId) === String(targetId)) {
+        showToast('❌ Không thể gộp bàn với chính nó!', 'error');
+        return;
+    }
+    Promise.all([_getTableFromCache(sourceId), _getTableFromCache(targetId)]).then(function(results) {
         var source = results[0];
         var target = results[1];
         if (!source || !target) return;
@@ -1332,7 +1509,6 @@ window.showCustomerSelectorForTable = showCustomerSelectorForTable;
 window.showSplitBillModal = showSplitBillModal;
 window.showTransferItemsModal = showTransferItemsModal;
 window.showMergeTableModal = showMergeTableModal;
-window.confirmSplitPayment = confirmSplitPayment;
 window.confirmTransferItems = confirmTransferItems;
 window.deleteTableItem = deleteTableItem;
 window.logDelete = logDelete;

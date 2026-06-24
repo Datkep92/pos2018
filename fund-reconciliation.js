@@ -14,6 +14,8 @@ function loadFundReconciliationData() {
     ]).then(function(results) {
         managerCashPickups = results[0] || [];
         inventoryTransactions = results[1] || [];
+        // Đồng bộ window.managerCashPickups để report.js đọc được
+        window.managerCashPickups = managerCashPickups;
     });
 }
 
@@ -43,7 +45,9 @@ function saveManagerPickup() {
     var btn = document.getElementById('saveManagerPickupBtn');
     if (btn) btn.disabled = true;
 
-    var amount = parseInt(document.getElementById('managerPickupAmount').value) || 0;
+    // Ưu tiên settings (mgrPickupInput) trước, sau đó modal (managerPickupAmount)
+    var amountEl = document.getElementById('mgrPickupInput') || document.getElementById('managerPickupAmount');
+    var amount = amountEl ? (parseFloat(amountEl.value) || 0) : 0;
     var note = document.getElementById('managerPickupNote').value.trim();
 
     if (amount <= 0) {
@@ -54,7 +58,7 @@ function saveManagerPickup() {
     }
 
     var now = new Date();
-    var dateKey = now.toISOString().slice(0, 10);
+    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
 
     var data = {
         id: 'pickup_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
@@ -85,7 +89,7 @@ function renderManagerPickupHistory() {
     var container = document.getElementById('managerPickupHistory');
     if (!container) return;
 
-    var today = new Date().toISOString().slice(0, 10);
+    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
     var todayPickups = managerCashPickups.filter(function(p) {
         return p.dateKey === today;
     });
@@ -109,7 +113,9 @@ function renderManagerPickupHistory() {
         if (p.date) {
             try {
                 var d = new Date(p.date);
-                timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+                var hh = d.getHours();
+                var mm = d.getMinutes();
+                timeStr = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
             } catch(e) { timeStr = ''; }
         }
         html += '<div class="pickup-item">' +
@@ -118,7 +124,7 @@ function renderManagerPickupHistory() {
                 '<span class="pickup-item-note">' + escapeHtml(p.note || '') + '</span>' +
             '</div>' +
             '<span class="pickup-item-amount">' + formatMoney(p.amount) + '</span>' +
-            (isAdmin ? '<button class="pickup-delete-btn" onclick="deleteManagerPickup(\'' + p.id + '\')">🗑️</button>' : '') +
+            (isAdmin ? '<button class="pickup-delete-btn" style="padding:2px 6px;font-size:10px;margin-left:auto;color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:4px;cursor:pointer;" onclick="deleteManagerPickup(\'' + p.id + '\')" title="Xóa">🗑️</button>' : '') +
         '</div>';
     }
 
@@ -134,7 +140,7 @@ function deleteManagerPickup(id) {
         managerCashPickups = managerCashPickups.filter(function(p) { return p.id !== id; });
         renderManagerPickupHistory();
         // Cập nhật lại khu vực đối soát
-        var today = new Date().toISOString().slice(0, 10);
+        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
         if (typeof renderReconciliation === 'function') {
             renderReconciliation(today);
         }
@@ -154,8 +160,9 @@ function getOpeningBalance(dateStr) {
 
 // ========== TÍNH SỐ DƯ CUỐI KỲ DỰ KIẾN ==========
 function calculateExpectedClosing(dateStr) {
-    // Lấy ngày hôm trước
-    var prevDate = new Date(dateStr);
+    // Lấy ngày hôm trước - dùng Date.UTC để đúng VN timezone
+    var prevParts = dateStr.split('-');
+    var prevDate = new Date(Date.UTC(parseInt(prevParts[0], 10), parseInt(prevParts[1], 10) - 1, parseInt(prevParts[2], 10)));
     prevDate.setDate(prevDate.getDate() - 1);
     var prevDateStr = prevDate.toISOString().slice(0, 10);
 
@@ -501,7 +508,26 @@ function saveActualClosing(dateStr, expectedClosing) {
             savedAt: Date.now()
         });
 
+        // Bước 1: Lưu vào IndexedDB qua DB.create trước -> memoryCache được cập nhật ngay
         return DB.create('daily_balances', data, dateStr).then(function() {
+            // Bước 2: Sau khi DB.create thành công, đồng bộ lên Firebase
+            try {
+                var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+                var fbRef = firebase.database().ref(shopId + '/daily_balances/' + dateStr);
+                fbRef.update({
+                    cashKept: data.cashKept || actualClosing,
+                    actualClosing: actualClosing,
+                    expectedClosing: expectedClosing,
+                    difference: difference,
+                    diffPercent: diffPercent,
+                    status: statusInfo.status,
+                    updatedAt: Date.now()
+                }).catch(function(err) {
+                    console.error('[SaveActualClosing] Firebase sync error:', err);
+                });
+            } catch(e) {
+                console.error('[SaveActualClosing] Firebase sync exception:', e);
+            }
             // Kiểm tra: lần 2 khớp nhưng lần 1 lệch => gửi cảnh báo cho quản lý
             var isRetrySave = (prevActualClosing !== undefined && prevActualClosing !== null);
             var prevDiff = prevActualClosing - expectedClosing;
@@ -634,7 +660,34 @@ function closeDay(dateStr) {
         saved.closedBy = window.currentDeviceId || '';
         if (note) saved.closeNote = note;
 
+        // Đồng bộ cashKept = actualClosing để settings.js đọc được làm số dư đầu kỳ ngày hôm sau
+        saved.cashKept = actualClosing;
+
         return DB.create('daily_balances', saved, dateStr).then(function() {
+            // Đồng bộ lên Firebase để settings.js (loadPosCashData) đọc được
+            // Vì settings.js đọc daily_balances từ Firebase, không phải IndexedDB
+            try {
+                var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+                var fbRef = firebase.database().ref(shopId + '/daily_balances/' + dateStr);
+                fbRef.update({
+                    cashKept: actualClosing,
+                    actualClosing: actualClosing,
+                    expectedClosing: expectedClosing,
+                    difference: difference,
+                    diffPercent: diffPercent,
+                    status: statusInfo.status,
+                    isClosed: true,
+                    closedAt: Date.now(),
+                    closedBy: window.currentDeviceId || '',
+                    closeNote: note || '',
+                    updatedAt: Date.now()
+                }).catch(function(err) {
+                    console.error('[CloseDay] Firebase sync error:', err);
+                });
+            } catch(e) {
+                console.error('[CloseDay] Firebase sync exception:', e);
+            }
+
             showToast('🔒 Đã chốt ngày ' + formatDateDisplay(dateStr), 'success');
             
             // Luôn gửi Telegram khi chốt ngày (dù khớp hay lệch)
@@ -696,7 +749,8 @@ function autoCloseDay() {
         // Lấy ngày hôm qua (N-1)
         var yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
-        var dateStr = yesterday.toISOString().slice(0, 10);
+        var dateStr = typeof getTodayDateKey === 'function' ? getTodayDateKey() : yesterday.toISOString().slice(0, 10);
+        // Lưu ý: auto-close lúc 6h sáng, yesterday là ngày VN hôm qua
         
         DB.get('daily_balances', dateStr).then(function(balance) {
             if (!balance) return; // Chưa có dữ liệu

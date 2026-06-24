@@ -3,37 +3,122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#f97316">
-    <title>POS Cafe - Bán hàng</title>
-    <!-- CSS modules - tách riêng cho từng tab, tối ưu tải nhanh -->
-    <link rel="stylesheet" href="css/base.css">
-    <link rel="stylesheet" href="css/tables.css">
-    <link rel="stylesheet" href="css/customers.css">
-    <link rel="stylesheet" href="css/history.css">
+    <title>MILANO COFFEE 259 - Bán hàng</title>
+    <link rel="stylesheet" href="css/pos-base.css">
     <link rel="stylesheet" href="css/report.css">
-    <link rel="stylesheet" href="css/manager.css">
-    <link rel="stylesheet" href="css/order.css">
+    <link rel="stylesheet" href="css/menu.css">
     <link rel="stylesheet" href="css/modals.css">
+    <link rel="stylesheet" href="css/manager.css">
+    <link rel="stylesheet" href="css/expense.css">
+    <link rel="stylesheet" href="css/manager-detail.css">
 </head>
 <body>
+    <!-- ========== MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ ========== -->
+    <div class="auth-overlay" id="authOverlay">
+        <div class="auth-container">
+            <!-- FORM ĐĂNG NHẬP -->
+            <div class="auth-form" id="loginForm">
+                <div class="auth-logo">☕</div>
+                <h2 class="auth-title">MILANO COFFEE 259</h2>
+                <p class="auth-subtitle">Đăng nhập để tiếp tục</p>
+                
+                <div class="auth-field">
+                    <label>Mã POS</label>
+                    <input type="text" id="loginShopCode" class="form-input" placeholder="Nhập mã POS (VD: cafe01)" autocomplete="off">
+                </div>
+                <div class="auth-field">
+                    <label>Tên đăng nhập</label>
+                    <input type="text" id="loginUsername" class="form-input" placeholder="Tên đăng nhập" autocomplete="off">
+                </div>
+                <div class="auth-field">
+                    <label>Mật khẩu</label>
+                    <input type="password" id="loginPassword" class="form-input" placeholder="Mật khẩu">
+                </div>
+                
+                <div class="auth-error" id="loginError"></div>
+                
+                <button class="auth-btn" id="loginBtn" onclick="handleLogin()">Đăng nhập</button>
+                
+                <div class="auth-switch">
+                    Chưa có POS? <span onclick="showRegisterForm()">Đăng ký ngay</span>
+                </div>
+            </div>
+            
+            <!-- FORM ĐĂNG KÝ -->
+            <div class="auth-form" id="registerForm" style="display:none;">
+                <div class="auth-logo">☕</div>
+                <h2 class="auth-title">Đăng ký POS mới</h2>
+                <p class="auth-subtitle">Tạo cửa hàng mới</p>
+                
+                <div class="auth-field">
+                    <label>Tên quán / cửa hàng</label>
+                    <input type="text" id="regShopName" class="form-input" placeholder="VD: Cafe Milano">
+                </div>
+                <div class="auth-field">
+                    <label>Mã POS (dùng để đăng nhập)</label>
+                    <input type="text" id="regShopCode" class="form-input" placeholder="VD: cafe01 (ít nhất 3 ký tự)">
+                </div>
+                <div class="auth-field">
+                    <label>Tên đăng nhập Admin</label>
+                    <input type="text" id="regAdminUser" class="form-input" placeholder="Tên đăng nhập">
+                </div>
+                <div class="auth-field">
+                    <label>Mật khẩu</label>
+                    <input type="password" id="regAdminPass" class="form-input" placeholder="Mật khẩu (ít nhất 4 ký tự)">
+                </div>
+                <div class="auth-field">
+                    <label>Xác nhận mật khẩu</label>
+                    <input type="password" id="regConfirmPass" class="form-input" placeholder="Nhập lại mật khẩu">
+                </div>
+                
+                <div class="auth-error" id="registerError"></div>
+                
+                <button class="auth-btn" id="registerBtn" onclick="handleRegister()">Đăng ký</button>
+                
+                <div class="auth-switch">
+                    Đã có tài khoản? <span onclick="showLoginForm()">Đăng nhập</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app">
-        <div class="header">
-            <div class="logo"><span class="logo-icon">☕</span><span class="logo-text">POS CAFE</span></div>
-            <div class="header-right"><span class="staff-name">👤 Nhân viên</span><span class="time" id="currentTime">--:--</span></div>
+        <!-- Header notification bar -->
+        <div class="header-notification-bar" id="headerNotificationBar" style="display:none;">
+            <div class="header-notification-text" id="headerNotificationText"></div>
+            <span class="header-notification-close" id="headerNotificationClose" onclick="dismissHeaderNotification()">✕</span>
         </div>
 
+        <!-- POS TABS -->
         <div class="main-tabs">
             <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
             <div class="tab-btn" data-tab="customers">👥 Khách</div>
             <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
-            <div class="tab-btn" data-tab="report">📈 Báo cáo</div>
-            <div class="tab-btn" data-tab="manager">⚙️ Quản lý</div>
+            <div class="tab-btn" data-tab="inventory" style="display:none;">📋 Menu - Tồn kho</div>
+            <div class="tab-btn" data-tab="cost">💰 Chi phí</div>
+            <div class="tab-btn" data-tab="manager" style="display:none;">⚙️ Quản lý</div>
+            <div class="tab-btn" data-tab="settings">⚙️</div>
         </div>
 
         <div class="main-content">
-            <div id="tablesView" class="tab-content active"><div class="tables-grid" id="tablesGrid"></div></div>
+            <!-- TAB BÀN -->
+            <div id="tablesView" class="tab-content active">
+                <!-- Banner thông báo lịch âm -->
+                <div class="lunar-notification-banner" id="lunarNotificationBanner" style="display:none;">
+                    <div class="lunar-notification-content">
+                        <span class="lunar-notification-icon">🏮</span>
+                        <span class="lunar-notification-text" id="lunarNotificationText"></span>
+                    </div>
+                    <button class="lunar-notification-btn" id="lunarNotificationBtn" onclick="dismissLunarNotification()">✅ Đã mua</button>
+                </div>
+                <div class="tables-grid" id="tablesGrid"></div>
+            </div>
+
+            <!-- TAB KHÁCH -->
             <div id="customersView" class="tab-content">
                 <div class="customer-header">
                     <div class="debt-summary"><span>💰 Tổng công nợ</span><span id="totalDebtAmount">0đ</span></div>
@@ -44,189 +129,715 @@
                 </div>
                 <div class="customer-list" id="customerList"></div>
             </div>
-            <!-- ========== TAB QUẢN LÝ (ADMIN) ========== -->
-<div id="managerView" class="tab-content">
-    <div class="nav-group full-width">
-        <button id="managerPeriodPrevBtn" class="nav-btn">◀</button>
-        <select id="managerViewModeSelect" class="mode-select">
-            <option value="period">Kỳ 20/5/2026 → 19/6/2026</option>
-            <option value="month">Tháng</option>
-            <option value="day">Ngày</option>
-        </select>
-        <button id="managerPeriodNextBtn" class="nav-btn">▶</button>
-    </div>
 
-    <!-- CARD THỐNG KÊ TỔNG HỢP (KPI) -->
-    <div class="card">
-        <div class="manager-grid">
-            <div class="manager-box" id="revenueBox" style="cursor: pointer;">
-                <label>💰 Doanh thu</label>
-                <div class="big-value" id="managerRevenue">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-            <div class="manager-box" id="grabBox" style="cursor: pointer;">
-                <label>🚕 Grab</label>
-                <div class="big-value" id="managerGrab">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-            <div class="manager-box" id="bankBox" style="cursor: pointer;">
-                <label>🏦 Chuyển khoản</label>
-                <div class="big-value" id="managerBank">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-            <div class="manager-box" id="cashBox" style="cursor: pointer;">
-                <label>💵 Thực nhận</label>
-                <div class="big-value" id="managerCash">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-            <div class="manager-box" id="expenseBox" style="cursor: pointer;">
-                <label>📉 Chi phí (NV)</label>
-                <div class="big-value" id="managerExpense">0đ</div>
-                <div class="summary-hint">Click danh sách</div>
-            </div>
-            <div class="manager-box" id="debtOccurBox" style="cursor: pointer;">
-                <label>📊 Công nợ phát sinh</label>
-                <div class="big-value" id="managerDebt">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-            <div class="manager-box" id="adminExpenseBox" style="cursor: pointer;">
-                <label>📋 Tổng CP Quản lý</label>
-                <div class="big-value" id="managerAdminExpense">0đ</div>
-                <div class="summary-hint">Click xem chi tiết</div>
-            </div>
-            <div class="manager-box" id="totalDebtBox" style="cursor: pointer;">
-                <label>🏦 TỔNG CÔNG NỢ</label>
-                <div class="big-value" id="managerTotalDebt">0đ</div>
-                <div class="summary-hint">Click xem danh sách nợ</div>
-            </div>
-            <div class="manager-box employee-box" id="employeeBox" style="cursor: pointer;">
-                <label>👥 NHÂN VIÊN</label>
-                <div class="big-value" id="managerTotalSalary">0đ</div>
-                <div class="summary-hint">Click quản lý</div>
-            </div>
-            <div class="manager-box" id="netIncomeBox" style="cursor: pointer;">
-                <label>💰 THU NHẬP RÒNG</label>
-                <div class="big-value" id="managerNetIncome">0đ</div>
-                <div class="summary-hint">Click chi tiết</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Thống kê đồ uống -->
-    <div class="card">
-        <div class="card-header toggle-header" style="cursor: pointer;">
-            <h2>📊 Thống kê đồ uống</h2>
-            <span class="toggle-icon">▼</span>
-        </div>
-        <div class="card-body" id="managerDrinkStats">
-            <div class="empty-state">Đang tải...</div>
-        </div>
-    </div>
-
-    <!-- Cảnh báo tồn kho thấp -->
-    <div class="card">
-        <div class="card-header toggle-header" style="cursor: pointer;">
-            <h2>⚠️ Cảnh báo tồn kho thấp</h2>
-            <span class="toggle-icon">▼</span>
-        </div>
-        <div class="card-body" id="managerLowStockAlert">
-            <div class="empty-state">Đang tải...</div>
-        </div>
-    </div>
-
-    <!-- Chi phí nhân viên -->
-    <div class="card collapsible">
-        <div class="card-header toggle-header" style="cursor: pointer;">
-            <h2>📋 Chi Phí Nhân Viên</h2>
-            <span class="toggle-icon">▼</span>
-        </div>
-        <div class="card-body" id="managerExpenseList"></div>
-    </div>
-
-    <!-- Công nợ khách hàng -->
-    <div class="card collapsible collapsed">
-        <div class="card-header toggle-header" style="cursor: pointer;">
-            <h2>🧾 Công Nợ Khách Hàng</h2>
-            <span class="toggle-icon">▼</span>
-        </div>
-        <div class="card-body" id="managerDebtList"></div>
-    </div>
-</div>
+            <!-- TAB LỊCH SỬ -->
             <div id="historyView" class="tab-content">
                 <div class="history-controls">
                     <button class="nav-btn" id="prevDayBtn">◀</button>
                     <div class="date-display">📅 <span id="historyDate">--/--/----</span></div>
                     <button class="nav-btn" id="nextDayBtn">▶</button>
                     <select id="historyFilter" class="filter-select">
-                        <option value="all">📋 Tất cả</option><option value="dinein">🍽️ Tại chỗ</option>
-                        <option value="takeaway">🛵 Mang đi</option><option value="grab">🚕 Grab</option>
-                        <option value="cash">💰 Tiền mặt</option><option value="transfer">💳 Chuyển khoản</option>
-                        <option value="debt_payment">💢 Thanh toán nợ</option>
+                        <option value="all">📋 Tất cả</option>
+                        <option value="dinein">🍽️ Tại chỗ</option>
+                        <option value="takeaway">🛵 Mang đi</option>
+                        <option value="grab">🚕 Grab</option>
+                        <option value="cash">💰 Tiền mặt</option>
+                        <option value="transfer">💳 Chuyển khoản</option>
+                        <option value="debt">💢 Ghi nợ</option>
+                        <option value="debt_payment">💵 Trả nợ</option>
+                        <option value="credit">💰 Tiền dư</option>
                         <option value="cancelled">❌ Đã hủy</option>
                     </select>
                 </div>
                 <div class="history-list" id="historyList"></div>
             </div>
-           <div id="reportView" class="tab-content">
-    <div class="report-controls">
-        <button class="nav-btn" id="reportPrevDayBtn">◀</button>
-        <div class="date-display">📅 <span id="reportDate">--/--/----</span></div>
-        <button class="nav-btn" id="reportNextDayBtn">▶</button>
-    </div>
-    <div class="report-stats" id="reportStats"></div>
-    <!-- Form nhập số dư cuối ngày nằm ngay dưới -->
-    <div class="daily-balance-form">
-    <div class="balance-row">
-    <label>💵 Tiền mặt thực nhận:</label>
-    <input type="number" id="actualCashInput" class="balance-input" placeholder="0đ" step="1000" value="0">
-    <button id="submitActualCashBtn" class="btn-submit-balance">📤 Gửi báo cáo</button>
-</div>
-<div class="actual-cash-preview" id="actualCashPreview" style="display: none;"></div>
-    <div class="balance-note">* Nhập số tiền mặt thực tế bàn giao cuối ca, hệ thống sẽ tự tính số dư để lại quán.</div>
-</div>
-</div>
-        </div>
 
-        <div class="float-buttons">
-            <button class="float-btn primary" id="createOrderBtn"><span class="float-icon">➕</span><span class="float-label">TẠO ĐƠN</span></button>
-            <button class="float-btn cost" id="staffCostFloatBtn"><span class="float-icon">📊</span><span class="float-label">CHI PHÍ NV</span></button>
-        </div>
-    </div>
-
-    <!-- MODAL TẠO ĐƠN - BỐ CỤC 3 CỘT -->
-<div class="modal" id="orderModal">
-    <div class="modal-content modal-large">
-        <div class="modal-header">
-            <span class="modal-title">🛒 Tạo đơn hàng</span>
-            <span class="modal-close" onclick="closeModal('orderModal')">&times;</span>
-        </div>
-        <div class="modal-body order-modal-body">
-            <!-- BỐ CỤC 3 CỘT -->
-            <div class="order-three-columns">
-                <!-- CỘT 1: DANH MỤC -->
-                <div class="order-categories-column" id="orderCategoriesColumn"></div>
-                
-                <!-- CỘT 2: MENU -->
-                <div class="order-menu-column">
-                    <div class="menu-grid" id="menuGrid"></div>
-                </div>
-                
-                <!-- CỘT 3: GIỎ HÀNG -->
-                <div class="order-cart-column">
-                    <div class="cart-header">🛒 Giỏ hàng</div>
-                    <div class="cart-items-list" id="cartItemsList"></div>
-                    <div class="cart-total-section">
-                        <div class="total-row">
-                            <span>Tổng cộng:</span>
-                            <span id="cartTotalAmount">0đ</span>
+            <!-- TAB MENU - TỒN KHO (ADMIN) -->
+            <div id="inventoryView" class="tab-content">
+                <div class="inventory-container">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📋 Quản lý thực đơn</h2>
+                            <span class="inv-pos-id" id="invPosId" style="font-size:12px;color:#94a3b8;font-weight:400;"></span>
                         </div>
-                        <div class="cart-action-buttons" id="cartFooterActions"></div>
+                        <div style="padding:6px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+                            <input class="inv-search-input" id="invMenuSearch" type="text" placeholder="🔍 Tìm món..." oninput="filterInventoryMenu(this.value)">
+                        </div>
+                        <div class="card-body">
+                            <div class="inv-section">
+                                <div id="invCategoryList" class="inv-category-list"></div>
+                                <div id="addCategoryForm" style="display:none;"></div>
+                            </div>
+                            <div class="inv-section">
+                                <div class="inv-section-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                    <span class="inv-section-title" style="margin-right:auto;">🍽️ Danh sách món</span>
+                                    <button class="btn-small btn-outline" onclick="showAddCategoryForm()" style="font-size:11px;">+ Thêm danh mục</button>
+                                    <button class="btn-small btn-outline" onclick="showAddMenuItemForm()" style="font-size:11px;">+ Thêm món</button>
+                                </div>
+                                <div class="inv-filter-row" id="invMenuFilterRow">
+                                    <div class="inv-filter-btns" id="invMenuFilter">
+                                        <button class="inv-filter-btn active" data-cat="all" onclick="setInvMenuFilter('all')">📋 Tất cả</button>
+                                    </div>
+                                </div>
+                                <div id="invMenuItemList" class="inv-menu-list"></div>
+                                <div id="addMenuItemForm" style="display:none;margin-top:8px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+                                    <input type="text" id="invMenuItemName" class="form-input" placeholder="Tên món">
+                                    <input type="number" id="invMenuItemPrice" class="form-input" placeholder="Giá bán" style="margin-top:6px;" step="1000">
+                                    <select id="invMenuItemCategory" class="form-input" style="margin-top:6px;">
+                                        <option value="">-- Chọn danh mục --</option>
+                                    </select>
+                                    <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                            <strong style="font-size:13px;">📏 Size món</strong>
+                                            <button class="btn-small btn-outline" onclick="_addMenuItemSizeRow('','')" style="font-size:11px;">+ Thêm size</button>
+                                        </div>
+                                        <div id="menuItemSizesContainer"></div>
+                                    </div>
+                                    <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                                            <strong style="font-size:13px;">🧂 Nguyên liệu</strong>
+                                            <button class="btn-small btn-outline" onclick="_addMenuItemIngredientRow('','','')" style="font-size:11px;">+ Thêm NL</button>
+                                        </div>
+                                        <div id="menuItemIngredientsContainer"></div>
+                                    </div>
+                                    <div style="display:flex;gap:6px;margin-top:8px;">
+                                        <button class="btn-small btn-save" onclick="handleSaveMenuItem()">💾 Lưu</button>
+                                        <button class="btn-small btn-cancel" onclick="hideAddMenuItemForm()">Hủy</button>
+                                    </div>
+                                    <div id="invMenuItemError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🧂 Quản lý tồn kho</h2>
+                        </div>
+                        <div style="padding:6px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+                            <input class="inv-search-input" id="invIngredientSearch" type="text" placeholder="🔍 Tìm nguyên liệu..." oninput="filterInventoryIngredients(this.value)">
+                        </div>
+                        <div class="card-body">
+                            <div class="inv-section">
+                                <div class="inv-section-header">
+                                    <span class="inv-section-title">📦 Nguyên liệu</span>
+                                    <button class="btn-small btn-outline" onclick="showAddIngredientForm()">+ Thêm</button>
+                                </div>
+                                <div id="invIngredientList" class="inv-ingredient-list"></div>
+                                <div id="addIngredientForm" style="display:none;margin-top:8px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+                                    <input type="text" id="invIngredientName" class="form-input" placeholder="Tên nguyên liệu">
+                                    <input type="text" id="invIngredientUnit" class="form-input" placeholder="Đơn vị (VD: kg, lít, cái)" style="margin-top:6px;">
+                                    <input type="number" id="invIngredientStock" class="form-input" placeholder="Tồn kho hiện tại" style="margin-top:6px;" step="0.1">
+                                    <input type="number" id="invIngredientMinStock" class="form-input" placeholder="Cảnh báo tồn tối thiểu" style="margin-top:6px;" step="0.1">
+                                    <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                                        <strong style="font-size:13px;">🔄 Quy đổi đơn vị</strong>
+                                        <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                                            <span style="font-size:12px;color:#64748b;">1</span>
+                                            <input type="text" id="invIngredientConvFrom" class="form-input" placeholder="VD: kg" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                                            <span style="font-size:12px;color:#64748b;">→</span>
+                                            <input type="number" id="invIngredientConvRate" class="form-input" placeholder="SL" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;" step="0.1">
+                                            <input type="text" id="invIngredientConvTo" class="form-input" placeholder="VD: ml" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                                        </div>
+                                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">VD: 1 kg → 1600 ml (để trống nếu không quy đổi)</div>
+                                    </div>
+                                    <div style="display:flex;gap:6px;margin-top:8px;">
+                                        <button class="btn-small btn-save" onclick="handleSaveIngredient()">💾 Lưu</button>
+                                        <button class="btn-small btn-cancel" onclick="hideAddIngredientForm()">Hủy</button>
+                                    </div>
+                                    <div id="invIngredientError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB CHI PHÍ -->
+            <div id="costView" class="tab-content">
+                <div class="cost-tab-container">
+                    <!-- NGUỒN TIỀN -->
+                    <div class="cost-fund-source">
+                        <span class="fund-source-label">Nguồn tiền:</span>
+                        <div class="fund-source-buttons">
+                            <button class="fund-source-btn active" id="fundSourcePosBtn" onclick="switchFundSource('pos_cash')">🏦 Két POS</button>
+                            <button class="fund-source-btn" id="fundSourceMgmtBtn" onclick="switchFundSource('management')">👔 QL TT</button>
+                        </div>
+                    </div>
+
+                    <!-- TABS LOẠI CHI PHÍ -->
+                    <div class="cost-type-tabs">
+                        <button class="cost-type-tab active" id="expenseIngredientTab" onclick="switchExpenseType('ingredient')">🧂 Nguyên liệu</button>
+                        <button class="cost-type-tab" id="expenseWasteTab" onclick="switchExpenseType('waste')">📦 Hao phí</button>
+                    </div>
+
+                    <!-- FORM NHẬP LIỆU -->
+                    <div class="cost-form-card">
+                        <!-- KHU VỰC NGUYÊN LIỆU -->
+                        <div id="expenseIngredientArea" class="cost-type-area">
+                            <div class="cost-section-title">🧂 Chọn nguyên liệu</div>
+                            <div class="cost-search-row">
+                                <input type="text" id="expenseIngredientSearch" class="cost-search-input" placeholder="🔍 Tìm nguyên liệu hoặc hao phí...">
+                                <button class="cost-add-btn" id="addNewIngredientBtn">+ Thêm</button>
+                            </div>
+                            <div class="cost-ingredient-grid" id="expenseIngredientGrid"></div>
+                            <!-- Kết quả tìm kiếm chung (hiển thị khi có từ khóa) -->
+                            <div class="cost-search-results" id="expenseIngredientSearchResults" style="display:none;"></div>
+                        </div>
+
+                        <!-- KHU VỰC HAO PHÍ -->
+                        <div id="expenseWasteArea" class="cost-type-area" style="display:none;">
+                            <div class="cost-section-title">📦 Chọn loại hao phí</div>
+                            <div class="cost-search-row">
+                                <input type="text" id="expenseWasteSearch" class="cost-search-input" placeholder="🔍 Tìm nguyên liệu hoặc hao phí...">
+                                <button class="cost-add-btn" id="addNewWasteBtn">+ Thêm</button>
+                            </div>
+                            <div class="cost-waste-grid" id="expenseWasteGrid"></div>
+                            <!-- Kết quả tìm kiếm chung (hiển thị khi có từ khóa) -->
+                            <div class="cost-search-results" id="expenseWasteSearchResults" style="display:none;"></div>
+                        </div>
+                    </div>
+
+                    <!-- LỊCH SỬ CHI PHÍ NGÀY -->
+                    <div class="cost-history-card">
+                        <div class="cost-history-header">
+                            <div class="cost-date-nav">
+                                <button class="cost-date-nav-btn" onclick="expenseDateChange(-1)">◀</button>
+                                <div class="cost-date-display" id="expenseDateDisplay" onclick="expensePickDate()">📅 Hôm nay</div>
+                                <button class="cost-date-nav-btn" onclick="expenseDateChange(1)">▶</button>
+                            </div>
+                            <div class="cost-header-total" id="expenseHeaderTotal"></div>
+                            <button class="cost-delete-old-btn" id="deleteOldExpensesBtn" onclick="_showDeleteOldExpensesModal()" style="display:none;font-size:11px;padding:4px 8px;border:1px solid #fca5a5;border-radius:6px;background:#fff;color:#dc2626;cursor:pointer;white-space:nowrap;flex-shrink:0;">🗑️ Xóa chi phí cũ</button>
+                        </div>
+                        <div class="cost-list-container">
+                            <div id="expenseTodayList"></div>
+                        </div>
+                    </div>
+
+                    <!-- CHI PHÍ THÁNG -->
+                    <div class="cost-month-card">
+                        <div class="cost-month-header">
+                            <span>📜 Chi phí tháng này</span>
+                            <button class="cost-expand-all-btn" id="expMonthToggleAll" onclick="toggleAllMonthDates()">📂 Mở rộng tất cả</button>
+                        </div>
+                        <div class="cost-month-list">
+                            <div id="expenseMonthTotal"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB QUẢN LÝ (ADMIN) -->
+            <div id="managerView" class="tab-content">
+                <div class="nav-group full-width">
+                    <button id="managerPeriodPrevBtn" class="nav-btn">◀</button>
+                    <select id="managerViewModeSelect" class="mode-select">
+                        <option value="period">Kỳ</option>
+                        <option value="month">Tháng</option>
+                        <option value="day">Ngày</option>
+                    </select>
+                    <button id="managerPeriodNextBtn" class="nav-btn">▶</button>
+                </div>
+                <div class="card">
+                    <div class="manager-grid">
+                        <div class="manager-box" id="revenueBox" style="cursor:pointer;" onclick="showManagerRevenueDetail()">
+                            <label>💰 Doanh thu</label>
+                            <div class="big-value" id="managerRevenue">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="grabBox" style="cursor:pointer;" onclick="showManagerGrabDetail()">
+                            <label>🚕 Grab</label>
+                            <div class="big-value" id="managerGrab">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="bankBox" style="cursor:pointer;" onclick="showManagerBankDetail()">
+                            <label>🏦 Chuyển khoản</label>
+                            <div class="big-value" id="managerBank">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="cashBox" style="cursor:pointer;" onclick="showManagerCashDetail()">
+                            <label>💵 Thực nhận</label>
+                            <div class="big-value" id="managerCash">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="expenseBox" style="cursor:pointer;" onclick="showManagerExpenseDetail()">
+                            <label>🏦 Chi phí từ Két POS</label>
+                            <div class="big-value" id="managerExpense">0đ</div>
+                            <div class="summary-hint">Click danh sách</div>
+                        </div>
+                        <div class="manager-box" id="debtOccurBox" style="cursor:pointer;" onclick="showManagerDebtOccurDetail()">
+                            <label>📊 Công nợ phát sinh</label>
+                            <div class="big-value" id="managerDebt">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="adminExpenseBox" style="cursor:pointer;" onclick="showManagerAdminExpenseDetail()">
+                            <label>📋 Tổng CP Quản lý</label>
+                            <div class="big-value" id="managerAdminExpense">0đ</div>
+                            <div class="summary-hint">Click xem chi tiết</div>
+                        </div>
+                        <div class="manager-box" id="totalDebtBox" style="cursor:pointer;" onclick="showManagerTotalDebtDetail()">
+                            <label>🏦 TỔNG CÔNG NỢ</label>
+                            <div class="big-value" id="managerTotalDebt">0đ</div>
+                            <div class="summary-hint">Click xem danh sách nợ</div>
+                        </div>
+                        <div class="manager-box employee-box" id="employeeBox" style="cursor:pointer;" onclick="showManagerEmployeeDetail()">
+                            <label>👥 NHÂN VIÊN</label>
+                            <div class="big-value" id="managerTotalSalary">0đ</div>
+                            <div class="summary-hint">Click quản lý</div>
+                        </div>
+                        <div class="manager-box" id="posFundBox" style="cursor:pointer;" onclick="showManagerPosFundDetail()">
+                            <label>🏦 QUỸ POS</label>
+                            <div class="big-value" id="managerPosFund">0đ</div>
+                            <div class="summary-hint">Click chi tiết</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card collapsible">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>📊 Thống kê đồ uống</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body" id="managerDrinkStats">
+                        <div class="empty-state">Đang tải...</div>
+                    </div>
+                </div>
+                <div class="card collapsible collapsed">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>📦 Thống kê nguyên liệu</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body" id="managerIngredientStats">
+                        <div class="empty-state">Đang tải...</div>
+                    </div>
+                </div>
+                <div class="card collapsible">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>⚠️ Cảnh báo tồn kho thấp</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body" id="managerLowStockAlert">
+                        <div class="empty-state">Đang tải...</div>
+                    </div>
+                </div>
+                <div class="card collapsible">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>📋 Chi Phí Mua Sắm</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body" id="managerExpenseList"></div>
+                </div>
+                <div class="card collapsible collapsed">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>🧾 Công Nợ Khách Hàng</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body" id="managerDebtList"></div>
+                </div>
+                <div class="card collapsible">
+                    <div class="card-header toggle-header" style="cursor:pointer;">
+                        <h2>📢 Quản lý thông báo</h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="notification-toggle-row" id="notificationToggleRow">
+                            <span>🔔 Bật thông báo</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="notificationToggle" checked onchange="toggleNotifications(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="notification-input-row">
+                            <div class="notification-color-row">
+                                <input type="color" id="notificationColor" value="#f97316">
+                                <input type="text" id="notificationColorLabel" value="Cam" readonly>
+                            </div>
+                            <textarea id="notificationInput" class="form-input" placeholder="Nhập nội dung thông báo..." rows="2"></textarea>
+                            <button class="btn-save" onclick="saveNotification()">📨 Cập nhật thông báo</button>
+                        </div>
+                        <div class="notification-history-header">
+                            <span>📜 Lịch sử thông báo</span>
+                            <button class="btn-small btn-outline" onclick="toggleNotificationHistory()" id="notificationHistoryToggleBtn">📂 Mở rộng</button>
+                        </div>
+                        <div id="notificationHistoryList" class="notification-history-list" style="max-height:0;overflow:hidden;transition:max-height 0.3s ease;">
+                            <div class="empty-text" style="padding:8px;text-align:center;color:#94a3b8;">Chưa có thông báo</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB CÀI ĐẶT -->
+            <div id="settingsView" class="tab-content">
+                <div class="settings-container">
+                    <!-- TIỀN MẶT TẠI POS -->
+                    <div class="settings-section">
+                        <div id="quickCashContainer"></div>
+                    </div>
+
+                    <!-- PHẦN GHI CHÚ NHÂN VIÊN -->
+                    <div class="settings-section" id="settingsStaffNoteSection">
+                        <h3 class="settings-title">📝 Ghi chú</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Ghi chú công việc</label>
+                            <textarea id="staffNoteInput" class="form-input staff-note-textarea"
+                                placeholder="Nhập ghi chú của bạn..."
+                                oninput="saveStaffNote(this.value)"
+                                style="width:100%;min-height:100px;resize:vertical;padding:10px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#eee;font-size:14px;line-height:1.5;font-family:inherit;"></textarea>
+                            <div class="settings-hint">Ghi chú được lưu tự động trên trình duyệt này</div>
+                        </div>
+                    </div>
+
+                    <!-- PHẦN CÀI ĐẶT CHAT -->
+                    <div class="settings-section" id="settingsChatSection">
+                        <h3 class="settings-title">💬 Cài đặt Chat nội bộ</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Âm thanh thông báo</label>
+                            <div class="settings-toggle-row">
+                                <span class="settings-toggle-label" id="chatSoundStatusLabel">🔊 Đang bật</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="chatSoundToggle" checked onchange="toggleChatSoundSetting(this.checked)">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-hint">Bật/tắt âm thanh khi có tin nhắn mới</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Tự động hiện popup</label>
+                            <div class="settings-toggle-row">
+                                <span class="settings-toggle-label" id="chatAutoPopupStatusLabel">✅ Đang bật</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="chatAutoPopupToggle" checked onchange="toggleChatAutoPopup(this.checked)">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-hint">Tự động hiện popup thông báo khi có tin nhắn mới</div>
+                        </div>
+                        <div class="settings-field" id="chatLockField">
+                            <label class="settings-label">🔒 Khóa chat nhân viên</label>
+                            <div class="settings-toggle-row">
+                                <span class="settings-toggle-label" id="chatLockStatusLabel">🔓 Đã mở</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="chatLockToggle" onchange="toggleChatLock(this.checked)">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-hint">Khi khóa, nhân viên chỉ xem được tin nhắn, không thể gửi hoặc trả lời</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Xóa tin nhắn cũ</label>
+                            <div class="settings-actions" style="margin-top:4px;">
+                                <button class="settings-btn settings-btn-secondary" onclick="clearOldChatMessages()" style="font-size:13px;">
+                                    🗑️ Xóa tin nhắn > 30 ngày
+                                </button>
+                            </div>
+                            <div class="settings-hint">Chỉ admin mới có quyền xóa tin nhắn cũ</div>
+                        </div>
+                    </div>
+
+                    <!-- PHẦN TELEGRAM -->
+                    <div class="settings-section" id="settingsTelegramSection">
+                        <h3 class="settings-title">🤖 Cấu hình Telegram</h3>
+
+                        <!-- === CHAT ID DÙNG CHUNG === -->
+                        <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
+                            <div style="font-weight:600;font-size:14px;color:#fbbf24;margin-bottom:8px;">📢 Chat ID chung (dùng cho tất cả thông báo)</div>
+                            <div class="settings-field" style="margin-bottom:6px;">
+                                <label class="settings-label">Chat ID</label>
+                                <input type="text" id="telegramChatId" class="form-input"
+                                    placeholder="VD: -1001234567890 hoặc 123456789">
+                                <div class="settings-hint">
+                                    Chat ID nhóm/channel dùng chung cho toàn bộ bot token bên dưới.
+                                    <a href="https://t.me/username_to_id_bot" target="_blank"
+                                       style="color:#f97316;text-decoration:underline;">Lấy Chat ID tại đây</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- === THÔNG BÁO CHUNG === -->
+                        <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
+                            <div style="font-weight:600;font-size:14px;color:#f97316;margin-bottom:8px;">📢 Thông báo chung (đơn hàng, chi phí, ...)</div>
+                            <div class="settings-field" style="margin-bottom:6px;">
+                                <label class="settings-label">Bot Token</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="telegramBotToken" class="form-input"
+                                        placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                    <button class="settings-toggle-btn" id="settingsToggleTelegramToken"
+                                        onclick="toggleTelegramTokenVisibility()">👁️</button>
+                                </div>
+                                <div class="settings-hint">
+                                    Token từ <a href="https://t.me/BotFather" target="_blank"
+                                       style="color:#f97316;text-decoration:underline;">@BotFather</a>
+                                    trên Telegram. Dùng chung Chat ID bên trên.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- === THÔNG BÁO CHỐT CA === -->
+                        <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
+                            <div style="font-weight:600;font-size:14px;color:#22c55e;margin-bottom:8px;">🔒 Thông báo chốt ca</div>
+                            <div class="settings-field" style="margin-bottom:6px;">
+                                <label class="settings-label">Bot Token chốt ca</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="telegramShiftCloseToken" class="form-input"
+                                        placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                    <button class="settings-toggle-btn" id="settingsToggleShiftCloseToken"
+                                        onclick="toggleShiftCloseTokenVisibility()">👁️</button>
+                                </div>
+                                <div class="settings-hint">
+                                    Token riêng cho bot gửi báo cáo chốt ca. Dùng chung Chat ID bên trên.
+                                    <a href="https://t.me/BotFather" target="_blank"
+                                       style="color:#f97316;text-decoration:underline;">Tạo bot tại @BotFather</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- === CẢNH BÁO (TỒN KHO, XÓA BÀN, XÓA MÓN) === -->
+                        <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
+                            <div style="font-weight:600;font-size:14px;color:#ef4444;margin-bottom:8px;">⚠️ Cảnh báo (tồn kho, xóa bàn, xóa món)</div>
+                            <div class="settings-field" style="margin-bottom:6px;">
+                                <label class="settings-label">Bot Token cảnh báo</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="telegramWarningToken" class="form-input"
+                                        placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                    <button class="settings-toggle-btn" id="settingsToggleWarningToken"
+                                        onclick="toggleWarningTokenVisibility()">👁️</button>
+                                </div>
+                                <div class="settings-hint">
+                                    Token riêng cho bot gửi cảnh báo tồn kho, xóa bàn, xóa món.
+                                    Dùng chung Chat ID bên trên.
+                                    <a href="https://t.me/BotFather" target="_blank"
+                                       style="color:#f97316;text-decoration:underline;">Tạo bot tại @BotFather</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- === CHI PHÍ === -->
+                        <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
+                            <div style="font-weight:600;font-size:14px;color:#a855f7;margin-bottom:8px;">📊 Chi phí</div>
+                            <div class="settings-field" style="margin-bottom:6px;">
+                                <label class="settings-label">Bot Token chi phí</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="telegramExpenseToken" class="form-input"
+                                        placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                    <button class="settings-toggle-btn" id="settingsToggleExpenseToken"
+                                        onclick="toggleExpenseTokenVisibility()">👁️</button>
+                                </div>
+                                <div class="settings-hint">
+                                    Token riêng cho bot gửi thông báo khi có chi phí phát sinh.
+                                    Dùng chung Chat ID bên trên.
+                                    <a href="https://t.me/BotFather" target="_blank"
+                                       style="color:#f97316;text-decoration:underline;">Tạo bot tại @BotFather</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveTelegramConfig()">💾 Lưu cấu hình</button>
+                            <button class="settings-btn settings-btn-primary" onclick="testTelegramConfig()" style="background:#22c55e;">📨 Gửi thử chung</button>
+                            <button class="settings-btn settings-btn-primary" onclick="testShiftCloseTelegram()" style="background:#22c55e;">📨 Gửi thử chốt ca</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearTelegramConfig()">🗑️ Xóa</button>
+                        </div>
+                        <div id="telegramConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN CẤU HÌNH KHÓA BÀN & THỜI GIAN -->
+                    <div class="settings-section" id="settingsLockSection">
+                        <h3 class="settings-title">🔒 Cấu hình khóa bàn & thời gian</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">🕐 Giờ mở quán (bắt đầu tính giờ)</label>
+                            <input type="number" id="settingsLockStartHour" class="form-input"
+                                placeholder="VD: 17" min="0" max="23" style="width:100px;">
+                            <div class="settings-hint">Sau giờ này, bàn sẽ bị khóa toàn bộ (mặc định: 17h)</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🕐 Giờ đóng quán (kết thúc khóa)</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="number" id="settingsLockEndHour" class="form-input"
+                                    placeholder="Giờ" min="0" max="23" style="width:80px;">
+                                <span style="color:#64748b;">:</span>
+                                <input type="number" id="settingsLockEndMinute" class="form-input"
+                                    placeholder="Phút" min="0" max="59" style="width:80px;">
+                            </div>
+                            <div class="settings-hint">Kết thúc khung giờ khóa (mặc định: 5h30)</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">⏱ Thời gian ngồi tối đa (giờ)</label>
+                            <input type="number" id="settingsTableLockHours" class="form-input"
+                                placeholder="VD: 5" min="1" max="24" style="width:100px;">
+                            <div class="settings-hint">Quá số giờ này, bàn sẽ bị khóa (mặc định: 5h)</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🔑 Mật khẩu mở khóa bàn</label>
+                            <input type="password" id="settingsLockPassword" class="form-input"
+                                placeholder="VD: 28122020" style="width:160px;">
+                            <div class="settings-hint">Mật khẩu để mở khóa bàn khi cần</div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveLockConfig()">💾 Lưu cấu hình</button>
+                        </div>
+                        <div id="lockConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN CẤU HÌNH ESP32 (KÉT TIỀN) -->
+                    <div class="settings-section" id="settingsEsp32Section" style="display:none;">
+                        <h3 class="settings-title">🔌 Cấu hình ESP32 (Két tiền)</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">📶 WiFi SSID</label>
+                            <input type="text" id="esp32WifiSsid" class="form-input" placeholder="VD: Ca Na">
+                            <div class="settings-hint">Tên WiFi mà ESP32 sẽ kết nối</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🔑 WiFi Password</label>
+                            <input type="password" id="esp32WifiPassword" class="form-input" placeholder="Nhập mật khẩu WiFi">
+                            <div class="settings-hint">Mật khẩu WiFi cho ESP32</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🏠 Firebase Host</label>
+                            <input type="text" id="esp32FirebaseHost" class="form-input" placeholder="VD: posmilano-default-rtdb.firebaseio.com">
+                            <div class="settings-hint">Firebase Realtime Database host (không bao gồm https://)</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🆔 Shop ID</label>
+                            <input type="text" id="esp32ShopId" class="form-input" placeholder="VD: shop_default">
+                            <div class="settings-hint">ID cửa hàng trên Firebase</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">🤖 Telegram Bot Token</label>
+                            <div class="settings-input-group">
+                                <input type="password" id="esp32TelegramToken" class="form-input"
+                                    placeholder="VD: 123456789:ABCdefGHIjklmNOpqrsTUVwxyz">
+                                <button class="settings-toggle-btn" onclick="toggleEsp32TelegramToken()">👁️</button>
+                            </div>
+                            <div class="settings-hint">Token bot Telegram để ESP32 gửi cảnh báo (có thể khác với bot chat)</div>
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">👥 Telegram Chat ID</label>
+                            <input type="text" id="esp32TelegramChatId" class="form-input" placeholder="VD: 6372876364">
+                            <div class="settings-hint">Chat ID nhận cảnh báo từ ESP32</div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveEsp32Config()">💾 Lưu cấu hình ESP32</button>
+                            <button class="settings-btn settings-btn-primary" onclick="loadEsp32Config()" style="background:#22c55e;">🔄 Tải lại</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearEsp32Config()">🗑️ Xóa</button>
+                        </div>
+                        <div id="esp32ConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN THÔNG TIN QUÁN -->
+                    <div class="settings-section" id="settingsShopSection">
+                        <h3 class="settings-title">🏪 Thông tin quán</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Tên quán</label>
+                            <input type="text" id="shopInfoName" class="form-input" placeholder="VD: MILANO COFFEE 259">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Địa chỉ</label>
+                            <input type="text" id="shopInfoAddress" class="form-input" placeholder="VD: 123 Nguyễn Huệ, Q1">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Số điện thoại</label>
+                            <input type="text" id="shopInfoPhone" class="form-input" placeholder="VD: 0901234567">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Mã QR thanh toán</label>
+                            <input type="text" id="shopInfoQR" class="form-input" placeholder="VD: https://qr.vn/pay/123456 hoặc nội dung QR">
+                            <div class="settings-hint">Nhập link hoặc nội dung mã QR để in trên hóa đơn</div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="saveShopInfo()">💾 Lưu thông tin</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearShopInfo()">🗑️ Xóa</button>
+                        </div>
+                        <div id="shopInfoStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN PHÂN QUYỀN QUẢN LÝ (đã chuyển sang modal employees.js) -->
+                    <div class="settings-section" id="settingsPermissionSection" style="display:none;">
+                        <h3 class="settings-title">🔐 Phân quyền quản lý</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Danh sách nhân viên</label>
+                            <div id="staffPermissionList" class="permission-staff-list">
+                                <div class="permission-loading">Đang tải...</div>
+                            </div>
+                            <div class="settings-hint">Nhấn vào tên nhân viên để thay đổi quyền (Admin/Staff)</div>
+                        </div>
+                        <div class="settings-field" style="margin-top:12px;">
+                            <label class="settings-label">Thêm nhân viên mới</label>
+                            <div class="settings-input-group" style="margin-bottom:6px;">
+                                <input type="text" id="newStaffUsername" class="form-input" placeholder="Tên đăng nhập" style="flex:1;">
+                            </div>
+                            <div class="settings-input-group">
+                                <input type="password" id="newStaffPassword" class="form-input" placeholder="Mật khẩu" style="flex:1;">
+                                <button class="settings-btn settings-btn-primary" onclick="createNewStaff()" style="white-space:nowrap;">➕ Thêm</button>
+                            </div>
+                            <div class="settings-hint">Nhân viên mới sẽ có quyền Staff mặc định</div>
+                        </div>
+                        <div id="staffPermissionStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- PHẦN DỮ LIỆU -->
+                    <div class="settings-section" id="settingsDataSection">
+                        <h3 class="settings-title">🗄️ Dữ liệu</h3>
+                        <div class="settings-field">
+                            <label class="settings-label">Xóa bộ nhớ đệm IndexedDB</label>
+                            <div class="settings-hint" style="margin-bottom:8px;">
+                                Xóa toàn bộ dữ liệu cache trên trình duyệt và tải lại từ Firebase.
+                                Dữ liệu trên Firebase <strong>không bị ảnh hưởng</strong>.
+                                Dùng khi dữ liệu hiển thị không chính xác hoặc cần refresh.
+                            </div>
+                            <div class="settings-actions" style="margin-top:4px;">
+                                <button class="settings-btn settings-btn-danger" onclick="clearIndexedDB()" style="font-size:13px;background:#dc2626;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">
+                                    🗑️ Xóa cache & Tải lại
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- DRAFT BUBBLE CONTAINER -->
+        <div class="draft-bubble-container" id="draftBubbleContainer"></div>
+    </div>
+
+    <!-- MODAL TẠO ĐƠN - 3 CỘT -->
+    <div class="modal" id="orderModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                
+                <div class="modal-header-actions" id="orderHeaderActions"></div>
+                <button class="modal-close-btn" onclick="closeModal('orderModal')">✕ Đóng</button>
+            </div>
+            <div class="modal-body order-modal-body">
+                <div class="order-three-columns">
+                    <!-- CỘT 1: DANH MỤC -->
+                    <div class="order-categories-column" id="orderCategoriesColumn"></div>
+                    
+                    <!-- CỘT 2: MENU -->
+                    <div class="order-menu-column">
+                        <!-- Dropdown chọn danh mục (mobile) -->
+                        <select class="order-category-select" id="orderCategorySelect" onchange="onCategorySelectChange()"></select>
+                        <div class="order-menu-header">
+                            <span class="order-menu-title">📋 Thực đơn</span>
+                            <input class="order-menu-search" id="menuSearchInput" type="text" placeholder="🔍 Tìm món..." oninput="filterMenuBySearch(this.value)">
+                            <button class="quick-create-menu-btn" onclick="showQuickCreateMenuItem()" title="Tạo món nhanh">➕</button>
+                        </div>
+                        <div class="menu-grid" id="menuGrid"></div>
+                    </div>
+                    
+                    <!-- CỘT 3: GIỎ HÀNG -->
+                    <div class="order-cart-column">
+                        <div class="cart-header">🛒 Giỏ hàng</div>
+                        <div class="cart-items-list" id="cartItemsList"></div>
+                        <div class="cart-total-section">
+                            <div class="total-row">
+                                <span>Tổng cộng:</span>
+                                <span id="cartTotalAmount">0đ</span>
+                            </div>
+                            <div class="cart-action-buttons" id="cartFooterActions"></div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
     <!-- MODAL CHI TIẾT BÀN -->
     <div class="modal" id="tableDetailModal">
@@ -240,24 +851,10 @@
         </div>
     </div>
 
-    <!-- MODAL THANH TOÁN (3 nút) -->
-    <div class="modal" id="paymentMethodModal">
-        <div class="modal-content" style="max-width:350px;">
-            <div class="modal-header"><span class="modal-title">💸 Chọn phương thức thanh toán</span><span class="modal-close" onclick="closeModal('paymentMethodModal')">&times;</span></div>
-            <div class="modal-body">
-                <div class="payment-modal-buttons">
-                    <button class="payment-cash" id="paymentCashBtn">💰 Tiền mặt</button>
-                    <button class="payment-transfer" id="paymentTransferBtn">💳 Chuyển khoản</button>
-                    <button class="payment-debt" id="paymentDebtBtn">💢 Ghi nợ</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- MODAL CHỌN KHÁCH (ghi nợ) -->
     <div class="modal" id="customerSelectorModal">
-        <div class="modal-content"><div class="modal-header"><span class="modal-title">👥 Chọn khách hàng</span><span class="modal-close" onclick="closeModal('customerSelectorModal')">&times;</span></div>
-        <div class="modal-body"><input type="text" id="customerSelectorSearch" class="form-input" placeholder="🔍 Tìm khách..."><div id="customerSelectorList" class="customer-selector-list"></div><button class="btn-create-customer" id="createCustomerFromSelectorBtn">➕ Tạo khách mới</button></div></div>
+        <div class="modal-content"><div class="modal-header cus-sel-header"><input type="text" id="customerSelectorSearch" class="form-input cus-sel-search" placeholder="🔍 Tìm khách..."><button class="btn-create-customer cus-sel-create-btn" id="createCustomerFromSelectorBtn">➕ Tạo</button><span class="modal-close" onclick="closeModal('customerSelectorModal')">&times;</span></div>
+        <div class="modal-body cus-sel-body"><div id="customerSelectorList" class="customer-selector-list"></div></div></div>
     </div>
 
     <!-- MODAL CHIA HÓA ĐƠN -->
@@ -288,174 +885,423 @@
 
     <!-- MODAL CHI TIẾT KHÁCH -->
     <div class="modal" id="customerDetailModal">
-        <div class="modal-content"><div class="modal-header"><span class="modal-title">👤 Chi tiết khách</span><span class="modal-close" onclick="closeModal('customerDetailModal')">&times;</span></div>
+        <div class="modal-content cus-detail-modal"><div class="modal-header"><span class="modal-title" id="customerDetailTitle">👤 Chi tiết khách</span><span class="cus-header-balance" id="customerDetailBalance"></span><span class="modal-close" onclick="closeModal('customerDetailModal')">&times;</span></div>
         <div class="modal-body" id="customerDetailContent"></div></div>
     </div>
 
-    <!-- MODAL THANH TOÁN NỢ -->
-    <div class="modal" id="debtPaymentModal">
-        <div class="modal-content"><div class="modal-header"><span class="modal-title">💸 Thanh toán nợ</span><span class="modal-close" onclick="closeModal('debtPaymentModal')">&times;</span></div>
-        <div class="modal-body"><p id="debtPaymentInfo"></p><input type="number" id="debtPaymentAmount" class="form-input" placeholder="Số tiền thanh toán" step="1000">
-        <div class="form-actions"><button class="btn-save" id="confirmDebtPaymentBtn">✅ Xác nhận</button><button class="btn-cancel" onclick="closeModal('debtPaymentModal')">Hủy</button></div></div></div>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- MODAL CHI TIẾT GIAO DỊCH -->
+    <div class="modal" id="transactionDetailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="header-left">
+                    <div class="modal-title">🧾 Chi tiết giao dịch</div>
+                    <div class="header-date" id="txDetailDate"></div>
+                </div>
+                <span class="modal-close" onclick="closeModal('transactionDetailModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="transactionDetailBody"></div>
+        </div>
     </div>
 
-    <div class="toast-container" id="toastContainer"></div>
-<!-- MODAL CHI TIẾT GIAO DỊCH -->
-<div class="modal" id="transactionDetailModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title">🧾 Chi tiết giao dịch</span>
-            <span class="modal-close" onclick="closeModal('transactionDetailModal')">&times;</span>
-        </div>
-        <div class="modal-body" id="transactionDetailBody">
-            <!-- Nội dung sẽ được render bằng JS -->
+    <!-- MODAL XÁC NHẬN ĐƠN NHÁP -->
+    <div class="modal" id="draftConfirmModal">
+        <div class="modal-content" style="max-width: 380px;">
+            <div class="modal-header">
+                <span class="modal-title">📋 Xác nhận đơn nháp</span>
+                <span class="modal-close" onclick="closeModal('draftConfirmModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="draftConfirmContent"></div>
         </div>
     </div>
-</div>
-<!-- MODAL NHẬP SỐ DƯ CUỐI NGÀY -->
-<div class="modal" id="dailyBalanceModal">
-    <div class="modal-content" style="max-width: 350px;">
-        <div class="modal-header">
-            <span class="modal-title">🏦 Nhập số dư cuối ngày</span>
-            <span class="modal-close" onclick="closeModal('dailyBalanceModal')">&times;</span>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>💰 Số dư cuối ngày (tiền mặt để lại quán)</label>
-                <input type="number" id="cashKeptInput" class="form-input" placeholder="0đ" step="1000" value="0">
-                <small style="font-size: 11px; color: #64748b;">Số tiền này sẽ là số dư đầu ngày hôm sau</small>
+
+    <!-- MODAL CHI TIẾT MÓN ĂN -->
+    <div class="modal" id="menuItemDetailModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <span class="modal-title" id="menuItemDetailTitle">🍽️ Chi tiết món</span>
+                <span class="modal-close" onclick="closeModal('menuItemDetailModal')">&times;</span>
             </div>
-            <div class="form-actions">
-                <button class="btn-save" id="saveDailyBalanceBtn">💾 Lưu</button>
-                <button class="btn-cancel" onclick="closeModal('dailyBalanceModal')">Hủy</button>
+            <div class="modal-body" id="menuItemDetailContent">
             </div>
         </div>
     </div>
-</div>
-<!-- MODAL CHI PHÍ -->
-<div class="modal" id="costModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title">📊 Thêm chi phí</span>
-            <span class="modal-close" onclick="closeModal('costModal')">&times;</span>
-        </div>
-        <div class="modal-body">
-            <input type="text" id="costName" class="form-input" placeholder="Tên chi phí">
-            <div class="cost-categories" id="costCategoriesList"></div>
-            <div class="quick-money">
-                <button type="button" class="quick-money-btn" data-amount="35000">35k</button>
-                <button type="button" class="quick-money-btn" data-amount="40000">40k</button>
-                <button type="button" class="quick-money-btn" data-amount="50000">50k</button>
-                <button type="button" class="quick-money-btn" data-amount="55000">55k</button>
-                <button type="button" class="quick-money-btn" data-amount="60000">60k</button>
+
+    <!-- MODAL THÊM MÓN ĂN (POPUP) - Nội dung được render động bởi showAddMenuItemForm() -->
+    <div class="modal" id="addMenuItemModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <span class="modal-title" id="addMenuItemModalTitle">➕ Thêm món mới</span>
+                <span class="modal-close" onclick="closeModal('addMenuItemModal')">&times;</span>
             </div>
-            <input type="number" id="costAmount" class="form-input" placeholder="Số tiền" step="1000">
-            <button class="btn-save" id="saveCostBtn">💾 Lưu chi phí</button>
-            <div class="cost-history-title">📋 Chi phí hôm nay</div>
-            <div id="todayCostList" class="cost-list"></div>
-            <div class="cost-history-title">📜 Tổng chi phí tháng này</div>
-            <div id="monthCostTotal" class="cost-total">0đ</div>
+            <div class="modal-body" id="addMenuItemModalBody"></div>
         </div>
     </div>
-</div>
-<!-- MODAL CHI TIẾT CHI PHÍ -->
-<div class="modal" id="costDetailModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title">📋 Danh sách chi phí</span>
-            <span class="modal-close" onclick="closeModal('costDetailModal')">&times;</span>
-        </div>
-        <div class="modal-body" id="costDetailList"></div>
-    </div>
-</div>
-<!-- Toast giao dịch gần đây -->
-<div id="recentToast" class="recent-toast">
-    <div id="recentToastList" class="recent-toast-list"></div>
-</div>
-<!-- MODAL HIỂN THỊ LỊCH SỬ CHI TIẾT (ADMIN) -->
-<div class="modal" id="historyDetailModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title" id="historyDetailTitle">📋 Chi tiết</span>
-            <span class="modal-close" onclick="closeModal('historyDetailModal')">&times;</span>
-        </div>
-        <div class="modal-body" id="historyDetailContent">
-            <!-- Nội dung sẽ được render bằng JS -->
-        </div>
-    </div>
-</div>
-<!-- MODAL CHI PHÍ NHÂN VIÊN (STAFF COST) -->
-<div class="modal" id="staffCostModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title" id="staffExpensePopupTitle">📊 Thêm chi phí Nhân viên</span>
-            <span class="modal-close" onclick="closeModal('staffCostModal')">&times;</span>
-        </div>
-        <div class="modal-body">
-            <input type="text" id="staffExpenseNameInput" class="form-input" placeholder="Tên chi phí nhân viên">
-            <div class="cost-categories" id="staffRecentCategoriesList">
-                <div class="empty-text">Chưa có danh mục</div>
+
+    <!-- MODAL THÊM DANH MỤC (POPUP) -->
+    <div class="modal" id="addCategoryModal">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">
+                <span class="modal-title" id="addCategoryModalTitle">➕ Thêm danh mục</span>
+                <span class="modal-close" onclick="closeModal('addCategoryModal')">&times;</span>
             </div>
-            <div class="quick-money">
-                <button type="button" class="quick-money-btn" data-amount="35000">35k</button>
-                <button type="button" class="quick-money-btn" data-amount="40000">40k</button>
-                <button type="button" class="quick-money-btn" data-amount="50000">50k</button>
-                <button type="button" class="quick-money-btn" data-amount="55000">55k</button>
-                <button type="button" class="quick-money-btn" data-amount="60000">60k</button>
-                <button type="button" class="quick-money-btn" data-amount="100000">100k</button>
-                <button type="button" class="quick-money-btn" data-amount="200000">200k</button>
+            <div class="modal-body">
+                <input type="text" id="addModalCategoryName" class="form-input" placeholder="Tên danh mục (VD: Cà phê)">
+                <input type="number" id="addModalCategoryOrder" class="form-input" placeholder="Thứ tự (VD: 1)" style="margin-top:6px;">
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn-small btn-save" onclick="handleSaveCategory()" style="flex:1;">💾 Lưu</button>
+                    <button class="btn-small btn-cancel" onclick="closeModal('addCategoryModal')" style="flex:1;">Hủy</button>
+                </div>
+                <div id="addModalCategoryError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
             </div>
-            <input type="number" id="staffExpenseAmount" class="form-input" placeholder="Số tiền" step="1000">
-            <input type="number" id="staffExpenseQty" class="form-input" placeholder="Số lượng" value="1" step="1">
-            <button class="btn-save" id="saveStaffExpenseBtn">💾 Lưu chi phí Nhân viên</button>
-            <div class="cost-history-title">📋 Chi phí nhân viên hôm nay</div>
-            <div id="staffTodayCostList" class="cost-list"></div>
-            <div class="cost-history-title">📜 Tổng chi phí nhân viên tháng này</div>
-            <div id="staffMonthCostTotal" class="cost-total">0đ</div>
         </div>
     </div>
-</div>
-<!-- MODAL LỊCH SỬ CHI PHÍ -->
-<div class="modal" id="costHistoryModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title" id="costHistoryTitle">📜 Lịch sử chi phí</span>
-            <span class="modal-close" onclick="closeModal('costHistoryModal')">&times;</span>
+
+    <!-- MODAL THÊM NGUYÊN LIỆU (POPUP) -->
+    <div class="modal" id="addIngredientModal">
+        <div class="modal-content" style="max-width:450px;">
+            <div class="modal-header">
+                <span class="modal-title" id="addIngredientModalTitle">➕ Thêm nguyên liệu</span>
+                <span class="modal-close" onclick="closeModal('addIngredientModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="text" id="addModalIngredientName" class="form-input" placeholder="Tên nguyên liệu">
+                <input type="text" id="addModalIngredientUnit" class="form-input" placeholder="Đơn vị (VD: kg, lít, cái)" style="margin-top:6px;">
+                <input type="number" id="addModalIngredientStock" class="form-input" placeholder="Tồn kho hiện tại" style="margin-top:6px;" step="0.1">
+                <input type="number" id="addModalIngredientMinStock" class="form-input" placeholder="Cảnh báo tồn tối thiểu" style="margin-top:6px;" step="0.1">
+                
+                <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                    <strong style="font-size:13px;">🔄 Quy đổi đơn vị</strong>
+                    <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:#64748b;">1</span>
+                        <input type="text" id="addModalIngredientConvFrom" class="form-input" placeholder="VD: kg" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                        <span style="font-size:12px;color:#64748b;">→</span>
+                        <input type="number" id="addModalIngredientConvRate" class="form-input" placeholder="SL" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;" step="0.1">
+                        <input type="text" id="addModalIngredientConvTo" class="form-input" placeholder="VD: ml" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                    </div>
+                    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">VD: 1 kg → 1600 ml (để trống nếu không quy đổi)</div>
+                </div>
+                
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn-small btn-save" onclick="handleSaveIngredient()" style="flex:1;">💾 Lưu</button>
+                    <button class="btn-small btn-cancel" onclick="closeModal('addIngredientModal')" style="flex:1;">Hủy</button>
+                </div>
+                <div id="addModalIngredientError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+            </div>
         </div>
-        <div class="modal-body" id="costHistoryList"></div>
     </div>
-</div>
-<!-- MODAL CHI TIẾT KHÁCH -->
-<div class="modal" id="customerDetailModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="modal-title">👤 Chi tiết khách</span>
-            <span class="modal-close" onclick="closeModal('customerDetailModal')">&times;</span>
+
+    <!-- MODAL SỬA MÓN ĂN (POPUP) -->
+    <div class="modal" id="editMenuItemModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <span class="modal-title" id="editMenuItemModalTitle">✏️ Sửa món</span>
+                <span class="modal-close" onclick="closeModal('editMenuItemModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="editMenuItemModalBody">
+                <input type="text" id="editMenuItemName" class="form-input" placeholder="Tên món">
+                <input type="number" id="editMenuItemPrice" class="form-input" placeholder="Giá bán" style="margin-top:6px;" step="1000">
+                <select id="editMenuItemCategory" class="form-input" style="margin-top:6px;">
+                    <option value="">-- Chọn danh mục --</option>
+                </select>
+                
+                <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <strong style="font-size:13px;">📏 Size món</strong>
+                        <button class="btn-small btn-outline" onclick="_addEditMenuItemSizeRow('','')" style="font-size:11px;">+ Thêm size</button>
+                    </div>
+                    <div id="editMenuItemSizesContainer"></div>
+                </div>
+                
+                <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <strong style="font-size:13px;">🧂 Nguyên liệu</strong>
+                        <button class="btn-small btn-outline" onclick="_addEditMenuItemIngredientRow('','','')" style="font-size:11px;">+ Thêm NL</button>
+                    </div>
+                    <div id="editMenuItemIngredientsContainer"></div>
+                </div>
+                
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn-small btn-save" onclick="handleEditMenuItemSave()" style="flex:1;">💾 Lưu</button>
+                    <button class="btn-small btn-cancel" onclick="closeModal('editMenuItemModal')" style="flex:1;">Hủy</button>
+                </div>
+                <div id="editMenuItemError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+            </div>
         </div>
-        <div class="modal-body" id="customerDetailContent"></div>
     </div>
-</div>
+
+    <!-- MODAL SỬA NGUYÊN LIỆU (POPUP) -->
+    <div class="modal" id="editIngredientModal">
+        <div class="modal-content" style="max-width:450px;">
+            <div class="modal-header">
+                <span class="modal-title" id="editIngredientModalTitle">✏️ Sửa nguyên liệu</span>
+                <span class="modal-close" onclick="closeModal('editIngredientModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="editIngredientModalBody">
+                <input type="text" id="editIngredientName" class="form-input" placeholder="Tên nguyên liệu">
+                <input type="text" id="editIngredientUnit" class="form-input" placeholder="Đơn vị (VD: kg, lít, cái)" style="margin-top:6px;">
+                <input type="number" id="editIngredientStock" class="form-input" placeholder="Tồn kho hiện tại" style="margin-top:6px;" step="0.1">
+                <input type="number" id="editIngredientMinStock" class="form-input" placeholder="Cảnh báo tồn tối thiểu" style="margin-top:6px;" step="0.1">
+                
+                <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                    <strong style="font-size:13px;">🔄 Quy đổi đơn vị</strong>
+                    <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:#64748b;">1</span>
+                        <input type="text" id="editIngredientConvFrom" class="form-input" placeholder="VD: kg" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                        <span style="font-size:12px;color:#64748b;">→</span>
+                        <input type="number" id="editIngredientConvRate" class="form-input" placeholder="SL" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;" step="0.1">
+                        <input type="text" id="editIngredientConvTo" class="form-input" placeholder="VD: ml" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                    </div>
+                    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">VD: 1 kg → 1600 ml (để trống nếu không quy đổi)</div>
+                </div>
+                
+                <div style="margin-top:8px;padding:8px;background:#f0fdf4;border-radius:6px;border:1px solid #bbf7d0;">
+                    <strong style="font-size:13px;color:#16a34a;">📥 Nhập kho nhanh</strong>
+                    <div style="display:flex;gap:6px;margin-top:4px;align-items:center;">
+                        <input type="number" id="editIngredientAddStock" class="form-input" placeholder="Số lượng nhập" style="flex:1;padding:6px 8px;font-size:12px;" step="0.1" min="0">
+                        <button class="btn-small" style="background:#16a34a;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" onclick="handleIngredientQuickImport()">➕ Nhập</button>
+                    </div>
+                    <div style="font-size:11px;color:#64748b;margin-top:4px;">Nhập số lượng và bấm "Nhập" để thêm tồn kho</div>
+                </div>
+                
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn-small btn-save" onclick="handleEditIngredientSave()" style="flex:1;">💾 Lưu</button>
+                    <button class="btn-small btn-cancel" onclick="closeModal('editIngredientModal')" style="flex:1;">Hủy</button>
+                </div>
+                <div id="editIngredientError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LỊCH SỬ SỬ DỤNG NGUYÊN LIỆU -->
+    <div class="modal" id="ingredientUsageModal">
+        <div class="modal-content" style="max-width:560px;">
+            <div class="modal-header">
+                <span class="modal-title" id="ingredientUsageTitle">🧂 Lịch sử sử dụng</span>
+                <span class="modal-close" onclick="closeModal('ingredientUsageModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="ingredientUsageContent">
+                <div class="ing-usage-tabs" id="ingUsageTabs">
+                    <span class="ing-usage-tab active" data-tab="usage" onclick="switchIngUsageTab('usage')">📊 Sử dụng</span>
+                    <span class="ing-usage-tab" data-tab="menuitems" onclick="switchIngUsageTab('menuitems')">🍽️ Món chứa NL</span>
+                    <span class="ing-usage-tab" data-tab="transactions" onclick="switchIngUsageTab('transactions')">📋 Nhập/Xuất</span>
+                </div>
+                <div class="ing-usage-tab-content" id="ingUsageTabUsage">
+                    <div class="ing-usage-summary" id="ingUsageSummary"></div>
+                    <div class="ing-usage-dates" id="ingUsageDates"></div>
+                </div>
+                <div class="ing-usage-tab-content" id="ingUsageTabMenuItems" style="display:none;">
+                    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+                        <input type="text" id="ingRelatedMenuSearch" class="form-input" placeholder="🔍 Tìm món..." style="flex:1;min-width:120px;padding:6px 8px;font-size:12px;" oninput="filterIngRelatedMenu(this.value)">
+                        <button class="btn-small btn-outline" onclick="_showAssignIngredientToMenu()" style="font-size:11px;white-space:nowrap;">📌 Gán NL</button>
+                        <button class="btn-small btn-outline" onclick="_showCreateMenuItemFromIng()" style="font-size:11px;white-space:nowrap;">➕ Tạo món</button>
+                    </div>
+                    <div id="ingRelatedMenuList" style="max-height:300px;overflow-y:auto;"></div>
+                </div>
+                <div class="ing-usage-tab-content" id="ingUsageTabTransactions" style="display:none;">
+                    <div class="ing-tx-filter">
+                        <div class="ing-tx-filter-row">
+                            <div class="ing-tx-filter-group">
+                                <label class="ing-tx-filter-label">Từ ngày</label>
+                                <input type="date" class="ing-tx-filter-input" id="ingTxFilterFrom" onchange="showIngredientUsage(window._currentIngId)">
+                            </div>
+                            <div class="ing-tx-filter-group">
+                                <label class="ing-tx-filter-label">Đến ngày</label>
+                                <input type="date" class="ing-tx-filter-input" id="ingTxFilterTo" onchange="showIngredientUsage(window._currentIngId)">
+                            </div>
+                            <button class="ing-tx-filter-clear" onclick="document.getElementById('ingTxFilterFrom').value='';document.getElementById('ingTxFilterTo').value='';showIngredientUsage(window._currentIngId)">✕</button>
+                        </div>
+                    </div>
+                    <div class="ing-tx-list" id="ingTxList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL GÁN NGUYÊN LIỆU CHO MÓN -->
+    <div class="modal" id="assignIngredientModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <span class="modal-title" id="assignIngredientModalTitle">📌 Gán nguyên liệu cho món</span>
+                <span class="modal-close" onclick="closeModal('assignIngredientModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="assignIngredientModalBody">
+                <input type="text" id="assignIngMenuSearch" class="form-input" placeholder="🔍 Tìm món..." oninput="filterAssignIngMenu(this.value)" style="margin-bottom:6px;">
+                <div id="assignIngMenuList" style="max-height:200px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:4px;"></div>
+                <div id="assignIngSizeSection" style="display:none;margin-top:8px;padding:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;">
+                    <div style="font-weight:600;font-size:13px;color:#92400e;margin-bottom:4px;">📏 Size & Nguyên liệu</div>
+                    <div id="assignIngSizeContainer"></div>
+                    <button class="btn-small btn-outline" onclick="_addAssignIngSizeRow()" style="font-size:11px;margin-top:4px;">+ Thêm size</button>
+                    <div style="margin-top:6px;padding:6px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;">
+                        <div style="font-weight:600;font-size:12px;color:#16a34a;margin-bottom:4px;">🧂 Nguyên liệu (chung)</div>
+                        <div id="assignIngGlobalIngContainer"></div>
+                        <button class="btn-small btn-outline" onclick="_addAssignIngGlobalIngRow()" style="font-size:10px;padding:2px 6px;">+ Thêm NL</button>
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <button class="btn-small btn-save" onclick="_handleAssignIngredientSave()" style="flex:1;font-size:12px;">💾 Lưu</button>
+                        <button class="btn-small btn-cancel" onclick="closeModal('assignIngredientModal')" style="flex:1;font-size:12px;">Hủy</button>
+                    </div>
+                    <div id="assignIngError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL TẠO MÓN MỚI TỪ NGUYÊN LIỆU -->
+    <div class="modal" id="createMenuItemFromIngModal">
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <span class="modal-title" id="createMenuItemFromIngTitle">➕ Tạo món mới từ nguyên liệu</span>
+                <span class="modal-close" onclick="closeModal('createMenuItemFromIngModal')">&times;</span>
+            </div>
+            <div class="modal-body" id="createMenuItemFromIngBody">
+                <input type="text" id="createIngMenuItemName" class="form-input" placeholder="Tên món">
+                <input type="number" id="createIngMenuItemPrice" class="form-input" placeholder="Giá bán" style="margin-top:6px;" step="1000">
+                <select id="createIngMenuItemCategory" class="form-input" style="margin-top:6px;">
+                    <option value="">-- Chọn danh mục --</option>
+                </select>
+                <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <strong style="font-size:13px;">📏 Size món</strong>
+                        <button class="btn-small btn-outline" onclick="_addCreateIngSizeRow()" style="font-size:11px;">+ Thêm size</button>
+                    </div>
+                    <div id="createIngSizesContainer"></div>
+                </div>
+                <div style="margin-top:8px;padding:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                        <strong style="font-size:13px;color:#16a34a;">🧂 Nguyên liệu (chung)</strong>
+                        <button class="btn-small btn-outline" onclick="_addCreateIngGlobalIngRow()" style="font-size:11px;">+ Thêm NL</button>
+                    </div>
+                    <div id="createIngGlobalIngContainer"></div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn-small btn-save" onclick="_handleCreateMenuItemFromIng()" style="flex:1;">💾 Lưu</button>
+                    <button class="btn-small btn-cancel" onclick="closeModal('createMenuItemFromIngModal')" style="flex:1;">Hủy</button>
+                </div>
+                <div id="createIngMenuItemError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast giao dịch gần đây -->
+    <!-- CHAT POPUP -->
+    <div id="chatPopup" class="chat-popup" style="display:none;">
+        <div class="chat-popup-header">
+            <span>💬 Chat nội bộ</span>
+            <div class="chat-popup-header-actions">
+                <button class="chat-popup-close-btn" onclick="toggleChatPopup()">✕</button>
+            </div>
+        </div>
+        <div class="chat-popup-body" id="chatPopupBody">
+            <div class="chat-empty">Đang tải...</div>
+        </div>
+        <div class="chat-popup-footer">
+            <div class="chat-locked-message" id="chatLockedMessage" style="display:none;">
+                🔒 Chat đã bị khóa bởi quản lý. Bạn chỉ có thể xem tin nhắn.
+            </div>
+            <div class="chat-input-row">
+                <select id="chatPrioritySelect" class="chat-priority-select">
+                    <option value="normal">📝 Thường</option>
+                    <option value="important">⭐ Quan trọng</option>
+                    <option value="urgent">🔴 Gấp</option>
+                </select>
+                <input type="text" id="chatInput" class="chat-input" placeholder="Nhập tin nhắn..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+                <button class="chat-send-btn" onclick="sendChatMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="recentToast" class="recent-toast">
+        <div class="recent-toast-header" onclick="toggleRecentToast()">
+            <span>🔄 GIAO DỊCH GẦN ĐÂY</span>
+            <span id="recentToastToggle" class="recent-toast-toggle">▲</span>
+        </div>
+        <div id="recentToastList" class="recent-toast-list"></div>
+    </div>
+
+    <!-- SCRIPTS - CHỈ LOAD NHỮNG GÌ POS CẦN -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
-    <script src="db.js"></script>
-    <!-- Core modules (tách từ pos.js) -->
-    <script src="app.js"></script>
-    <script src="realtime.js"></script>
+    
+    <!-- DB CHUNG -->
+    <script src="db.js?v=3"></script>
+    <!-- Auth CHUNG -->
+    <script src="auth.js"></script>
+    
+    <!-- POS-APP RÚT GỌN (thay thế app.js) -->
+    <script src="pos-app.js"></script>
+    <!-- REALTIME RÚT GỌN (thay thế realtime.js) -->
+    <script src="realtime-pos.js"></script>
+    
+    <!-- INGREDIENTS - kiểm tra tồn kho, trừ nguyên liệu (cần cho order.js, tables.js) -->
     <script src="ingredients.js"></script>
-    <script src="report.js"></script>
-    <script src="cost.js"></script>
-    <script src="split-transfer-merge.js"></script>
-    <!-- Feature modules -->
+    
+    <!-- ESP32 Cash Drawer Audit - Định nghĩa handleCashPayment mặc định TRƯỚC order.js -->
+    <!-- để order.js, tables.js, customers.js có thể gọi ngay cả khi esp32_audit.js chưa load -->
+    <script>
+    // Hàng đợi các cuộc gọi handleCashPayment trước khi esp32_audit.js sẵn sàng
+    window._pendingCashPayments = [];
+    window.handleCashPayment = function(amount, invoiceId) {
+        console.log('[AUDIT] handleCashPayment queued (esp32_audit.js chưa load):', amount, invoiceId);
+        window._pendingCashPayments.push({ amount: amount, invoiceId: invoiceId });
+        // Nếu đã có esp32_audit.js (đã ghi đè handleCashPayment), gọi trực tiếp
+        if (window._handleCashPaymentImpl) {
+            return window._handleCashPaymentImpl(amount, invoiceId, 0);
+        }
+        return Promise.resolve();
+    };
+    </script>
+    
+    <!-- Notifications - Định nghĩa notifyPaymentToTelegram TRƯỚC order.js, tables.js, customers.js -->
+    <script src="notifications.js"></script>
+    
+    <!-- CORE MODULES DÙNG CHUNG -->
     <script src="order.js"></script>
-    <script src="tables.js"></script>
+    <script src="tables.js?v=2"></script>
+    <script src="split-transfer-merge.js"></script>
     <script src="customers.js"></script>
     <script src="history.js"></script>
-    <script src="staff-cost.js"></script>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        if (typeof initStaffCost === 'function') initStaffCost();
-    });
-</script>
+    <script src="print.js"></script>
+    <script src="draft-orders.js"></script>
+    <script src="fund-reconciliation.js"></script>
+    <!-- Manager Detail - click vào manager-grid items + tab quản lý -->
+    <script src="manager-detail.js"></script>
+    <!-- Inventory / Menu management -->
+    <script src="inventory-manager.js"></script>
+    <script src="expense.js"></script>
+    <!-- Telegram notification integration -->
+    <script src="telegram.js"></script>
+    
+    <!-- ESP32 Cash Drawer Audit -->
+    <script src="esp32_audit.js"></script>
+    
+    <!-- Chat nội bộ -->
+    <script src="messages.js"></script>
+    
+    <!-- Lunar calendar (giữ để có thông báo) -->
+    <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/dist/lunar.min.js"></script>
+    
+    <!-- Employees management - Modal quản lý nhân viên (thay thế staff logic trong auth.js, settings.js, manager-detail.js) -->
+    <script src="employees.js"></script>
+    
+    <!-- Settings + Đếm tiền nhanh -->
+    <script src="settings.js"></script>
+    
+    <!-- HEADER DƯỚI ĐÁY -->
+    <div class="header">
+        <div class="logo"><span class="logo-icon">☕</span><span class="logo-text" id="shopNameHeader">MILANO COFFEE 259</span></div>
+        <div class="header-center">
+            <span class="header-date" id="headerDate">--</span>
+        </div>
+        <div class="header-right">
+            <span class="staff-name">👤 Nhân viên</span>
+            <button class="chat-btn" id="chatBtn" onclick="toggleChatPopup()" title="Chat nội bộ">
+                💬 <span id="chatBadge" class="chat-badge" style="display:none;">0</span>
+            </button>
+            <span class="time" id="currentTime">--:--</span>
+        </div>
+    </div>
 </body>
 </html>

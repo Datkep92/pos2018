@@ -117,6 +117,11 @@ function deleteDraft(draftId) {
     // Xóa khỏi IndexedDB
     return _deleteDraftFromDB(draftId).then(function() {
         renderDraftBubbles();
+    }).catch(function(err) {
+        console.error('Lỗi xóa draft khỏi IndexedDB:', err);
+        if (typeof showToast === 'function') {
+            showToast('❌ Lỗi xóa đơn nháp!', 'error');
+        }
     });
 }
 
@@ -172,7 +177,7 @@ function renderDraftBubbles() {
             '<div class="draft-bubble-header">' +
                 '<span class="draft-bubble-icon">' + icon + '</span>' +
                 '<span class="draft-bubble-label">' + escapeHtml(d.label) + '</span>' +
-                '<button class="draft-bubble-close" onclick="event.stopPropagation(); deleteDraft(\'' + d.id + '\')">&times;</button>' +
+                '<button class="draft-bubble-close" onclick="event.stopPropagation(); deleteDraft(\'' + d.id + '\').catch(function(e){ console.error(e); })">&times;</button>' +
             '</div>' +
             '<div class="draft-bubble-body">' +
                 '<span class="draft-bubble-count">' + itemCount + ' món</span>' +
@@ -339,7 +344,7 @@ function confirmDraftOrder(draftId, options) {
                 tableName: null,
                 note: 'Đơn Grab (từ nháp)',
                 createdAt: now.toISOString(),
-                dateKey: now.toISOString().slice(0, 10)
+                dateKey: typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10)
             }).then(function() {
                 return deleteDraft(draftId);
             }).then(function() {
@@ -364,7 +369,7 @@ function confirmDraftOrder(draftId, options) {
                 tableName: null,
                 note: 'Mang đi (từ nháp) - ' + (paymentMethod === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'),
                 createdAt: now.toISOString(),
-                dateKey: now.toISOString().slice(0, 10)
+                dateKey: typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10)
             }).then(function() {
                 return deleteDraft(draftId);
             }).then(function() {

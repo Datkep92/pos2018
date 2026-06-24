@@ -140,7 +140,7 @@ function buildReceiptESC(data) {
         orderInfo = 'Ban: ' + (data.tableName ? removeAccent(data.tableName) : '???');
     } else if (data.orderType === 'takeaway') orderInfo = 'Mang di';
     else if (data.orderType === 'grab') orderInfo = 'Grab';
-    else if (data.orderType === 'debt_payment') orderInfo = 'Ghi no';
+    else if (data.orderType === 'debt_payment') orderInfo = 'Tra sau';
     else orderInfo = 'Tai cho';
     lines.push(orderInfo);
 
@@ -169,7 +169,7 @@ function buildReceiptESC(data) {
         for (var i = 0; i < data.items.length; i++) {
             var item = data.items[i];
             var name = removeAccent(item.name || '');
-            var qty = item.quantity || 1;
+            var qty = item.qty || item.quantity || 1;
             var price = item.price || 0;
             var total = qty * price;
 
@@ -197,7 +197,7 @@ function buildReceiptESC(data) {
         if (data.paymentMethod === 'cash') method = 'Tien mat';
         else if (data.paymentMethod === 'transfer') method = 'Chuyen khoan';
         else if (data.paymentMethod === 'grab') method = 'Grab';
-        else if (data.paymentMethod === 'debt') method = 'Ghi no';
+        else if (data.paymentMethod === 'debt') method = 'Tra sau';
         else method = data.paymentMethod;
         lines.push(padLeft('Thanh toan: ' + method, PW));
     }
@@ -340,3 +340,223 @@ function autoDetectPrinter() {
 }
 
 setTimeout(autoDetectPrinter, 1000);
+
+// ========== IN LỊCH SỬ NỢ (THERMAL) ==========
+function buildDebtHistoryReceipt(data) {
+    var lines = [];
+    // Reset
+    lines.push([0x1B, 0x40]);                 // ESC @
+    // Center + bold
+    lines.push([0x1B, 0x61, 0x01]);           // ESC a 1 (center)
+    lines.push([0x1B, 0x45, 0x01]);           // ESC E 1 (bold ON)
+    if (data.storeName) {
+        lines.push([0x1B, 0x21, 0x10]);       // ESC ! 0x10 (double height)
+        lines.push(removeAccent(data.storeName));
+        lines.push([0x1B, 0x21, 0x00]);       // ESC ! 0x00 (normal)
+    }
+    lines.push([0x1B, 0x45, 0x00]);           // ESC E 0 (bold OFF)
+    lines.push([0x1B, 0x61, 0x00]);           // ESC a 0 (left)
+    if (data.storeAddress) lines.push(removeAccent(data.storeAddress));
+    if (data.storePhone) lines.push('Tel: ' + data.storePhone);
+    lines.push('');
+    // Title
+    lines.push([0x1B, 0x61, 0x01]);           // center
+    lines.push([0x1B, 0x45, 0x01]);           // bold ON
+    lines.push('=== LICH SU TRA SAU ===');
+    lines.push([0x1B, 0x45, 0x00]);           // bold OFF
+    lines.push([0x1B, 0x61, 0x00]);           // left
+    if (data.customerName) lines.push('Khach: ' + removeAccent(data.customerName));
+    if (data.customerPhone) lines.push('SDT: ' + data.customerPhone);
+    if (data.printDate) lines.push('Ngay in: ' + data.printDate);
+    lines.push('');
+    // Separator
+    var sep = repeatChar('-', PW);
+    lines.push(sep);
+    // Header
+    lines.push([0x1B, 0x45, 0x01]); // bold ON
+    lines.push(padRight('Ngay', 12) + padRight('Loai', 10) + padLeft('So tien', 10) + padLeft('Con lai', 10));
+    lines.push([0x1B, 0x45, 0x00]); // bold OFF
+    // Items
+    if (data.history && data.history.length > 0) {
+        var runningBalance = data.initialBalance || 0;
+        for (var i = 0; i < data.history.length; i++) {
+            var h = data.history[i];
+            var dateStr = h.dateStr || '';
+            var typeLabel = '';
+            if (h.type === 'debt') typeLabel = 'Ghi tra sau';
+            else if (h.type === 'payment') typeLabel = 'Thanh toan';
+            else if (h.type === 'credit') typeLabel = 'Tra du';
+            else typeLabel = h.type || '';
+            var amountStr = formatPrice(Math.abs(h.amount));
+            if (h.type === 'debt') {
+                runningBalance += h.amount;
+                amountStr = '+' + amountStr;
+            } else {
+                runningBalance -= h.amount;
+                amountStr = '-' + amountStr;
+            }
+            if (dateStr.length > 12) dateStr = dateStr.substring(0, 10);
+            if (typeLabel.length > 10) typeLabel = typeLabel.substring(0, 8) + '.';
+            lines.push(padRight(dateStr, 12) + padRight(typeLabel, 10) + padLeft(amountStr, 10) + padLeft(formatPrice(runningBalance), 10));
+            // Neu co items, in chi tiet mon
+            if (h.items && h.items.length > 0) {
+                for (var j = 0; j < h.items.length; j++) {
+                    var it = h.items[j];
+                    var itName = removeAccent(it.name || '');
+                    if (itName.length > 20) itName = itName.substring(0, 17) + '...';
+                    var itLine = '  ' + itName + ' x' + (it.qty || 1) + ' = ' + formatPrice((it.price || 0) * (it.qty || 1));
+                    lines.push(itLine);
+                }
+            }
+        }
+    }
+    lines.push(sep);
+    // Summary
+    lines.push([0x1B, 0x45, 0x01]); // bold ON
+    lines.push(padLeft('Tong tra sau: ' + formatPrice(data.totalDebt || 0), PW));
+    if (data.creditBalance > 0) {
+        lines.push(padLeft('Tien du: ' + formatPrice(data.creditBalance), PW));
+        lines.push(padLeft('Con lai: ' + formatPrice(Math.max(0, (data.totalDebt || 0) - (data.creditBalance || 0))), PW));
+    }
+    lines.push([0x1B, 0x45, 0x00]); // bold OFF
+    lines.push('');
+    // Footer
+    lines.push([0x1B, 0x61, 0x01]); // center
+    lines.push([0x1B, 0x45, 0x01]); // bold ON
+    lines.push('Cam on quy khach!');
+    lines.push([0x1B, 0x45, 0x00]); // bold OFF
+    lines.push([0x1B, 0x61, 0x00]); // left
+    // Cut
+    lines.push([0x1B, 0x64, 0x04]); // ESC d 4 (4 line feeds)
+    lines.push([0x1D, 0x56, 0x00]); // GS V 0 (full cut)
+    return lines;
+}
+
+function printDebtHistoryThermal(data) {
+    var escLines = buildDebtHistoryReceipt(data);
+    var bytes = escLinesToBytes(escLines);
+    var base64Data = bytesToBase64(bytes);
+    if (typeof Android !== 'undefined' && typeof Android.printSunmi === 'function') {
+        var result = Android.printSunmi(base64Data);
+        if (result === 'ok') {
+            showToast('Da in lich su no', 'success');
+            return true;
+        } else {
+            showToast('In that bai: ' + result, 'error');
+            return false;
+        }
+    } else {
+        showToast('Khong co bridge Android', 'error');
+        return false;
+    }
+}
+
+// ========== XUẤT PDF LỊCH SỬ NỢ ==========
+function exportDebtHistoryPdf(data) {
+    // Tạo HTML để in / xuất PDF
+    var shopName = data.storeName || 'MILANO COFFEE 259';
+    var customerName = data.customerName || '';
+    var customerPhone = data.customerPhone || '';
+    var printDate = data.printDate || '';
+    
+    var rowsHtml = '';
+    if (data.history && data.history.length > 0) {
+        var runningBalance = data.initialBalance || 0;
+        for (var i = 0; i < data.history.length; i++) {
+            var h = data.history[i];
+            var dateStr = h.dateStr || '';
+            var typeLabel = '';
+            var amountColor = '';
+            if (h.type === 'debt') {
+                typeLabel = 'Ghi trả sau';
+                amountColor = '#ef4444';
+                runningBalance += h.amount;
+            } else if (h.type === 'payment') {
+                typeLabel = 'Thanh toán';
+                amountColor = '#16a34a';
+                runningBalance -= h.amount;
+            } else if (h.type === 'credit') {
+                typeLabel = 'Trả dư';
+                amountColor = '#f59e0b';
+                runningBalance -= h.amount;
+            }
+            var amountStr = formatPrice(Math.abs(h.amount));
+            var noteStr = h.note ? escapeHtml(h.note) : '';
+            
+            rowsHtml += '<tr>';
+            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">' + dateStr + '</td>';
+            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">' + typeLabel + '</td>';
+            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;color:' + amountColor + ';text-align:right;">' + amountStr + '</td>';
+            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right;">' + formatPrice(runningBalance) + '</td>';
+            rowsHtml += '</tr>';
+            
+            // Items detail
+            if (h.items && h.items.length > 0) {
+                for (var j = 0; j < h.items.length; j++) {
+                    var it = h.items[j];
+                    var itName = escapeHtml(it.name || '');
+                    var itTotal = formatPrice((it.price || 0) * (it.qty || 1));
+                    rowsHtml += '<tr style="background:#f8fafc;">';
+                    rowsHtml += '<td colspan="4" style="padding:2px 8px 2px 24px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#64748b;">';
+                    rowsHtml += '• ' + itName + ' <span style="color:#94a3b8;">x' + (it.qty || 1) + '</span> = <span style="color:#334155;">' + itTotal + '</span>';
+                    rowsHtml += '</td></tr>';
+                }
+            }
+        }
+    }
+    
+    var totalDebt = data.totalDebt || 0;
+    var creditBalance = data.creditBalance || 0;
+    var remaining = Math.max(0, totalDebt - creditBalance);
+    
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8">';
+    html += '<title>Lich su tra sau - ' + customerName + '</title>';
+    html += '<style>';
+    html += 'body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 20px; color: #1e293b; }';
+    html += 'h1 { font-size: 18px; text-align: center; margin: 0 0 4px 0; color: #1e293b; }';
+    html += 'h2 { font-size: 15px; text-align: center; margin: 0 0 4px 0; color: #475569; font-weight: normal; }';
+    html += '.info { text-align: center; font-size: 13px; color: #64748b; margin-bottom: 16px; }';
+    html += 'table { width: 100%; border-collapse: collapse; margin-top: 8px; }';
+    html += 'th { background: #1e293b; color: #fff; padding: 8px; font-size: 13px; text-align: left; }';
+    html += 'th.right { text-align: right; }';
+    html += '.summary { margin-top: 12px; text-align: right; font-size: 14px; }';
+    html += '.summary-item { margin: 4px 0; }';
+    html += '.summary-total { font-weight: bold; font-size: 16px; color: #ef4444; }';
+    html += '.footer { text-align: center; margin-top: 24px; font-size: 12px; color: #94a3b8; }';
+    html += '@media print { body { margin: 10px; } }';
+    html += '</style></head><body>';
+    html += '<h1>' + escapeHtml(shopName) + '</h1>';
+    html += '<h2>LỊCH SỬ TRẢ SAU</h2>';
+    html += '<div class="info">';
+    html += 'Khách: <strong>' + escapeHtml(customerName) + '</strong>';
+    if (customerPhone) html += ' | SDT: ' + escapeHtml(customerPhone);
+    html += '<br>Ngày in: ' + printDate;
+    html += '</div>';
+    html += '<table><thead><tr>';
+    html += '<th>Ngày</th><th>Loại</th><th class="right">Số tiền</th><th class="right">Còn lại</th>';
+    html += '</tr></thead><tbody>';
+    html += rowsHtml;
+    html += '</tbody></table>';
+    html += '<div class="summary">';
+    html += '<div class="summary-item">Tổng trả sau: <strong>' + formatPrice(totalDebt) + 'đ</strong></div>';
+    if (creditBalance > 0) {
+        html += '<div class="summary-item">Tiền dư: <strong style="color:#16a34a;">' + formatPrice(creditBalance) + 'đ</strong></div>';
+        html += '<div class="summary-item summary-total">Còn lại: ' + formatPrice(remaining) + 'đ</div>';
+    }
+    html += '</div>';
+    html += '<div class="footer">Phần mềm quản lý bán hàng MILANO COFFEE 259</div>';
+    html += '</body></html>';
+    
+    // Mở cửa sổ in mới
+    var printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (printWindow) {
+        printWindow.document.write(html);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(function() {
+            printWindow.print();
+        }, 500);
+    } else {
+        showToast('Trình duyệt đã chặn cửa sổ popup!', 'error');
+    }
+}

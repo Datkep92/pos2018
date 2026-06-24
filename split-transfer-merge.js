@@ -63,7 +63,7 @@ function confirmSplitPaymentWithMethod(method, customer) {
                     var historyPromise;
                     if (method === 'debt') {
                         // Ghi nợ: cộng nợ cho khách
-                        addCustomerDebt(customer.id, splitTotal, 'Chia hóa đơn tại bàn ' + table.name).then(function() {
+                        addCustomerDebt(customer.id, splitTotal, 'Chia hóa đơn tại bàn ' + table.name, splitItems).then(function() {
                             historyPromise = addHistory({
                                 type: 'debt_payment',
                                 amount: splitTotal,
@@ -464,15 +464,10 @@ function showDeleteTableConfirm(tableId) {
             return;
         }
         
-        if (isTableLocked(table)) {
-            // Bàn bị khóa: yêu cầu mật khẩu
-            closeModal('deleteTableModal');
-            requirePassword('xóa bàn (bàn đang bị khóa)', function() {
-                document.getElementById('deleteTableModal').style.display = 'flex';
-            });
-        } else {
-            document.getElementById('deleteTableModal').style.display = 'flex';
-        }
+        // FIX: Bỏ kiểm tra isTableLocked ở đây
+        // Bàn khóa đã được xử lý ở tables.js (dòng 417) - gọi requirePassword trước khi gọi hàm này
+        // Nếu kiểm tra lại ở đây sẽ gây ra nhập mật khẩu 2 lần
+        document.getElementById('deleteTableModal').style.display = 'flex';
     });
 }
 
@@ -480,15 +475,9 @@ function confirmDeleteTable() {
     if (!pendingDeleteTableId) return;
     DB.get('tables', String(pendingDeleteTableId)).then(function(table) {
         if (!table) return;
-        // Kiểm tra lại khóa bàn trước khi xóa (phòng trường hợp đã mở modal lâu)
-        if (isTableLocked(table)) {
-            closeModal('deleteTableModal');
-            requirePassword('xóa bàn (bàn đang bị khóa)', function() {
-                // Sau khi nhập đúng mật khẩu, thực hiện xóa
-                doDeleteTable(table);
-            });
-            return;
-        }
+        // FIX: Bỏ kiểm tra isTableLocked ở đây vì đã được kiểm tra trong showDeleteTableConfirm
+        // Nếu bàn locked, showDeleteTableConfirm đã yêu cầu mật khẩu trước khi hiển thị modal
+        // Kiểm tra lại ở đây chỉ gây ra nhập mật khẩu 2 lần
         doDeleteTable(table);
     });
 }
@@ -504,7 +493,10 @@ function doDeleteTable(table) {
             tableId: table.id,
             tableName: table.name,
             items: itemsSnapshot,
-            customerName: table.customerName || null
+            customerName: table.customerName || null,
+            createdByName: table.createdByName || '',
+            startTime: table.startTime || null,
+            total: table.total || 0
         };
         logDelete('delete_table', details);
         

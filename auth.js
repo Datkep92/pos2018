@@ -162,23 +162,35 @@ function applyRoleBasedUI(user) {
     // Cập nhật tên nhân viên trên header
     var staffNameEl = document.querySelector('.staff-name');
     if (staffNameEl) {
-        var roleText = user.role === 'admin' ? '🛡️ Admin' : '👤 Nhân viên';
-        staffNameEl.innerHTML = roleText + ' - ' + escapeHtml(user.displayName) +
-            ' <span class="logout-link" onclick="handleLogout()" style="font-size:11px;color:#f97316;cursor:pointer;margin-left:8px;">[Đăng xuất]</span>';
+        var roleIcon = user.role === 'admin' ? '🛡️' : '👤';
+        staffNameEl.innerHTML = roleIcon + ' ' + escapeHtml(user.displayName);
+        staffNameEl.style.cursor = 'pointer';
+        staffNameEl.title = 'Đăng xuất';
+        staffNameEl.onclick = function() {
+            if (confirm('Đăng xuất?')) handleLogout();
+        };
     }
     
-    // Ẩn/hiện tab Quản lý, Nhân viên và Menu-Tồn kho dựa trên role
+    // Ẩn/hiện tab Quản lý, Nhân viên, Menu-Tồn kho dựa trên role
+    // Tab Báo cáo và Chi phí hiển thị cho tất cả (staff và admin)
     var managerTab = document.querySelector('.tab-btn[data-tab="manager"]');
     var staffTab = document.querySelector('.tab-btn[data-tab="staff"]');
     var inventoryTab = document.querySelector('.tab-btn[data-tab="inventory"]');
+    var reportTab = document.querySelector('.tab-btn[data-tab="report"]');
+    var costTab = document.querySelector('.tab-btn[data-tab="cost"]');
     if (user.role === 'admin') {
         if (managerTab) managerTab.style.display = '';
         if (staffTab) staffTab.style.display = '';
         if (inventoryTab) inventoryTab.style.display = '';
+        if (reportTab) reportTab.style.display = '';
+        if (costTab) costTab.style.display = '';
     } else {
         if (managerTab) managerTab.style.display = 'none';
         if (staffTab) staffTab.style.display = 'none';
         if (inventoryTab) inventoryTab.style.display = 'none';
+        // Staff vẫn thấy tab Báo cáo và Chi phí
+        if (reportTab) reportTab.style.display = '';
+        if (costTab) costTab.style.display = '';
     }
     
     // Hiển thị mã POS trong tab nhân viên
@@ -229,132 +241,28 @@ function reloadAppData() {
 }
 
 // ========== QUẢN LÝ NHÂN VIÊN (ADMIN) ==========
+// Đã chuyển hoàn toàn sang employees.js
+// Các hàm dưới đây là fallback tối thiểu, employees.js sẽ ghi đè khi load
 
 function openStaffManager() {
-    if (!DB.isAdmin()) {
-        showToast('Chỉ admin mới có thể quản lý nhân viên', 'warning');
-        return;
+    // employees.js sẽ ghi đè hàm này khi load
+    // Fallback: mở modal từ employees.js nếu có
+    if (typeof window.openStaffManager === 'function') {
+        window.openStaffManager();
+    } else {
+        showToast('⚠️ Chưa sẵn sàng (employees.js chưa load)', 'warning');
     }
-    
-    var modal = document.getElementById('staffManagerModal');
-    if (!modal) return;
-    
-    // Load danh sách nhân viên
-    DB.getStaffs().then(function(staffs) {
-        renderStaffList(staffs);
-        openBottomSheet('staffManagerModal');
-    }).catch(function(err) {
-        showToast('Lỗi tải danh sách nhân viên', 'error');
-    });
 }
 
 function renderStaffList(staffs) {
-    var container = document.getElementById('staffList');
-    if (!container) return;
-    
-    if (!staffs || staffs.length === 0) {
-        container.innerHTML = '<div class="empty-text">Chưa có nhân viên nào</div>';
-        return;
-    }
-    
-    var html = '';
-    for (var i = 0; i < staffs.length; i++) {
-        var s = staffs[i];
-        var roleLabel = s.role === 'admin' ? '🛡️ Admin' : '👤 Nhân viên';
-        var createdDate = '';
-        if (s.createdAt) {
-            try {
-                createdDate = formatDateDisplay(new Date(s.createdAt).toISOString().slice(0, 10));
-            } catch(e) {}
-        }
-        html += '<div class="staff-item">' +
-            '<div class="staff-info">' +
-                '<div class="staff-name-display"><strong>' + escapeHtml(s.displayName || s.username) + '</strong></div>' +
-                '<div class="staff-username">@' + escapeHtml(s.username) + '</div>' +
-                '<div class="staff-role">' + roleLabel + '</div>' +
-            '</div>' +
-            '<div class="staff-actions">' +
-                (s.role !== 'admin' ? '<button class="btn-small btn-danger" onclick="deleteStaff(\'' + s.id + '\')">Xóa</button>' : '') +
-            '</div>' +
-        '</div>';
-    }
-    container.innerHTML = html;
+    // employees.js sẽ ghi đè
 }
 
-function showAddStaffForm() {
-    var form = document.getElementById('addStaffForm');
-    if (form) form.style.display = 'block';
-}
+function showAddStaffForm() {}
+function hideAddStaffForm() {}
+function handleAddStaff() {}
 
-function hideAddStaffForm() {
-    var form = document.getElementById('addStaffForm');
-    if (form) form.style.display = 'none';
-    // Clear form
-    var username = document.getElementById('newStaffUsername');
-    var password = document.getElementById('newStaffPassword');
-    var displayName = document.getElementById('newStaffDisplayName');
-    if (username) username.value = '';
-    if (password) password.value = '';
-    if (displayName) displayName.value = '';
-}
-
-function handleAddStaff() {
-    var username = document.getElementById('newStaffUsername');
-    var password = document.getElementById('newStaffPassword');
-    var displayName = document.getElementById('newStaffDisplayName');
-    var errorEl = document.getElementById('addStaffError');
-    
-    if (!username || !password) return;
-    
-    var user = username.value.trim();
-    var pass = password.value;
-    var name = displayName ? displayName.value.trim() : user;
-    
-    if (!user || !pass) {
-        if (errorEl) errorEl.innerText = 'Vui lòng nhập tên đăng nhập và mật khẩu';
-        return;
-    }
-    if (pass.length < 4) {
-        if (errorEl) errorEl.innerText = 'Mật khẩu phải có ít nhất 4 ký tự';
-        return;
-    }
-    
-    if (errorEl) errorEl.innerText = '';
-    
-    DB.createStaff({
-        username: user,
-        password: pass,
-        displayName: name,
-        role: 'staff'
-    }).then(function() {
-        showToast('Thêm nhân viên thành công', 'success');
-        hideAddStaffForm();
-        // Reload danh sách
-        return DB.getStaffs();
-    }).then(function(staffs) {
-        renderStaffList(staffs);
-    }).catch(function(err) {
-        if (errorEl) errorEl.innerText = err.message || 'Thêm nhân viên thất bại';
-    });
-}
-
-function deleteStaff(staffId) {
-    if (!staffId) return;
-    if (!confirm('Bạn có chắc muốn xóa nhân viên này?')) return;
-    
-    var ref = firebase.database().ref(DB.getShopId() + '/staffs/' + staffId);
-    ref.remove().then(function() {
-        showToast('Đã xóa nhân viên', 'success');
-        // Reload danh sách
-        return DB.getStaffs();
-    }).then(function(staffs) {
-        renderStaffList(staffs);
-    }).catch(function(err) {
-        showToast('Lỗi xóa nhân viên', 'error');
-    });
-}
-
-// Export global
+// Export global - employees.js sẽ ghi đè các hàm này khi load
 window.initAuth = initAuth;
 window.handleLogin = handleLogin;
 window.handleRegister = handleRegister;
@@ -365,4 +273,3 @@ window.openStaffManager = openStaffManager;
 window.showAddStaffForm = showAddStaffForm;
 window.hideAddStaffForm = hideAddStaffForm;
 window.handleAddStaff = handleAddStaff;
-window.deleteStaff = deleteStaff;

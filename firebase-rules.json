@@ -1,0 +1,71 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "$shopId": {
+      "info": {
+        ".indexOn": ["_version"]
+      },
+      "transactions": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "daily_balances": {
+        ".indexOn": ["_version"]
+      },
+      "cost_transactions": {
+        ".indexOn": ["_version"]
+      },
+      "inventory_transactions": {
+        ".indexOn": ["_version"]
+      },
+      "ingredient_transactions": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "manager_cash_pickups": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "employee_attendance": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "employee_salaries": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "delete_logs": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "drawer_sessions": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "notifications": {
+        ".indexOn": ["_version", "createdAt"]
+      },
+      "tables": {
+        ".indexOn": ["_version"]
+      },
+      "customers": {
+        ".indexOn": ["_version"]
+      },
+      "menu": {
+        ".indexOn": ["_version"]
+      },
+      "menu_categories": {
+        ".indexOn": ["_version"]
+      },
+      "ingredients": {
+        ".indexOn": ["_version"]
+      },
+      "staffs": {
+        ".indexOn": ["_version"]
+      },
+      "cost_categories": {
+        ".indexOn": ["_version"]
+      },
+      "messages": {
+        ".indexOn": ["_version"]
+      },
+      "drawer_telegram_queue": {
+        ".indexOn": ["timestamp"]
+      }
+    }
+  }
+}

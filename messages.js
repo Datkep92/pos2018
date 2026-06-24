@@ -6,9 +6,16 @@
 // ========== BIẾN GLOBAL ==========
 var CHAT_SOUND_ENABLED = true;
 var CHAT_SOUND_KEY = 'chat_sound_enabled';
+var CHAT_AUTO_POPUP_KEY = 'chat_auto_popup_enabled';
+var CHAT_LOCK_KEY = 'chat_staff_locked';
 var _chatPopupVisible = false;
 var _lastMessageCount = 0;
 var _chatInitialized = false;
+var _chatPollInterval = null;
+
+// Biến lưu trạng thái khóa chat từ Firebase (đồng bộ realtime giữa các thiết bị)
+var _chatLockedState = false;
+var _chatLockListener = null;
 
 // Hàng đợi âm thanh
 var _audioQueue = [];
@@ -30,7 +37,155 @@ function initChat() {
     // Cập nhật badge
     updateChatBadge();
     
+    // Polling kiểm tra tin nhắn mới mỗi 5 giây
+    if (_chatPollInterval) {
+        clearInterval(_chatPollInterval);
+    }
+    _chatPollInterval = setInterval(checkNewMessages, 5000);
+    
+    // Đăng ký Firebase realtime listener cho trạng thái khóa chat
+    _initChatLockListener();
+    
+    // Đồng bộ trạng thái khóa chat vào UI (gọi nhiều lần để đảm bảo user đã load)
+    _syncChatLockUI();
+    // Nếu user chưa kịp load, thử lại sau
+    setTimeout(_syncChatLockUI, 500);
+    setTimeout(_syncChatLockUI, 1500);
+    
     console.log('💬 Chat initialized');
+}
+
+// ========== KIỂM TRA / ĐỒNG BỘ KHÓA CHAT ==========
+// Lấy shopId từ localStorage (giống db.js)
+function _getChatShopId() {
+    try {
+        return localStorage.getItem('current_shop_id') || 'shop_default';
+    } catch(e) {
+        return 'shop_default';
+    }
+}
+
+// Kiểm tra trạng thái khóa chat
+// Ưu tiên đọc từ biến _chatLockedState (đồng bộ từ Firebase realtime)
+// Fallback về localStorage nếu chưa có Firebase data
+function isChatLocked() {
+    // Nếu đã có Firebase listener, dùng biến global
+    if (_chatLockListener) {
+        return _chatLockedState;
+    }
+    // Fallback: đọc từ localStorage
+    try {
+        var locked = localStorage.getItem(CHAT_LOCK_KEY);
+        return locked === 'true';
+    } catch(e) {
+        return false;
+    }
+}
+
+// Đăng ký Firebase realtime listener cho trạng thái khóa chat
+// Tất cả client (admin + staff) đều nhận cập nhật realtime
+function _initChatLockListener() {
+    // Hủy listener cũ nếu có
+    if (_chatLockListener) {
+        _chatLockListener.off();
+        _chatLockListener = null;
+    }
+    
+    try {
+        var shopId = _getChatShopId();
+        var lockRef = firebase.database().ref(shopId + '/config/chat_staff_locked');
+        
+        // Đọc giá trị hiện tại một lần (đảm bảo UI đúng ngay lập tức)
+        lockRef.once('value').then(function(snapshot) {
+            var val = snapshot.val();
+            _chatLockedState = val === true;
+            try {
+                localStorage.setItem(CHAT_LOCK_KEY, _chatLockedState ? 'true' : 'false');
+            } catch(e) {}
+            _syncChatLockUI();
+        }).catch(function() {
+            // Fallback nếu không đọc được Firebase
+            try {
+                var saved = localStorage.getItem(CHAT_LOCK_KEY);
+                _chatLockedState = saved === 'true';
+            } catch(e) {}
+            _syncChatLockUI();
+        });
+        
+        // Đăng ký realtime listener - tất cả client đều nhận cập nhật ngay lập tức
+        _chatLockListener = lockRef;
+        lockRef.on('value', function(snapshot) {
+            var val = snapshot.val();
+            _chatLockedState = val === true;
+            // Đồng bộ xuống localStorage để có fallback
+            try {
+                localStorage.setItem(CHAT_LOCK_KEY, _chatLockedState ? 'true' : 'false');
+            } catch(e) {}
+            _syncChatLockUI();
+        });
+    } catch(e) {
+        console.warn('Chat lock Firebase listener failed:', e);
+        // Fallback: đọc từ localStorage
+        try {
+            var saved = localStorage.getItem(CHAT_LOCK_KEY);
+            _chatLockedState = saved === 'true';
+        } catch(e) {}
+        _syncChatLockUI();
+    }
+}
+
+// Admin bật/tắt khóa chat - ghi lên Firebase để đồng bộ realtime
+function toggleChatLock(locked) {
+    // Cập nhật biến local ngay lập tức
+    _chatLockedState = locked;
+    
+    // Ghi xuống localStorage làm fallback
+    try {
+        localStorage.setItem(CHAT_LOCK_KEY, locked ? 'true' : 'false');
+    } catch(e) {}
+    
+    // Ghi lên Firebase để đồng bộ realtime với tất cả client
+    try {
+        var shopId = _getChatShopId();
+        firebase.database().ref(shopId + '/config/chat_staff_locked').set(locked);
+    } catch(e) {
+        console.warn('Chat lock Firebase write failed:', e);
+    }
+    
+    // Đồng bộ UI toggle trong settings nếu có
+    var lockToggle = document.getElementById('chatLockToggle');
+    if (lockToggle) {
+        lockToggle.checked = locked;
+    }
+    var lockLabel = document.getElementById('chatLockStatusLabel');
+    if (lockLabel) {
+        lockLabel.textContent = locked ? '🔒 Đã khóa' : '🔓 Đã mở';
+    }
+    
+    _syncChatLockUI();
+    
+    showToast(locked ? '🔒 Đã khóa chat nhân viên' : '🔓 Đã mở khóa chat nhân viên', 'success');
+}
+
+function _syncChatLockUI() {
+    var locked = isChatLocked();
+    var inputRow = document.querySelector('.chat-input-row');
+    var lockMsg = document.getElementById('chatLockedMessage');
+    
+    if (!inputRow) return;
+    
+    var currentUser = DB.getCurrentUser();
+    var isAdmin = currentUser && currentUser.role === 'admin';
+    
+    if (locked && !isAdmin) {
+        // Staff bị khóa: ẩn hoàn toàn ô nhập + nút gửi, hiện thông báo
+        inputRow.style.display = 'none';
+        if (lockMsg) lockMsg.style.display = 'block';
+    } else {
+        // Admin hoặc chưa khóa: hiện ô nhập, ẩn thông báo
+        inputRow.style.display = 'flex';
+        if (lockMsg) lockMsg.style.display = 'none';
+    }
 }
 
 // ========== ÂM THANH THÔNG BÁO ==========
@@ -90,6 +245,8 @@ function toggleChatPopup() {
         renderChatMessages();
         // Đánh dấu tất cả đã đọc
         markAllAsRead();
+        // Đồng bộ trạng thái khóa chat
+        _syncChatLockUI();
     } else {
         popup.style.display = 'none';
         _chatPopupVisible = false;
@@ -158,6 +315,12 @@ function _renderMessageHtml(msg, isAdmin, currentUser) {
     html += '<div class="chat-msg-header">';
     html += '<span class="chat-msg-from">' + roleIcon + escapeHtml(fromName) + '</span>';
     html += '<span class="chat-msg-time">' + priorityIcon + timeStr + '</span>';
+    
+    // Nút xóa tin nhắn (chỉ admin)
+    if (isAdmin) {
+        html += '<button class="chat-msg-delete-btn" onclick="deleteChatMessage(\'' + escapeJsString(msg.id) + '\', event)" title="Xóa tin nhắn">🗑️</button>';
+    }
+    
     html += '</div>';
     
     // Nội dung
@@ -188,6 +351,7 @@ function _renderMessageHtml(msg, isAdmin, currentUser) {
     // - Staff chưa reply
     // - Message còn active
     // - Người gửi không phải là chính mình
+    // Khi khóa chat: staff vẫn được xác nhận/từ chối/trả lời, chỉ không gửi được tin nhắn mới
     var canReply = !hasReplied && status === 'active';
     if (currentUser && msg.from) {
         if (msg.from.id === currentUser.id) canReply = false;
@@ -236,13 +400,19 @@ function sendChatMessage() {
     var prioritySelect = document.getElementById('chatPrioritySelect');
     if (!input) return;
     
+    // Kiểm tra khóa chat
+    var currentUser = DB.getCurrentUser();
+    if (currentUser && currentUser.role !== 'admin' && isChatLocked()) {
+        showToast('🔒 Chat đã bị khóa bởi quản lý! Bạn chỉ có thể xem tin nhắn.', 'warning');
+        return;
+    }
+    
     var content = input.value.trim();
     if (!content) {
         showToast('Vui lòng nhập nội dung tin nhắn!', 'warning');
         return;
     }
     
-    var currentUser = DB.getCurrentUser();
     if (!currentUser) {
         showToast('Bạn cần đăng nhập để gửi tin nhắn!', 'warning');
         return;
@@ -276,12 +446,91 @@ function sendChatMessage() {
         if (_chatPopupVisible) {
             renderChatMessages();
         }
+        // Gửi thông báo Telegram khi có chat mới
+        _notifyChatToTelegram(msgData);
     }).catch(function(err) {
         showToast('❌ Lỗi gửi tin nhắn: ' + (err.message || 'unknown'), 'error');
     });
 }
 
+// ========== XÓA TIN NHẮN (ADMIN) ==========
+function deleteChatMessage(msgId, event) {
+    if (!msgId) return;
+    
+    var currentUser = DB.getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+        showToast('❌ Chỉ admin mới có quyền xóa tin nhắn!', 'error');
+        return;
+    }
+    
+    if (!confirm('🗑️ Xóa tin nhắn này?\n\nHành động này không thể hoàn tác.')) return;
+    
+    // Ngăn sự kiện click lan ra
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    DB.remove('messages', msgId).then(function() {
+        showToast('✅ Đã xóa tin nhắn', 'success');
+        if (_chatPopupVisible) {
+            renderChatMessages();
+        }
+        updateChatBadge();
+    }).catch(function(err) {
+        showToast('❌ Lỗi xóa tin nhắn: ' + (err.message || 'unknown'), 'error');
+    });
+}
+
+// ========== XÓA TIN NHẮN CŨ (ADMIN) ==========
+function clearOldChatMessages() {
+    var currentUser = DB.getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+        showToast('❌ Chỉ admin mới có quyền xóa tin nhắn cũ!', 'error');
+        return;
+    }
+    
+    if (!confirm('🗑️ Xóa tất cả tin nhắn > 30 ngày?\n\nHành động này không thể hoàn tác.')) return;
+    
+    var cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 ngày
+    
+    DB.getAll('messages').then(function(messages) {
+        if (!messages || messages.length === 0) {
+            showToast('ℹ️ Không có tin nhắn nào để xóa', 'info');
+            return;
+        }
+        
+        var deleted = 0;
+        var promises = [];
+        
+        for (var i = 0; i < messages.length; i++) {
+            var msg = messages[i];
+            if (msg.createdAt && msg.createdAt < cutoff) {
+                promises.push(DB.remove('messages', msg.id));
+                deleted++;
+            }
+        }
+        
+        if (deleted === 0) {
+            showToast('ℹ️ Không có tin nhắn nào cũ hơn 30 ngày', 'info');
+            return;
+        }
+        
+        Promise.all(promises).then(function() {
+            showToast('✅ Đã xóa ' + deleted + ' tin nhắn cũ', 'success');
+            if (_chatPopupVisible) {
+                renderChatMessages();
+            }
+            updateChatBadge();
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi xóa tin nhắn cũ: ' + (err.message || 'unknown'), 'error');
+        });
+    }).catch(function(err) {
+        showToast('❌ Lỗi khi tải tin nhắn: ' + (err.message || 'unknown'), 'error');
+    });
+}
+
 // ========== TRẢ LỜI / XÁC NHẬN / TỪ CHỐI ==========
+// Khi khóa chat: staff vẫn được xác nhận/từ chối/trả lời tin nhắn
 function replyToMessage(msgId, type, defaultContent) {
     if (!msgId) return;
     
@@ -349,6 +598,7 @@ function sendReply(msgId) {
     var input = document.getElementById('replyText_' + msgId);
     if (!input) return;
     
+    // Khi khóa chat: staff vẫn được trả lời tin nhắn
     var content = input.value.trim();
     if (!content) {
         showToast('Vui lòng nhập nội dung trả lời!', 'warning');
@@ -430,6 +680,9 @@ function markAllAsRead() {
 var _lastCheckedMsgId = null;
 
 function checkNewMessages() {
+    // Đồng bộ trạng thái khóa chat mỗi lần poll
+    _syncChatLockUI();
+    
     DB.getAll('messages').then(function(messages) {
         if (!messages || messages.length === 0) return;
         
@@ -459,8 +712,21 @@ function checkNewMessages() {
         // Phát âm thanh
         _playNotificationSound(latestMsg.priority || 'normal');
         
-        // Nếu là urgent và popup chưa mở, hiển thị popup tự động
-        if (latestMsg.priority === 'urgent' && !_chatPopupVisible) {
+        // Kiểm tra cài đặt auto popup
+        var autoPopupEnabled = true;
+        try {
+            var saved = localStorage.getItem(CHAT_AUTO_POPUP_KEY);
+            if (saved !== null) {
+                autoPopupEnabled = saved === 'true';
+            }
+        } catch(e) {}
+        
+        // Hiển thị popup tự động nếu:
+        // - Popup chưa mở
+        // - Auto popup được bật trong settings
+        // - Tin nhắn từ admin (hoặc là urgent)
+        var isFromAdmin = latestMsg.from && latestMsg.from.role === 'admin';
+        if (autoPopupEnabled && !_chatPopupVisible && (isFromAdmin || latestMsg.priority === 'urgent')) {
             showAutoChatPopup(latestMsg);
         }
         
@@ -483,9 +749,19 @@ function showAutoChatPopup(msg) {
     popup.className = 'auto-chat-popup';
     
     var fromName = msg.from ? (msg.from.name || msg.from.id || 'Unknown') : 'Unknown';
-    var priorityText = msg.priority === 'urgent' ? '🔴 URGENT' : '💬 Tin nhắn mới';
+    var isFromAdmin = msg.from && msg.from.role === 'admin';
+    var priorityText = msg.priority === 'urgent' ? '🔴 URGENT' : (isFromAdmin ? '👑 Admin' : '💬 Tin nhắn mới');
     
-    popup.innerHTML = '<div class="auto-chat-header">' +
+    // Màu viền theo priority
+    if (msg.priority === 'urgent') {
+        popup.style.borderColor = '#ef4444';
+    } else if (msg.priority === 'important') {
+        popup.style.borderColor = '#f59e0b';
+    } else {
+        popup.style.borderColor = '#f97316';
+    }
+    
+    popup.innerHTML = '<div class="auto-chat-header" style="background:' + (msg.priority === 'urgent' ? '#ef4444' : (msg.priority === 'important' ? '#f59e0b' : '#f97316')) + ';">' +
         '<span>' + priorityText + ' - ' + escapeHtml(fromName) + '</span>' +
         '<button class="auto-chat-close" onclick="closeAutoChatPopup()">✕</button>' +
         '</div>' +
@@ -514,6 +790,7 @@ function closeAutoChatPopup() {
 }
 
 function replyAndCloseAutoPopup(msgId, type) {
+    // Khi khóa chat: staff vẫn được xác nhận/từ chối từ auto popup
     replyToMessage(msgId, type, type === 'confirm' ? '✅ Đã xác nhận' : '❌ Từ chối');
     closeAutoChatPopup();
 }
@@ -545,6 +822,29 @@ function toggleChatSound(enabled) {
     }
     
     showToast(enabled ? '🔊 Đã bật âm thanh chat' : '🔇 Đã tắt âm thanh chat', 'success');
+}
+
+// Wrapper cho HTML onclick (settings gọi toggleChatSoundSetting)
+function toggleChatSoundSetting(checked) {
+    toggleChatSound(checked);
+}
+
+function toggleChatAutoPopup(enabled) {
+    try {
+        localStorage.setItem(CHAT_AUTO_POPUP_KEY, enabled ? 'true' : 'false');
+    } catch(e) {}
+    
+    // Đồng bộ UI toggle trong settings nếu có
+    var autoToggle = document.getElementById('chatAutoPopupToggle');
+    if (autoToggle) {
+        autoToggle.checked = enabled;
+    }
+    var autoLabel = document.getElementById('chatAutoPopupStatusLabel');
+    if (autoLabel) {
+        autoLabel.textContent = enabled ? '✅ Đang bật' : '⏸️ Đã tắt';
+    }
+    
+    showToast(enabled ? '✅ Đã bật tự động hiện popup' : '⏸️ Đã tắt tự động hiện popup', 'success');
 }
 
 // ========== UTILITY ==========
@@ -586,14 +886,18 @@ function formatChatTime(timestamp) {
     }
 }
 
-function escapeHtml(str) {
-    if (typeof str !== 'string') return '';
-    return str
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
-        .replace(/'/g, '&#039;');
+// Sử dụng escapeHtml từ settings.js (global) - tránh duplicate
+// Đã định nghĩa trong settings.js, nếu chưa có thì fallback
+if (typeof window.escapeHtml !== 'function') {
+    window.escapeHtml = function(str) {
+        if (typeof str !== 'string') return '';
+        return str
+            .replace(/&/g, '&')
+            .replace(/</g, '<')
+            .replace(/>/g, '>')
+            .replace(/"/g, '"')
+            .replace(/'/g, '&#039;');
+    };
 }
 
 function escapeJsString(str) {
@@ -604,4 +908,45 @@ function escapeJsString(str) {
         .replace(/"/g, '\\"')
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '\\r');
+}
+
+// ========== GỬI THÔNG BÁO TELEGRAM KHI CÓ CHAT MỚI ==========
+function _notifyChatToTelegram(msgData) {
+    if (!msgData || !msgData.from) return;
+
+    // Chỉ gửi Telegram nếu có cấu hình
+    var token = localStorage.getItem('telegram_bot_token');
+    var chatId = localStorage.getItem('telegram_chat_id');
+    if (!token || !chatId) return;
+
+    var senderName = msgData.from.name || 'Nhân viên';
+    var content = msgData.content || '';
+    var priority = msgData.priority || 'normal';
+    var time = new Date().toLocaleString('vi-VN', {
+        hour: '2-digit', minute: '2-digit',
+        day: '2-digit', month: '2-digit'
+    });
+
+    var priorityIcon = priority === 'urgent' ? '🔴' : (priority === 'important' ? '🟡' : '🔵');
+    var message = '<b>💬 Chat nội bộ</b>\n' +
+        priorityIcon + ' <b>' + escapeHtml(senderName) + '</b>\n' +
+        '📝 ' + escapeHtml(content) + '\n' +
+        '🕐 ' + time;
+
+    var url = 'https://api.telegram.org/bot' + token + '/sendMessage';
+    var params = {
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'HTML'
+    };
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status !== 200) {
+            console.warn('Telegram chat notify failed:', xhr.status);
+        }
+    };
+    xhr.send(JSON.stringify(params));
 }
