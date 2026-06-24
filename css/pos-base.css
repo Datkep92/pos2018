@@ -456,6 +456,22 @@ body {
     font-size: 10px;
     color: #64748b;
 }
+.chat-msg-delete-btn {
+    background: none;
+    border: none;
+    color: #64748b;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+    line-height: 1;
+    margin-left: auto;
+}
+.chat-msg-delete-btn:hover {
+    opacity: 1;
+    color: #ef4444;
+}
 .chat-msg-content {
     font-size: 12px;
     color: #e2e8f0;
@@ -641,6 +657,19 @@ body {
     transform: scale(0.95);
 }
 
+/* Chat locked message */
+.chat-locked-message {
+    font-size: 11px;
+    color: #fbbf24;
+    text-align: center;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    background: #1e293b;
+    border-radius: 8px;
+    border: 1px solid #f59e0b;
+    animation: chatSlideUp 0.2s ease-out;
+}
+
 /* Auto popup (thông báo nổi) */
 .auto-chat-popup {
     position: fixed;
@@ -739,6 +768,63 @@ body {
     flex-shrink: 0;
     min-width: 50px;               /* thêm min-width để số tiền thẳng hàng */
     text-align: right;
+}
+
+/* ----- Staff indicators (ai thanh toán, ai tạo bàn) ----- */
+.toast-staff {
+    font-size: 10px;
+    color: #94a3b8;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: 2px;
+}
+.table-creator {
+    font-size: 10px;
+    color: #94a3b8;
+    display: block;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+.history-staff {
+    font-size: 11px;
+    color: #94a3b8;
+    white-space: nowrap;
+    margin-left: 4px;
+    flex-shrink: 0;
+}
+.history-stt {
+    font-size: 12px;
+    color: var(--primary);
+    font-weight: 700;
+    min-width: 32px;
+    flex-shrink: 0;
+    text-align: center;
+    margin-right: 6px;
+    background: rgba(37, 99, 235, 0.08);
+    border-radius: 4px;
+    padding: 0 4px;
+    line-height: 20px;
+}
+.history-summary {
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: var(--surface);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text);
+    text-align: center;
+    border: 1px solid var(--border);
+}
+.history-summary strong {
+    color: var(--primary);
+}
+.history-summary-debt {
+    margin-top: 4px;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+.history-summary-debt strong {
+    color: #d97706;
 }
 /* ========== FORM ELEMENTS ========== */
 .form-input {
@@ -1102,6 +1188,100 @@ body {
 }
 .header-notification-close:hover { opacity: 1; }
 
+/* ========== OFFLINE INDICATOR ========== */
+.offline-indicator {
+    background: #dc2626;
+    color: #fff;
+    padding: 4px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    animation: offlinePulse 2s ease-in-out infinite;
+    position: relative;
+    z-index: 10;
+}
+
+@keyframes offlinePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.offline-indicator-icon {
+    font-size: 14px;
+}
+
+.offline-indicator-text {
+    white-space: nowrap;
+}
+
+/* ========== LOADING SPINNER ========== */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.loading-overlay.active {
+    display: flex;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-spinner-sm {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(249, 115, 22, 0.3);
+    border-top-color: #f97316;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+/* Loading inline trong button */
+.btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.btn-loading::after {
+    content: '';
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
 /* ========== MODAL OVERLAY (rút gọn - chỉ giữ modal POS cần) ========== */
 body.modal-open {
     overflow: hidden;
@@ -1456,15 +1636,15 @@ body.modal-open {
     padding: 6px 12px 12px;
 }
 
-/* Transaction detail modal - header ở đáy */
+/* Transaction detail modal - bố cục gọn gàng */
 #transactionDetailModal .modal-content {
     padding: 0;
-    flex-direction: column-reverse;
+    flex-direction: column;
+    max-width: 480px;
 }
 #transactionDetailModal .modal-header {
     padding: 14px 20px;
-    border-bottom: none;
-    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
 }
 #transactionDetailModal .modal-header .header-left {
@@ -1478,7 +1658,7 @@ body.modal-open {
     font-weight: 400;
 }
 #transactionDetailModal .modal-body {
-    padding: 20px;
+    padding: 16px 20px;
     flex: 1;
     overflow-y: auto;
 }
@@ -2828,84 +3008,6 @@ body.modal-open {
 @media (min-width: 1025px) { .customer-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; } .customer-card { padding: 16px; } }
 
 /* ========== HISTORY ========== */
-.history-view-toggle {
-    display: flex;
-    gap: 4px;
-    padding: 6px 12px;
-    background: #f1f5f9;
-    border-bottom: 1px solid var(--border);
-}
-.hvt-btn {
-    flex: 1;
-    text-align: center;
-    padding: 5px 8px;
-    border-radius: 6px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #64748b;
-    cursor: pointer;
-    transition: background 0.1s, color 0.1s;
-    user-select: none;
-    -webkit-user-select: none;
-    white-space: nowrap;
-}
-.hvt-btn.active {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.hvt-btn:active { background: #e2e8f0; }
-
-/* Chế độ xem 1: mặc định 1 hàng dọc */
-.history-list.view-1 {
-    display: flex;
-    flex-direction: column;
-}
-/* Chế độ xem 2: 2 cột - dinein / takeaway+grab */
-.history-list.view-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 12px;
-}
-.history-list.view-2 .history-column {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-.history-list.view-2 .history-column-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-secondary);
-    padding: 6px 10px;
-    background: #f8fafc;
-    border-radius: 6px;
-    text-align: center;
-    border: 1px solid var(--border);
-}
-/* Chế độ xem 3: 2 cột - cash / transfer+grab */
-.history-list.view-3 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 12px;
-}
-.history-list.view-3 .history-column {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-.history-list.view-3 .history-column-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-secondary);
-    padding: 6px 10px;
-    background: #f8fafc;
-    border-radius: 6px;
-    text-align: center;
-    border: 1px solid var(--border);
-}
-
 .history-controls {
     display: flex;
     align-items: center;
@@ -2949,6 +3051,8 @@ body.modal-open {
 
 .history-item:active { background: #f8fafc; }
 .history-item.refunded { border-left-color: #ef4444; opacity: 0.9; }
+.history-item.debt-record { border-left-color: #d97706; background: #fffbeb; }
+.history-item.debt-payment { border-left-color: #2563eb; background: #eff6ff; }
 
 .history-line1 {
     display: flex;
@@ -2979,6 +3083,18 @@ body.modal-open {
     background: #f1f5f9;
     color: var(--text-secondary);
     white-space: nowrap;
+}
+
+/* Method badge cho ghi nợ - màu cam */
+.history-method.debt-record-method {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+/* Method badge cho thanh toán nợ - màu xanh dương */
+.history-method.debt-payment-method {
+    background: #dbeafe;
+    color: #2563eb;
 }
 
 .history-line2 {
@@ -3019,6 +3135,18 @@ body.modal-open {
     -webkit-appearance: none;
     white-space: nowrap;
 }
+.swipe-delete-btn {
+    background: #64748b;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-appearance: none;
+    white-space: nowrap;
+}
 .history-amount { font-size: 17px; font-weight: 700; color: var(--success); }
 .history-amount-inline {
     margin-left: auto;
@@ -3029,6 +3157,9 @@ body.modal-open {
     flex-shrink: 0;
 }
 .refunded-amount { color: var(--danger); text-decoration: line-through; }
+.credit-amount { color: var(--info); }
+.debt-record-amount { color: #d97706; } /* Màu cam cho ghi nợ */
+.debt-payment-amount { color: #2563eb; } /* Màu xanh dương cho thanh toán nợ */
 
 .history-note {
     font-size: 11px;
@@ -3040,10 +3171,26 @@ body.modal-open {
     max-width: 100%;
 }
 
+/* Danh sách món trong history item */
+.history-items-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px dashed #e2e8f0;
+}
+.history-item-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: #f1f5f9;
+    padding: 1px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
 @media (max-width: 480px) { .history-controls { padding: 6px 10px; gap: 6px; } .history-item { padding: 12px; } .history-amount { font-size: 15px; } .history-line1 { font-size: 12px; gap: 6px; } }
 @media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) { .history-item { padding: 16px; } }
-@media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) { .history-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; } .history-item { margin-bottom: 0; } }
-@media (min-width: 1025px) { .history-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; } .history-item { margin-bottom: 0; } }
 
 /* History date group */
 .history-date-list { display: flex; flex-direction: column; gap: 8px; }
@@ -3461,69 +3608,6 @@ body.modal-open {
     opacity: 0.8;
 }
 
-/* ========== HISTORY VIEW TOGGLE ========== */
-.history-view-toggle {
-    display: flex;
-    gap: 4px;
-    padding: 8px 12px;
-    background: #f1f5f9;
-    border-radius: 10px;
-    margin: 0 12px 8px;
-}
-.hvt-btn {
-    flex: 1;
-    text-align: center;
-    padding: 6px 8px;
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #64748b;
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-}
-.hvt-btn.active {
-    background: #fff;
-    color: #1e293b;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-}
-.hvt-btn:active {
-    background: #e2e8f0;
-}
-
-/* ========== HISTORY VIEW MODES ========== */
-.history-list.view-1 {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 0 12px 12px;
-}
-.history-list.view-2,
-.history-list.view-3 {
-    display: flex;
-    flex-direction: row;
-    gap: 8px;
-    padding: 0 12px 12px;
-}
-.history-column {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.history-column-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: #475569;
-    padding: 6px 8px;
-    background: #e2e8f0;
-    border-radius: 8px;
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
 /* ========== CUSTOMER DETAIL MODAL - TỐI ƯU TABLET NGANG ========== */
 .cus-detail-modal {
     max-width: 600px;
@@ -3989,7 +4073,7 @@ body.modal-open {
         -webkit-flex-wrap: wrap;
         -ms-flex-wrap: wrap;
         flex-wrap: wrap;
-        gap: 16px;
+        gap: 12px;
         -webkit-box-align: start;
         -webkit-align-items: flex-start;
         -ms-flex-align: start;
@@ -3998,9 +4082,9 @@ body.modal-open {
 
     #transactionDetailModal .modal-body .detail-section {
         -webkit-box-flex: 1;
-        -webkit-flex: 1 1 calc(50% - 8px);
-        -ms-flex: 1 1 calc(50% - 8px);
-        flex: 1 1 calc(50% - 8px);
+        -webkit-flex: 1 1 calc(50% - 6px);
+        -ms-flex: 1 1 calc(50% - 6px);
+        flex: 1 1 calc(50% - 6px);
         min-width: 200px;
     }
 
@@ -4010,7 +4094,7 @@ body.modal-open {
         -webkit-flex: 1 1 100%;
         -ms-flex: 1 1 100%;
         flex: 1 1 100%;
-        margin-top: 8px;
+        margin-top: 4px;
     }
 }
 
@@ -4661,22 +4745,6 @@ body.modal-open {
     padding: 10px 12px;
     margin-bottom: 12px;
 }
-@media (orientation: landscape) and (min-width: 600px) {
-    .pos-cash-info {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px 16px;
-    }
-    .pos-cash-info .pos-cash-section-title {
-        grid-column: 1 / -1;
-    }
-    .pos-cash-info .pos-cash-total-row {
-        grid-column: 1 / -1;
-    }
-    .pos-cash-info .cash-counter-actions {
-        grid-column: 1 / -1;
-    }
-}
 .pos-cash-row {
     display: flex;
     justify-content: space-between;
@@ -4687,6 +4755,20 @@ body.modal-open {
 }
 .pos-cash-row + .pos-cash-row {
     border-top: 1px dashed #e2e8f0;
+}
+.pos-cash-row.staff {
+    border-left: 3px solid #3b82f6;
+    padding-left: 8px;
+    background: #f0f7ff;
+    border-radius: 4px;
+    margin: 2px 0;
+}
+.pos-cash-row.admin {
+    border-left: 3px solid #f97316;
+    padding-left: 8px;
+    background: #fff7ed;
+    border-radius: 4px;
+    margin: 2px 0;
 }
 .pos-cash-expense {
     color: #dc2626;
@@ -4713,6 +4795,11 @@ body.modal-open {
 }
 .pos-cash-negative {
     color: #dc2626;
+}
+.pos-cash-warning {
+    color: #d97706;
+    font-weight: 600;
+    font-size: 13px;
 }
 .pos-cash-section-title {
     font-size: 13px;
@@ -5086,18 +5173,46 @@ html, body, .app, .main-content {
     background: #ea580c;
 }
 
-/* ========== ORDER MENU HEADER (nút tạo món nhanh) ========== */
+/* ========== ORDER MENU HEADER (tìm kiếm + nút tạo món nhanh) ========== */
 .order-menu-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 6px 10px;
     font-size: 14px;
     font-weight: 700;
     color: #334155;
     border-bottom: 1px solid #e2e8f0;
     background: #f8fafc;
     flex-shrink: 0;
+}
+
+.order-menu-title {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.order-menu-search {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    background: #fff;
+    color: #333;
+    transition: border-color 0.15s;
+}
+
+.order-menu-search:focus {
+    border-color: #f97316;
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+
+.order-menu-search::placeholder {
+    color: #9ca3af;
 }
 
 .quick-create-menu-btn {
@@ -5372,4 +5487,862 @@ html, body, .app, .main-content {
 .permission-staff-role.self {
     background: #dcfce7;
     color: #16a34a;
+}
+
+.permission-staff-delete {
+    background: none;
+    border: none;
+    color: #ef4444;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    line-height: 1;
+}
+.permission-staff-item:hover .permission-staff-delete {
+    opacity: 1;
+}
+.permission-staff-delete:hover {
+    background: #fef2f2;
+}
+
+/* ========== EMPLOYEE SALARY (employees.js) ========== */
+.employee-info-section {
+    border: 1px solid #e2e8f0;
+}
+
+.employee-salary-section {
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+.salary-row {
+    border: 1px solid #e2e8f0;
+}
+
+.salary-row input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+.salary-row input[type="number"]::-webkit-inner-spin-button,
+.salary-row input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.salary-total {
+    border: 1px solid #1e293b;
+}
+
+.salary-history-item:last-child {
+    border-bottom: none !important;
+}
+
+.salary-history-item:hover {
+    background: #f8fafc;
+}
+
+/* Employee box trong manager grid - dùng màu mặc định như các nút khác */
+
+/* ========== EMPLOYEE MANAGER MODAL (employees.js) ========== */
+.emp-modal-content {
+    max-width: 520px !important;
+    max-height: 92vh !important;
+    overflow-y: auto !important;
+}
+
+.emp-modal-body {
+    padding: 0 !important;
+}
+
+/* Tabs */
+.emp-tabs {
+    display: flex;
+    border-bottom: 2px solid #e2e8f0;
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.emp-tab {
+    flex: 1;
+    padding: 12px 16px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+}
+
+.emp-tab.active {
+    color: #6366f1;
+    border-bottom-color: #6366f1;
+    background: #fff;
+}
+
+.emp-tab:hover {
+    color: #4f46e5;
+    background: #f1f5f9;
+}
+
+/* Tab content */
+.emp-tab-content {
+    padding: 16px;
+}
+
+/* Staff list */
+.emp-search-bar {
+    margin-bottom: 12px;
+}
+
+.emp-staff-list {
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+.emp-loading, .emp-empty {
+    text-align: center;
+    padding: 32px 16px;
+    color: #94a3b8;
+    font-size: 14px;
+}
+
+/* Staff card */
+.emp-staff-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.emp-staff-card:hover {
+    border-color: #6366f1;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.1);
+    transform: translateY(-1px);
+}
+
+.emp-staff-card:active {
+    transform: scale(0.98);
+}
+
+.emp-staff-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.emp-staff-card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.emp-staff-card-user {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+
+.emp-staff-card-salary {
+    text-align: right;
+    margin-left: 12px;
+    flex-shrink: 0;
+}
+
+.emp-staff-card-amount {
+    font-size: 16px;
+    font-weight: 700;
+    color: #059669;
+}
+
+.emp-staff-card-label {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 1px;
+}
+
+/* Add form */
+.emp-add-form {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.emp-form-group {
+    margin-bottom: 14px;
+}
+
+.emp-form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 4px;
+}
+
+.emp-input-with-unit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.emp-input-with-unit .form-input {
+    flex: 1;
+}
+
+.emp-unit {
+    font-size: 13px;
+    color: #64748b;
+    white-space: nowrap;
+}
+
+.emp-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+    margin: 4px 0;
+}
+
+.emp-checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.emp-hint {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 2px;
+    margin-left: 26px;
+}
+
+.emp-status {
+    font-size: 12px;
+    color: #64748b;
+    margin: 8px 0;
+    text-align: center;
+}
+
+.emp-submit-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #6366f1;
+    color: #fff;
+    transition: background 0.2s;
+}
+
+.emp-submit-btn:hover {
+    background: #4f46e5;
+}
+
+.emp-submit-btn:active {
+    transform: scale(0.98);
+}
+
+/* Detail container */
+.emp-detail-container {
+    padding: 0;
+}
+
+.emp-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.emp-back-btn {
+    background: none;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: #64748b;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.emp-back-btn:hover {
+    background: #f1f5f9;
+}
+
+.emp-detail-title {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.emp-detail-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.emp-detail-role {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.emp-detail-role.admin {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.emp-detail-role.staff {
+    background: #dbeafe;
+    color: #2563eb;
+}
+
+.emp-detail-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Detail info */
+.emp-detail-info {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.emp-info-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.emp-info-row:last-child {
+    border-bottom: none;
+}
+
+.emp-info-label {
+    font-size: 13px;
+    color: #64748b;
+    width: 110px;
+    flex-shrink: 0;
+}
+
+.emp-info-value {
+    font-size: 14px;
+    color: #1e293b;
+    font-weight: 500;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.emp-inline-input {
+    width: 100px !important;
+    text-align: right;
+    font-size: 13px !important;
+    padding: 4px 8px !important;
+}
+
+/* Period banner */
+.emp-period-banner {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #6366f1;
+    background: #eef2ff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+/* Period nav */
+.emp-period-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    gap: 4px;
+}
+
+/* Calendar */
+.emp-calendar-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.emp-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.emp-calendar-hint {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 8px;
+}
+
+.emp-badge-off {
+    display: inline-block;
+    background: #fef2f2;
+    color: #ef4444;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.emp-badge-ot {
+    display: inline-block;
+    background: #f0fdf4;
+    color: #16a34a;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.emp-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.emp-cal-header {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    padding: 4px 0;
+}
+
+.emp-cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #1e293b;
+    background: #fff;
+    border: 1px solid #f1f5f9;
+    transition: all 0.15s;
+    position: relative;
+    min-height: 36px;
+}
+
+.emp-cal-day:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+.emp-cal-day:active {
+    transform: scale(0.9);
+}
+
+.emp-cal-empty {
+    background: transparent;
+    border: none;
+    cursor: default;
+}
+
+.emp-cal-empty:hover {
+    background: transparent;
+}
+
+.emp-cal-off {
+    background: #fef2f2 !important;
+    border-color: #fecaca !important;
+    color: #dc2626;
+}
+
+.emp-cal-ot {
+    background: #f0fdf4 !important;
+    border-color: #bbf7d0 !important;
+    color: #16a34a;
+}
+
+.emp-cal-day-num {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.emp-cal-badge {
+    font-size: 8px;
+    font-weight: 700;
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    line-height: 1;
+}
+
+.emp-cal-badge-off {
+    color: #ef4444;
+}
+
+.emp-cal-badge-ot {
+    color: #16a34a;
+}
+
+/* Bonus / Penalty section */
+.emp-bonus-penalty-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.emp-bp-row {
+    display: flex;
+    gap: 12px;
+}
+
+.emp-bp-field {
+    flex: 1;
+}
+
+.emp-bp-field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 4px;
+}
+
+.emp-bp-field .form-input {
+    width: 100%;
+    text-align: right;
+    font-size: 14px;
+}
+
+/* Total section */
+.emp-total-section {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.emp-total-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+    color: #475569;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.emp-total-row:last-child {
+    border-bottom: none;
+}
+
+.emp-total-final {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    margin-top: 8px;
+    background: #1e293b;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.emp-total-final span:last-child {
+    font-size: 18px;
+    color: #34d399;
+}
+
+/* Save section */
+.emp-save-section {
+    text-align: center;
+    margin-top: 4px;
+}
+
+.emp-save-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #6366f1;
+    color: #fff;
+    transition: background 0.2s;
+}
+
+.emp-save-btn:hover {
+    background: #4f46e5;
+}
+
+.emp-save-btn:active {
+    transform: scale(0.98);
+}
+
+/* Day picker popup */
+.emp-day-picker {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    padding: 16px;
+    min-width: 200px;
+}
+
+.emp-day-picker-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.emp-day-picker-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1e293b;
+    text-align: center;
+    margin-bottom: 4px;
+}
+
+.emp-day-picker-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.emp-day-picker-btn:active {
+    transform: scale(0.97);
+}
+
+.emp-day-picker-off {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.emp-day-picker-off:hover {
+    background: #fee2e2;
+}
+
+.emp-day-picker-ot {
+    background: #f0fdf4;
+    color: #16a34a;
+}
+
+.emp-day-picker-ot:hover {
+    background: #dcfce7;
+}
+
+/* ========== INVENTORY SEARCH INPUT ========== */
+.inv-search-input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    background: #fff;
+    color: #333;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.inv-search-input:focus {
+    border-color: #f97316;
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+
+.inv-search-input::placeholder {
+    color: #9ca3af;
+}
+
+.emp-day-picker-cancel {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+.emp-day-picker-cancel:hover {
+    background: #e2e8f0;
+}
+
+/* ----- DETAIL ITEM ROW (lịch sử giao dịch) ----- */
+.detail-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    font-size: 13px;
+    gap: 12px;
+}
+.detail-item-row span:first-child {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #555;
+}
+.detail-item-row span:last-child {
+    white-space: nowrap;
+    font-weight: 500;
+    color: #333;
+    text-align: right;
+}
+
+/* Detail section card */
+.detail-section {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+.detail-section .detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 13px;
+    gap: 8px;
+}
+.detail-section .detail-row span:first-child {
+    color: #64748b;
+    white-space: nowrap;
+}
+.detail-section .detail-row span:last-child {
+    font-weight: 600;
+    color: #1e293b;
+    text-align: right;
+}
+.detail-section .detail-amount {
+    font-size: 16px;
+    color: #059669;
+}
+.detail-items-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #1e293b;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.refund-info {
+    background: #fef2f2;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #dc2626;
+    line-height: 1.5;
+}
+
+/* ========== INGREDIENT RELATED MENU ITEMS ========== */
+.ing-related-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: #fff;
+}
+.ing-related-menu-item:hover {
+    background: #fef3c7;
+    border-color: #f59e0b;
+}
+.ing-related-menu-item:active {
+    transform: scale(0.99);
+}
+.ing-related-menu-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ing-related-menu-price {
+    font-size: 12px;
+    color: #059669;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0 6px;
+    min-width: 60px;
+    text-align: right;
+}
+.ing-related-menu-ingcount {
+    font-size: 11px;
+    color: #64748b;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0 6px;
+    min-width: 40px;
+    text-align: center;
+}
+
+/* ========== ASSIGN INGREDIENT MENU LIST ========== */
+.assign-ing-menu-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.1s;
+    background: #fff;
+}
+.assign-ing-menu-item:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
 }

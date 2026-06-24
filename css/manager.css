@@ -168,3 +168,37 @@
     .manager-box { padding: 16px; }
     .big-value { font-size: 20px; }
 }
+
+/* Inv filter buttons */
+.inv-filter-row {
+    margin-bottom: 10px;
+}
+.inv-filter-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.inv-filter-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    -webkit-appearance: none;
+    white-space: nowrap;
+    transition: all 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+.inv-filter-btn:active {
+    transform: scale(0.96);
+}
+.inv-filter-btn.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+    font-weight: 600;
+}
