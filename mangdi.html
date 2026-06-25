@@ -101,11 +101,9 @@
 
         <!-- POS TABS -->
         <div class="main-tabs">
-            <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
-            <div class="tab-btn" data-tab="customers">👥 Khách</div>
+            <div class="tab-btn active" data-tab="takeaway">🛵 Mang đi</div>
+            <div class="tab-btn" data-tab="tables">🍽️ Bàn</div>
             <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
-            <div class="tab-btn" data-tab="cost">💰 Chi phí</div>
-            <div class="tab-btn" data-tab="settings">⚙️</div>
         </div>
 
         <div class="main-content">
@@ -464,6 +462,43 @@
 
                 </div>
             </div>
+
+            <!-- TAB MANG ĐI -->
+            <div id="takeawayView" class="tab-content">
+                <div class="takeaway-layout">
+                    <!-- CỘT TRÁI: DANH MỤC -->
+                    <div class="takeaway-categories" id="takeawayCategories"></div>
+                    
+                    <!-- CỘT GIỮA: MENU -->
+                    <div class="takeaway-menu">
+                        <div class="takeaway-menu-header">
+                            <input class="takeaway-search" id="takeawaySearch" type="text" placeholder="🔍 Tìm món..." oninput="_takeawayOnSearch(this.value)">
+                        </div>
+                        <div class="takeaway-menu-grid" id="takeawayMenuGrid"></div>
+                    </div>
+                    
+                    <!-- CỘT PHẢI: GIỎ HÀNG -->
+                    <div class="takeaway-cart" id="takeawayCartPanel">
+                        <div class="takeaway-cart-header">
+                            <span>🛒 Giỏ hàng</span>
+                            <button class="takeaway-cart-clear" onclick="_takeawayClearCart()">🗑️</button>
+                        </div>
+                        <div class="takeaway-cart-list" id="takeawayCartList"></div>
+                        <div class="takeaway-cart-footer">
+                            <div class="takeaway-cart-total">
+                                <span id="takeawayCartCount">0 món</span>
+                                <span id="takeawayCartTotal">0đ</span>
+                            </div>
+                            <div class="takeaway-cart-actions">
+                                <button class="takeaway-pay-btn cash" onclick="_takeawayPay('cash')">💵 Tiền mặt</button>
+                                <button class="takeaway-pay-btn transfer" onclick="_takeawayPay('transfer')">💳 Chuyển khoản</button>
+                                <button class="takeaway-pay-btn grab" onclick="_takeawayGrab()">🚕 Grab</button>
+                                <button class="takeaway-pay-btn table" onclick="_takeawayCreateNewTable()">🆕 Tạo bàn mới</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- DRAFT BUBBLE CONTAINER -->
@@ -633,8 +668,6 @@
     <script src="auth.js"></script>
     
     <!-- POS-APP RÚT GỌN (thay thế app.js) -->
-    <!-- pos.html mặc định hiển thị tab Bàn -->
-    <script>window._defaultTab = 'tables';</script>
     <script src="pos-app.js"></script>
     <!-- REALTIME RÚT GỌN (thay thế realtime.js) -->
     <script src="realtime-pos.js"></script>

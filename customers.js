@@ -2,6 +2,31 @@
 // Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 // OPTIMIZE: Dùng memory cache (customers array) thay vì query DB mỗi lần
 
+// Helper: lấy thời gian (timestamp) giao dịch gần nhất của khách từ debtHistory, paymentHistory, creditHistory
+// Trả về 0 nếu không có giao dịch nào
+function _getLatestActivityTime(c) {
+    var latest = 0;
+    if (c.debtHistory && c.debtHistory.length > 0) {
+        for (var i = 0; i < c.debtHistory.length; i++) {
+            var t = new Date(c.debtHistory[i].date).getTime();
+            if (t > latest) latest = t;
+        }
+    }
+    if (c.paymentHistory && c.paymentHistory.length > 0) {
+        for (var i = 0; i < c.paymentHistory.length; i++) {
+            var t = new Date(c.paymentHistory[i].date).getTime();
+            if (t > latest) latest = t;
+        }
+    }
+    if (c.creditHistory && c.creditHistory.length > 0) {
+        for (var i = 0; i < c.creditHistory.length; i++) {
+            var t = new Date(c.creditHistory[i].date).getTime();
+            if (t > latest) latest = t;
+        }
+    }
+    return latest;
+}
+
 // ========== KHÁCH HÀNG ==========
 function renderCustomerList() {
     // Dùng memory cache, không query DB
@@ -17,8 +42,21 @@ function renderCustomerList() {
     var container = document.getElementById('customerList');
     if (!container) return;
     if (!filtered.length) { container.innerHTML = '<div class="empty-state">📭 Không có khách hàng</div>'; return; }
-    // Sắp xếp: khách có nợ (netBalance < 0) lên trên
+    // Sắp xếp: khách có giao dịch ghi nợ/thanh toán lên đầu, theo thời gian gần nhất
     filtered.sort(function(a, b) {
+        // Lấy thời gian giao dịch gần nhất của mỗi khách (từ debtHistory, paymentHistory, creditHistory)
+        var aLatest = _getLatestActivityTime(a);
+        var bLatest = _getLatestActivityTime(b);
+        // Khách có giao dịch (aLatest > 0) được ưu tiên lên trước khách không có giao dịch
+        var aHasActivity = aLatest > 0;
+        var bHasActivity = bLatest > 0;
+        if (aHasActivity && !bHasActivity) return -1;
+        if (!aHasActivity && bHasActivity) return 1;
+        // Nếu cả 2 đều có giao dịch, khách có giao dịch gần hơn lên trước
+        if (aHasActivity && bHasActivity) {
+            if (bLatest !== aLatest) return bLatest - aLatest;
+        }
+        // Cùng cấp: khách có nợ (netBalance < 0) lên trước
         var debtA = (a.totalDebt || 0) - (a.creditBalance || 0);
         var debtB = (b.totalDebt || 0) - (b.creditBalance || 0);
         if (debtA > 0 && debtB <= 0) return -1;

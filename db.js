@@ -1448,14 +1448,7 @@
                 var queryRef = ref.orderByChild('_version').startAt(localMaxVersion + 1);
                 
                 queryRef.once('value', function(snapshot) {
-                    if (!snapshot.exists()) {
-                        // Cập nhật lastSyncAt
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: localMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                        resolve();
-                        return;
-                    }
-                    
-                    var remote = snapshot.val() || {};
+                    var remote = snapshot.exists() ? (snapshot.val() || {}) : {};
                     var count = 0;
                     var newMaxVersion = localMaxVersion;
                     var dateKeys = (meta && meta.dateKeys) || [];
@@ -1505,10 +1498,14 @@
                     }
                     
                     return saveChain.then(function() {
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: dateKeys });
-                        updateMetaOnFirebase(collection, newMaxVersion);
-                        console.log('  🔄 Delta synced ' + collection + ': ' + count + ' new items, maxVersion=' + newMaxVersion);
-                        resolve();
+                        // FIX: Sau khi delta sync, so sánh danh sách ID để phát hiện deletions
+                        // (khi máy khác xóa item lúc máy này offline, delta sync không phát hiện được vì deletion không có _version)
+                        return _cleanupDeletedIds(collection).then(function() {
+                            saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: dateKeys });
+                            updateMetaOnFirebase(collection, newMaxVersion);
+                            console.log('  🔄 Delta synced ' + collection + ': ' + count + ' new items, maxVersion=' + newMaxVersion);
+                            resolve();
+                        });
                     }).catch(function(err) {
                         console.error('  ❌ Error delta syncing ' + collection + ': ', err);
                         resolve();
@@ -1518,6 +1515,51 @@
                     resolve();
                 });
             });
+        });
+    }
+    
+    // FIX: So sánh danh sách ID local vs Firebase để xóa các item đã bị xóa trên Firebase
+    // Chỉ áp dụng cho master collections (date-based collections có cơ chế dateKey riêng)
+    function _cleanupDeletedIds(collection) {
+        var isMaster = MASTER_COLLECTIONS[collection];
+        if (!isMaster) return Promise.resolve();
+        if (!isOnline) return Promise.resolve();
+        if (!memoryCache[collection]) return Promise.resolve();
+        
+        var localIds = Object.keys(memoryCache[collection]);
+        if (localIds.length === 0) return Promise.resolve();
+        
+        // Query Firebase để lấy tất cả keys hiện tại (chỉ lấy keys, không lấy data - nhẹ)
+        var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
+        return ref.once('value').then(function(snapshot) {
+            var remoteData = snapshot.val() || {};
+            var remoteIds = Object.keys(remoteData);
+            
+            // Tìm ID có trong local nhưng không trong remote (= đã bị xóa)
+            var deletedIds = [];
+            for (var i = 0; i < localIds.length; i++) {
+                if (remoteIds.indexOf(localIds[i]) === -1) {
+                    deletedIds.push(localIds[i]);
+                }
+            }
+            
+            if (deletedIds.length === 0) return;
+            
+            console.log('  🗑️ Detected ' + deletedIds.length + ' deleted items in', collection);
+            
+            // Xóa từng ID khỏi local
+            var deleteChain = Promise.resolve();
+            for (var d = 0; d < deletedIds.length; d++) {
+                (function(delId) {
+                    deleteChain = deleteChain.then(function() {
+                        return deleteFromLocal(collection, delId);
+                    });
+                })(deletedIds[d]);
+            }
+            return deleteChain;
+        }).catch(function(err) {
+            // Fallback: nếu lỗi thì vẫn tiếp tục, không block sync
+            console.warn('  ⚠️ Could not check deleted IDs for', collection, ':', err.message);
         });
     }
     

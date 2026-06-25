@@ -203,7 +203,8 @@ function createTableCard(table) {
     var displayName = table.customerName ? escapeHtml(table.customerName) : escapeHtml(table.name);
     
     var div = document.createElement('div');
-    div.className = 'table-card' + (isLocked ? ' table-locked' : '');
+    var roleClass = table.createdByRole === 'admin' ? ' table-admin-created' : (table.createdByRole === 'staff' ? ' table-staff-created' : '');
+    div.className = 'table-card' + (isLocked ? ' table-locked' : '') + roleClass;
     div.setAttribute('data-id', table.id);
     div.setAttribute('data-start-time', table.startTime || '');
     div.onclick = function(id) { return function() { showTableDetail(id); }; }(table.id);
@@ -218,7 +219,7 @@ function createTableCard(table) {
         // Khi khóa: chỉ hiện nút thanh toán nếu có items
         if (hasItems) {
             actionBtnsHtml +=
-                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
                 '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
                 '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
         }
@@ -228,7 +229,7 @@ function createTableCard(table) {
             '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
         if (hasItems) {
             actionBtnsHtml +=
-                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
                 '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
                 '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
         }
@@ -283,6 +284,14 @@ function updateTableCard(card, table) {
     
     card.setAttribute('data-start-time', table.startTime || '');
     
+    // Cập nhật class role (admin/staff) trên card
+    card.classList.remove('table-admin-created', 'table-staff-created');
+    if (table.createdByRole === 'admin') {
+        card.classList.add('table-admin-created');
+    } else if (table.createdByRole === 'staff') {
+        card.classList.add('table-staff-created');
+    }
+    
     var displayName = table.customerName ? escapeHtml(table.customerName) : escapeHtml(table.name);
     
     var nameSpan = card.querySelector('.table-name');
@@ -296,6 +305,12 @@ function updateTableCard(card, table) {
     
     var totalSpan = card.querySelector('.table-total');
     if (totalSpan) totalSpan.innerHTML = formatMoney(table.total);
+    
+    // Cập nhật creator
+    var creatorSpan = card.querySelector('.table-creator');
+    if (creatorSpan) {
+        creatorSpan.innerHTML = table.createdByName ? '👤 ' + escapeHtml(table.createdByName) : '';
+    }
     
     // FIX: Cập nhật action buttons động
     var actionsEl = card.querySelector('.table-actions');
@@ -323,7 +338,7 @@ function updateTableCard(card, table) {
             // Khi khóa: chỉ hiện nút thanh toán nếu có items
             if (hasItems) {
                 newActionBtns +=
-                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
                     '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
                     '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
             }
@@ -333,7 +348,7 @@ function updateTableCard(card, table) {
                 '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
             if (hasItems) {
                 newActionBtns +=
-                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); printTableBill(\'' + table.id + '\')" title="In hóa đơn">🖨️</span>' +
+                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
                     '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
                     '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
             }

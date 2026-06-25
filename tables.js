@@ -347,21 +347,29 @@ function showTableDetail(tableId) {
         var customerName = table.customerName ? ' (' + escapeHtml(table.customerName) + ')' : '';
         var lockInfo = getTableLockInfo(table);
         var lockBadge = lockInfo ? ' <span style="color:#dc2626;font-size:12px;">🔒 ' + lockInfo.reason + '</span>' : '';
-        document.getElementById('detailTableName').innerHTML = '🪑 ' + tableName + customerName + lockBadge;
+        var creatorInfo = table.createdByName ? ' <span style="font-size:11px;color:#94a3b8;">👤 ' + escapeHtml(table.createdByName) + '</span>' : '';
+        document.getElementById('detailTableName').innerHTML = '🪑 ' + tableName + customerName + lockBadge + creatorInfo;
 
         var itemsHtml = '', totalAmount = 0, totalQty = 0;
+        // FIX: Lấy đầu ngày hôm nay (theo giờ địa phương) để so sánh
+        var now = new Date();
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         if (table.items && table.items.length) {
             for (var i = 0; i < table.items.length; i++) {
                 var item = table.items[i];
                 totalAmount += item.price * item.qty;
                 totalQty += item.qty;
-                var timeStr = '';
+                var timePart = '', datePart = '';
                 if (item.addedTime) {
                     var d = new Date(item.addedTime);
-                    timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                    timePart = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                    // Nếu món gọi khác ngày (qua đêm), hiển thị thêm ngày/tháng phía trên giờ
+                    if (d < todayStart) {
+                        datePart = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+                    }
                 }
                 itemsHtml += '<div class="cart-item">' +
-                    '<span class="cart-item-time">' + (timeStr ? timeStr : '') + '</span>' +
+                    '<span class="cart-item-time">' + (datePart ? '<span class="cart-item-date">' + datePart + '</span>' : '') + '<span class="cart-item-clock">' + (timePart ? timePart : '') + '</span></span>' +
                     '<span class="cart-item-name">' + escapeHtml(item.name) + '</span>' +
                     '<span class="cart-item-qty">x' + item.qty + '</span>' +
                     '<span class="cart-item-price">' + formatMoney(item.price * item.qty) + '</span>' +
@@ -437,13 +445,36 @@ function showTableDetail(tableId) {
 
 // ========== IN HÓA ĐƠN THỦ CÔNG ==========
 function printTableBill(tableId) {
-    // Kiểm tra nếu là màn hình dọc (điện thoại) -> yêu cầu xác nhận
-    var isPortrait = window.matchMedia && window.matchMedia('(orientation: portrait)').matches;
-    if (isPortrait) {
-        if (!confirm('Xác nhận in hóa đơn?')) {
-            return;
-        }
-    }
+    // Hiển thị popup chọn hình thức in
+    var overlay = document.createElement('div');
+    overlay.className = 'print-choice-overlay';
+    overlay.innerHTML =
+        '<div class="print-choice-modal">' +
+            '<div class="print-choice-title">🖨️ Chọn hình thức in</div>' +
+            '<div class="print-choice-buttons">' +
+                '<button class="print-choice-btn thermal" onclick="doPrintThermal(\'' + tableId + '\'); closePrintChoice(this)">' +
+                    '<span class="print-choice-icon">🧾</span>' +
+                    '<span class="print-choice-label">In nhiệt</span>' +
+                    '<span class="print-choice-desc">Máy in hóa đơn Sunmi</span>' +
+                '</button>' +
+                '<button class="print-choice-btn pdf" onclick="doPrintPDF(\'' + tableId + '\'); closePrintChoice(this)">' +
+                    '<span class="print-choice-icon">📄</span>' +
+                    '<span class="print-choice-label">Xuất PDF</span>' +
+                    '<span class="print-choice-desc">Lưu file PDF / In giấy A4</span>' +
+                '</button>' +
+            '</div>' +
+            '<button class="print-choice-cancel" onclick="closePrintChoice(this)">✕ Đóng</button>' +
+        '</div>';
+    document.body.appendChild(overlay);
+}
+
+function closePrintChoice(btn) {
+    var overlay = btn.closest ? btn.closest('.print-choice-overlay') : null;
+    if (!overlay) overlay = document.querySelector('.print-choice-overlay');
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+}
+
+function doPrintThermal(tableId) {
     _getTableFromCache(tableId).then(function(table) {
         if (!table) return;
         if (typeof printAfterPayment === 'function') {
@@ -462,6 +493,29 @@ function printTableBill(tableId) {
             });
         } else {
             showToast('Chức năng in chưa sẵn sàng', 'warning');
+        }
+    });
+}
+
+function doPrintPDF(tableId) {
+    _getTableFromCache(tableId).then(function(table) {
+        if (!table) return;
+        if (typeof exportBillPDF === 'function') {
+            var now = new Date();
+            exportBillPDF({
+                orderType: 'dinein',
+                amount: table.total,
+                paymentMethod: 'manual_print',
+                items: table.items,
+                tableName: table.name,
+                customer: table.customerName ? { name: table.customerName } : null,
+                tableTime: table.startTime ? _calcTableTime(table.startTime) : null,
+                startTime: table.startTime ? new Date(table.startTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : null,
+                endTime: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+                createdAt: now.toISOString()
+            });
+        } else {
+            showToast('Chức năng xuất PDF chưa sẵn sàng', 'warning');
         }
     });
 }
@@ -1393,11 +1447,14 @@ function confirmTransferItems() {
             if (newNumber > 99) { showToast('Đã đạt giới hạn 99 bàn!', 'warning'); return; }
             var newId = Date.now().toString();
             var now = new Date();
+            var currentUser = DB.getCurrentUser();
             targetTable = {
                 id: newId, name: targetName, status: 'occupied',
                 time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
                 startTime: now.toISOString(),
-                items: [], total: 0, customerId: null, customerName: null
+                items: [], total: 0, customerId: null, customerName: null,
+                createdByName: (currentUser && currentUser.displayName) || '',
+                createdByRole: (currentUser && currentUser.role) || ''
             };
         }
         var targetItems = targetTable.items || [];

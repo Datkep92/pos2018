@@ -313,6 +313,7 @@ function confirmDraftOrder(draftId, options) {
                 var tableName = 'Bàn ' + nextNum;
                 var tableId = Date.now().toString();
 
+                var currentUser = DB.getCurrentUser();
                 var newTable = {
                     id: tableId,
                     name: tableName,
@@ -322,7 +323,9 @@ function confirmDraftOrder(draftId, options) {
                     items: items,
                     total: total,
                     customerId: draft.customerId || null,
-                    customerName: draft.customerName || null
+                    customerName: draft.customerName || null,
+                    createdByName: (currentUser && currentUser.displayName) || '',
+                    createdByRole: (currentUser && currentUser.role) || ''
                 };
 
                 return DB.create('tables', newTable, tableId).then(function() {

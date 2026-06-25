@@ -2,7 +2,11 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
     <title>MILANO - Bán mang đi</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -14,8 +18,7 @@
             overflow: hidden;
             user-select: none;
         }
-        /* ===== HEADER ===== */
-        .header {
+        .header-tk {
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -26,11 +29,9 @@
             top: 0;
             z-index: 10;
         }
-        .header h1 { font-size: 14px; font-weight: 700; color: #f97316; }
-        .header .staff { font-size: 11px; color: #94a3b8; }
-        .header .time { font-size: 12px; color: #94a3b8; font-weight: 600; }
-
-        /* ===== DANH MỤC NGANG ===== */
+        .header-tk h1 { font-size: 14px; font-weight: 700; color: #f97316; }
+        .header-tk .staff { font-size: 11px; color: #94a3b8; }
+        .header-tk .time { font-size: 12px; color: #94a3b8; font-weight: 600; }
         .cat-bar {
             display: flex;
             overflow-x: auto;
@@ -55,14 +56,8 @@
             white-space: nowrap;
             transition: all 0.15s;
         }
-        .cat-btn.active {
-            background: #f97316;
-            color: #fff;
-            border-color: #f97316;
-        }
+        .cat-btn.active { background: #f97316; color: #fff; border-color: #f97316; }
         .cat-btn:active { transform: scale(0.95); }
-
-        /* ===== Ô TÌM KIẾM ===== */
         .search-bar {
             padding: 6px 8px;
             background: #1e293b;
@@ -79,8 +74,6 @@
             outline: none;
         }
         .search-bar input::placeholder { color: #64748b; }
-
-        /* ===== LƯỚI MENU ===== */
         .menu-area {
             flex: 1;
             overflow-y: auto;
@@ -89,11 +82,10 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 6px;
             align-content: start;
-            padding-bottom: 120px; /* chừa chỗ cho giỏ hàng fixed */
+            padding-bottom: 120px;
         }
         .menu-area::-webkit-scrollbar { width: 3px; }
         .menu-area::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-
         .m-item {
             background: #1e293b;
             border-radius: 10px;
@@ -108,17 +100,10 @@
             justify-content: center;
             min-height: 68px;
         }
-        .m-item:active {
-            transform: scale(0.93);
-            background: #f97316;
-            border-color: #f97316;
-        }
+        .m-item:active { transform: scale(0.93); background: #f97316; border-color: #f97316; }
         .m-item .name { font-size: 12px; font-weight: 600; color: #f1f5f9; margin-bottom: 2px; line-height: 1.3; }
         .m-item .price { font-size: 11px; color: #f97316; font-weight: 700; }
-        .m-item:active .name,
-        .m-item:active .price { color: #fff; }
-
-        /* ===== GIỎ HÀNG FIXED DƯỚI ĐÁY ===== */
+        .m-item:active .name, .m-item:active .price { color: #fff; }
         .cart-bar {
             position: fixed;
             bottom: 0;
@@ -137,20 +122,9 @@
             justify-content: space-between;
             margin-bottom: 6px;
         }
-        .cart-bar .cart-info .cart-count {
-            font-size: 12px;
-            color: #94a3b8;
-        }
-        .cart-bar .cart-info .cart-total {
-            font-size: 18px;
-            font-weight: 800;
-            color: #f97316;
-        }
-        .cart-bar .pay-row {
-            display: flex;
-            gap: 4px;
-            pointer-events: auto;
-        }
+        .cart-bar .cart-info .cart-count { font-size: 12px; color: #94a3b8; }
+        .cart-bar .cart-info .cart-total { font-size: 18px; font-weight: 800; color: #f97316; }
+        .cart-bar .pay-row { display: flex; gap: 4px; pointer-events: auto; }
         .cart-bar .pay-row .pay-btn {
             flex: 1;
             padding: 12px 0;
@@ -167,8 +141,6 @@
         .pay-btn.transfer { background: #2563eb; }
         .pay-btn.grab { background: #9333ea; }
         .pay-btn:disabled { opacity: 0.3; pointer-events: none; }
-
-        /* ===== GIỎ HÀNG POPUP ===== */
         .cart-overlay {
             position: fixed;
             inset: 0;
@@ -200,12 +172,7 @@
             border-bottom: 1px solid #334155;
         }
         .cart-popup .cp-header h3 { font-size: 14px; color: #f97316; }
-        .cart-popup .cp-header .cp-close {
-            font-size: 20px;
-            color: #94a3b8;
-            cursor: pointer;
-            padding: 4px;
-        }
+        .cart-popup .cp-header .cp-close { font-size: 20px; color: #94a3b8; cursor: pointer; padding: 4px; }
         .cart-popup .cp-item {
             display: flex;
             align-items: center;
@@ -247,14 +214,7 @@
             margin-left: 4px;
         }
         .cart-popup .cp-item .cp-del:active { background: rgba(239,68,68,0.2); }
-        .cart-popup .cp-empty {
-            text-align: center;
-            color: #475569;
-            font-size: 13px;
-            padding: 30px 10px;
-        }
-
-        /* ===== TOAST ===== */
+        .cart-popup .cp-empty { text-align: center; color: #475569; font-size: 13px; padding: 30px 10px; }
         .toast-container {
             position: fixed;
             top: 50%;
@@ -279,11 +239,7 @@
         .toast.warning { background: #f59e0b; }
         .toast.info { background: #3b82f6; }
         @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* ===== RESPONSIVE ===== */
-        @media (min-width: 600px) {
-            .menu-area { grid-template-columns: repeat(4, 1fr); }
-        }
+        @media (min-width: 600px) { .menu-area { grid-template-columns: repeat(4, 1fr); } }
         @media (max-width: 360px) {
             .menu-area { grid-template-columns: repeat(2, 1fr); }
             .m-item { min-height: 60px; padding: 10px 4px; }
@@ -294,7 +250,8 @@
     </style>
 </head>
 <body>
-    <div class="header">
+    <!-- HEADER -->
+    <div class="header-tk">
         <div>
             <h1>☕ MILANO</h1>
             <div class="staff" id="staffName">👤 Đang tải...</div>
@@ -302,18 +259,18 @@
         <div class="time" id="currentTime">--:--</div>
     </div>
 
-    <!-- DANH MỤC NGANG -->
+    <!-- DANH MỤC -->
     <div class="cat-bar" id="catBar"></div>
 
-    <!-- Ô TÌM KIẾM -->
+    <!-- TÌM KIẾM -->
     <div class="search-bar">
         <input type="text" id="searchInput" placeholder="🔍 Tìm món..." oninput="onSearch()">
     </div>
 
-    <!-- LƯỚI MENU -->
+    <!-- MENU GRID -->
     <div class="menu-area" id="menuArea"></div>
 
-    <!-- GIỎ HÀNG FIXED DƯỚI ĐÁY -->
+    <!-- CART BAR -->
     <div class="cart-bar" id="cartBar" onclick="toggleCartPopup()">
         <div class="cart-info">
             <span class="cart-count" id="cartCount">🛒 0 món</span>
@@ -326,7 +283,7 @@
         </div>
     </div>
 
-    <!-- POPUP GIỎ HÀNG CHI TIẾT -->
+    <!-- CART POPUP -->
     <div class="cart-overlay" id="cartOverlay" onclick="closeCartPopup(event)">
         <div class="cart-popup" id="cartPopup">
             <div class="cp-header">
@@ -344,14 +301,485 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    
     <script src="db.js?v=3"></script>
     <script src="auth.js"></script>
+    
+    <!-- === ĐỊNH NGHĨA BIẾN GLOBAL TRƯỚC KHI LOAD CÁC MODULE === -->
+    <script>
+    // Biến global cho takeaway (thay thế pos-app.js)
+    var tempOrder = [];
+    var selectedCustomer = null;
+    var currentHistoryDate = new Date();
+    var currentReportDate = new Date();
+    var menuItems = [];
+    var menuCategories = [];
+    var ingredients = [];
+    var customers = [];
+    var currentTableDetailId = null;
+    var currentMenuCategory = 'all';
+    var pendingPaymentTableId = null;
+    var pendingCustomerCallback = null;
+    var pendingDebtCustomerId = null;
+    var pendingSplitTableId = null;
+    var pendingTransferSourceTable = null;
+    var pendingMergeSourceId = null;
+    var pendingDeleteTableId = null;
+    var currentAddToTableId = null;
+    var renderDebounceTimer = null;
+    var cachedTables = [];
+    var tablesCacheTime = 0;
+    var CACHE_TTL = 2000;
+    var renderScheduled = false;
+    var shopInfo = null;
+    window.shopConfig = window.shopConfig || {};
+    window.tempOrder = tempOrder;
+    window.menuItems = menuItems;
+    window.customers = customers;
+    window.ingredients = ingredients;
+
+    // Stub cho các hàm pos-app.js (để order.js, customers.js không lỗi)
+    window.closeModal = function() {};
+    window.showToast = function() {};
+    window.hideToast = function() {};
+    window.renderRecentTransactions = function() {};
+    window.formatMoney = function(amount) {
+        if (amount === null || amount === undefined) amount = 0;
+        return Number(amount).toLocaleString('vi-VN') + 'đ';
+    };
+    window._cloneArr = function(arr) { return arr ? JSON.parse(JSON.stringify(arr)) : []; };
+    window.currentDraftId = null;
+    window.deleteDraft = function() {};
+    window._skipOrderCreditCheck = false;
+    window.renderTables = function() {};
+    window.updateRecentToast = function() {};
+    window._dispatchPosCashUpdate = function() {
+        try { window.dispatchEvent(new CustomEvent('pos_cash_update')); } catch(e) {}
+    };
+    window.handleCashPayment = function(amount, invoiceId) {
+        return Promise.resolve();
+    };
+    </script>
+    
+    <!-- CHỈ LOAD NHỮNG GÌ CẦN CHO BÁN MANG ĐI -->
     <script src="ingredients.js"></script>
     <script src="notifications.js"></script>
     <script src="order.js"></script>
-    <script src="print.js"></script>
+    <script src="customers.js"></script>
     <script src="telegram.js"></script>
-    <script src="esp32_audit.js"></script>
-    <script src="takeaway.js"></script>
+
+    <!-- ===== INLINE SCRIPT: KHỞI TẠO TAKEAWAY ===== -->
+    <script>
+    // === Biến UI takeaway ===
+    var _currentCat = 'all';
+    var _searchKeyword = '';
+
+    // === Cache key: DÙNG CHUNG key với pos-app.js (pos_menuItems, pos_customers, pos_cacheTime)
+    // === để tận dụng cache đã có sẵn từ index.html/pos.html, UI hiển thị ngay lập tức
+    (function _restoreSessionCache() {
+        try {
+            var cacheTime = sessionStorage.getItem('pos_cacheTime');
+            if (!cacheTime) return;
+            
+            // Cache hết hạn sau 24h (giống pos-app.js)
+            if (Date.now() - parseInt(cacheTime) > 86400000) {
+                return;
+            }
+            
+            var menuData = sessionStorage.getItem('pos_menuItems');
+            var customersData = sessionStorage.getItem('pos_customers');
+            
+            if (menuData) {
+                var parsed = JSON.parse(menuData);
+                if (parsed && parsed.length) {
+                    menuItems = parsed;
+                    window.menuItems = menuItems;
+                }
+            }
+            if (customersData) {
+                var custParsed = JSON.parse(customersData);
+                if (custParsed && custParsed.length) {
+                    customers = custParsed;
+                    window.customers = customers;
+                }
+            }
+            
+            // Render UI ngay lập tức từ cache
+            if (menuItems.length > 0) {
+                _renderUI();
+                _updateTime();
+                _showStaffName();
+                console.log('[TAKEAWAY] UI restored from pos-app.js session cache (' + menuItems.length + ' items)');
+            }
+        } catch(e) {
+            console.warn('[TAKEAWAY] Session cache restore error:', e);
+        }
+    })();
+
+    // === Khởi tạo đầy đủ (chạy sau khi DB.init hoàn tất) ===
+    document.addEventListener('DOMContentLoaded', function() {
+        DB.init().then(function() {
+            if (typeof initAuth === 'function') initAuth();
+            
+            // Load data từ memoryCache (getMemoryCache yêu cầu tham số collection name)
+            var menuFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('menu') : null;
+            var menuCatFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('menu_categories') : null;
+            var ingredientsFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('ingredients') : null;
+            var customersFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('customers') : null;
+            
+            if (menuFromCache && menuFromCache.length) {
+                menuItems = menuFromCache;
+                window.menuItems = menuItems;
+            }
+            if (menuCatFromCache && menuCatFromCache.length) {
+                menuCategories = menuCatFromCache;
+            }
+            if (ingredientsFromCache && ingredientsFromCache.length) {
+                ingredients = ingredientsFromCache;
+                window.ingredients = ingredients;
+            }
+            if (customersFromCache && customersFromCache.length) {
+                customers = customersFromCache;
+                window.customers = customers;
+            }
+            
+            // Lưu vào sessionStorage cho lần F5 sau
+            _saveSessionCache();
+            
+            if (menuItems.length === 0) {
+                return _waitForData();
+            }
+        }).then(function() {
+            _initSubscriptions();
+            _renderUI();
+            _updateTime();
+            setInterval(_updateTime, 30000);
+            _showStaffName();
+        }).catch(function(err) {
+            console.error('Takeaway init error:', err);
+        });
+    });
+
+    function _saveSessionCache() {
+        try {
+            // Lưu vào CHUNG key với pos-app.js để lần sau F5 takeaway.html
+            // hoặc index.html/pos.html đều thấy UI ngay lập tức
+            sessionStorage.setItem('pos_menuItems', JSON.stringify(menuItems));
+            sessionStorage.setItem('pos_customers', JSON.stringify(customers));
+            sessionStorage.setItem('pos_cacheTime', Date.now().toString());
+        } catch(e) {}
+    }
+
+    function _waitForData() {
+        return new Promise(function(resolve) {
+            var check = setInterval(function() {
+                if (menuItems.length > 0) {
+                    clearInterval(check);
+                    resolve();
+                }
+            }, 200);
+            setTimeout(function() { clearInterval(check); resolve(); }, 15000);
+        });
+    }
+
+    function _initSubscriptions() {
+        if (typeof DB.subscribe === 'function') {
+            DB.subscribe('menu', function() {
+                if (typeof DB.getAll === 'function') {
+                    DB.getAll('menu').then(function(list) {
+                        menuItems = list || [];
+                        _renderMenu();
+                        renderCategories();
+                    });
+                }
+            });
+            DB.subscribe('menu_categories', function() {
+                if (typeof DB.getAll === 'function') {
+                    DB.getAll('menu_categories').then(function(list) {
+                        menuCategories = list || [];
+                        renderCategories();
+                        _renderMenu();
+                    });
+                }
+            });
+        }
+    }
+
+    function _showStaffName() {
+        var user = DB.getCurrentUser();
+        var staffEl = document.getElementById('staffName');
+        if (user && staffEl) {
+            staffEl.innerText = (user.role === 'admin' ? '🛡️ ' : '👤 ') + user.displayName;
+        }
+    }
+
+    function _renderUI() {
+        renderCategories();
+        _renderMenu();
+        _updateCartBar();
+    }
+
+    function _updateTime() {
+        var el = document.getElementById('currentTime');
+        if (el) {
+            var now = new Date();
+            el.innerText = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        }
+    }
+
+    // === DANH MỤC ===
+    function renderCategories() {
+        var bar = document.getElementById('catBar');
+        if (!bar) return;
+        var html = '<button class="cat-btn' + (_currentCat === 'all' ? ' active' : '') + '" onclick="selectCat(\'all\')">📋 Tất cả</button>';
+        var cats = menuCategories || [];
+        for (var i = 0; i < cats.length; i++) {
+            var c = cats[i];
+            var active = (_currentCat === c.id) ? ' active' : '';
+            html += '<button class="cat-btn' + active + '" onclick="selectCat(\'' + c.id + '\')">' + (c.icon || '📌') + ' ' + (c.name || '') + '</button>';
+        }
+        bar.innerHTML = html;
+    }
+
+    function selectCat(catId) {
+        _currentCat = catId;
+        _searchKeyword = '';
+        var searchEl = document.getElementById('searchInput');
+        if (searchEl) searchEl.value = '';
+        renderCategories();
+        _renderMenu();
+    }
+
+    function onSearch() {
+        var el = document.getElementById('searchInput');
+        _searchKeyword = el ? el.value.trim().toLowerCase() : '';
+        _renderMenu();
+    }
+
+    // === MENU ===
+    function _renderMenu() {
+        var area = document.getElementById('menuArea');
+        if (!area) return;
+        var items = menuItems || [];
+        if (_currentCat !== 'all') {
+            items = items.filter(function(it) { return it.categoryId === _currentCat; });
+        }
+        if (_searchKeyword) {
+            items = items.filter(function(it) {
+                return (it.name || '').toLowerCase().indexOf(_searchKeyword) !== -1;
+            });
+        }
+        if (items.length === 0) {
+            area.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 10px;color:#475569;font-size:13px;">🍽️ Không có món</div>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var price = item.price || 0;
+            html += '<div class="m-item" onclick="addToCart(\'' + item.id + '\')">' +
+                '<div class="name">' + _esc(item.name) + '</div>' +
+                '<div class="price">' + _fmt(price) + '</div>' +
+            '</div>';
+        }
+        area.innerHTML = html;
+    }
+
+    // === GIỎ HÀNG ===
+    function addToCart(itemId) {
+        var items = menuItems || [];
+        var item = null;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === itemId) { item = items[i]; break; }
+        }
+        if (!item) return;
+        if (item.hasVariants && item.variants && item.variants.length) {
+            var v = item.variants[0];
+            _addOrder(item.id, v.name, v.price);
+            return;
+        }
+        _addOrder(item.id, null, item.price || 0);
+    }
+
+    function _addOrder(itemId, variantName, price) {
+        var found = null;
+        for (var i = 0; i < tempOrder.length; i++) {
+            var o = tempOrder[i];
+            if (o.id === itemId && o.variant === variantName) {
+                found = o;
+                break;
+            }
+        }
+        if (found) {
+            found.qty = (found.qty || 1) + 1;
+        } else {
+            tempOrder.push({
+                id: itemId,
+                name: _getItemName(itemId),
+                variant: variantName,
+                price: price,
+                qty: 1
+            });
+        }
+        _updateCartBar();
+    }
+
+    function _getItemName(itemId) {
+        var items = menuItems || [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === itemId) return items[i].name;
+        }
+        return '';
+    }
+
+    function _updateCartBar() {
+        var countEl = document.getElementById('cartCount');
+        var totalEl = document.getElementById('cartTotal');
+        var payBtns = document.querySelectorAll('.pay-btn');
+        var total = 0;
+        var count = 0;
+        for (var i = 0; i < tempOrder.length; i++) {
+            var o = tempOrder[i];
+            total += (o.price || 0) * (o.qty || 1);
+            count += (o.qty || 1);
+        }
+        if (countEl) countEl.innerText = '🛒 ' + count + ' món';
+        if (totalEl) totalEl.innerText = _fmt(total);
+        for (var j = 0; j < payBtns.length; j++) {
+            payBtns[j].disabled = (count === 0);
+        }
+    }
+
+    // === POPUP GIỎ HÀNG ===
+    function toggleCartPopup() {
+        var overlay = document.getElementById('cartOverlay');
+        if (!overlay) return;
+        if (overlay.classList.contains('show')) {
+            closeCartPopup();
+        } else {
+            openCartPopup();
+        }
+    }
+
+    function openCartPopup() {
+        var overlay = document.getElementById('cartOverlay');
+        if (!overlay) return;
+        overlay.classList.add('show');
+        _renderCartPopup();
+    }
+
+    function closeCartPopup(e) {
+        if (e && e.target !== e.currentTarget) return;
+        var overlay = document.getElementById('cartOverlay');
+        if (overlay) overlay.classList.remove('show');
+    }
+
+    function _renderCartPopup() {
+        var container = document.getElementById('cartPopupItems');
+        if (!container) return;
+        if (tempOrder.length === 0) {
+            container.innerHTML = '<div class="cp-empty">🛒 Chưa có món</div>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < tempOrder.length; i++) {
+            var o = tempOrder[i];
+            var itemTotal = (o.price || 0) * (o.qty || 1);
+            var name = o.name || '';
+            if (o.variant) name += ' (' + o.variant + ')';
+            html += '<div class="cp-item">' +
+                '<div class="cp-name">' + _esc(name) + '</div>' +
+                '<div class="cp-qty">' +
+                    '<button onclick="cpQty(' + i + ',-1)">−</button>' +
+                    '<span>' + (o.qty || 1) + '</span>' +
+                    '<button onclick="cpQty(' + i + ',1)">+</button>' +
+                '</div>' +
+                '<div class="cp-price">' + _fmt(itemTotal) + '</div>' +
+                '<button class="cp-del" onclick="cpDel(' + i + ')">✕</button>' +
+            '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function cpQty(index, delta) {
+        if (index < 0 || index >= tempOrder.length) return;
+        var newQty = (tempOrder[index].qty || 1) + delta;
+        if (newQty <= 0) {
+            tempOrder.splice(index, 1);
+        } else {
+            tempOrder[index].qty = newQty;
+        }
+        _updateCartBar();
+        _renderCartPopup();
+    }
+
+    function cpDel(index) {
+        if (index >= 0 && index < tempOrder.length) tempOrder.splice(index, 1);
+        _updateCartBar();
+        _renderCartPopup();
+        if (!tempOrder.length) closeCartPopup();
+    }
+
+    // === THANH TOÁN ===
+    function pay(method) {
+        if (tempOrder.length === 0) {
+            _toast('Chưa có món trong giỏ!', 'warning');
+            return;
+        }
+        if (method === 'grab') {
+            if (typeof window.handleGrabOrder === 'function') {
+                window.handleGrabOrder();
+                setTimeout(function() {
+                    tempOrder.length = 0;
+                    _updateCartBar();
+                    closeCartPopup();
+                }, 200);
+            } else {
+                _toast('Lỗi: chưa sẵn sàng', 'error');
+            }
+            return;
+        }
+        if (typeof window.handleTakeawayPayment === 'function') {
+            window.handleTakeawayPayment(method);
+            setTimeout(function() {
+                tempOrder.length = 0;
+                _updateCartBar();
+                closeCartPopup();
+            }, 200);
+        } else {
+            _toast('Lỗi: chưa sẵn sàng', 'error');
+        }
+    }
+
+    // === TOAST ===
+    function _toast(msg, type) {
+        type = type || 'info';
+        var container = document.getElementById('toastContainer');
+        if (!container) return;
+        var el = document.createElement('div');
+        el.className = 'toast ' + type;
+        el.innerText = msg;
+        container.appendChild(el);
+        setTimeout(function() {
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }, 2000);
+    }
+
+    // === HELPERS ===
+    function _esc(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&')
+            .replace(/</g, '<')
+            .replace(/>/g, '>')
+            .replace(/"/g, '"')
+            .replace(/'/g, '&#039;');
+    }
+
+    function _fmt(amount) {
+        if (amount === null || amount === undefined) amount = 0;
+        return Number(amount).toLocaleString('vi-VN') + 'đ';
+    }
+    </script>
 </body>
 </html>

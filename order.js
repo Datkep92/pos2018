@@ -1326,6 +1326,7 @@ function handleCreateNewTable() {
     var initTotal = tempOrder.reduce(function(sum, item) { return sum + (item.price * item.qty); }, 0);
     // Lưu danh sách món vừa thêm
     var initItems = tempOrder.map(function(item) { return { name: item.name, qty: item.qty }; });
+    var currentUser = DB.getCurrentUser();
     var newTable = {
         id: tableId,
         name: tableName,
@@ -1337,7 +1338,8 @@ function handleCreateNewTable() {
         customerId: selectedCustomer ? selectedCustomer.id : null,
         customerName: selectedCustomer ? selectedCustomer.name : null,
         recentAdds: [{ items: initItems, time: now.toISOString() }],
-        createdByName: (DB.getCurrentUser() && DB.getCurrentUser().displayName) || ''
+        createdByName: (currentUser && currentUser.displayName) || '',
+        createdByRole: (currentUser && currentUser.role) || ''
     };
     
     // OPTIMIZE: Gộp checkStock + deductIngredients, chạy song song với DB.create

@@ -348,11 +348,14 @@ function confirmTransferItems() {
             if (newNumber > 99) { showToast('Đã đạt giới hạn 99 bàn!', 'warning'); return; }
             var newId = Date.now().toString();
             var now = new Date();
+            var currentUser = DB.getCurrentUser();
             targetTable = {
                 id: newId, name: targetName, status: 'occupied',
                 time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
                 startTime: now.toISOString(),
-                items: [], total: 0, customerId: null, customerName: null
+                items: [], total: 0, customerId: null, customerName: null,
+                createdByName: (currentUser && currentUser.displayName) || '',
+                createdByRole: (currentUser && currentUser.role) || ''
             };
         }
         var targetItems = targetTable.items || [];

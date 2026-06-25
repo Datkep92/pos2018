@@ -166,6 +166,8 @@ function buildReceiptESC(data) {
     lines.push([0x1B, 0x45, 0x00]); // bold OFF
 
     if (data.items && data.items.length > 0) {
+        var now = new Date();
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         for (var i = 0; i < data.items.length; i++) {
             var item = data.items[i];
             var name = removeAccent(item.name || '');
@@ -178,6 +180,22 @@ function buildReceiptESC(data) {
 
             // Dong mon chinh
             lines.push(padRight(name, 22) + padLeft(qty.toString(), 4) + padLeft(formatPrice(price), 8) + padLeft(formatPrice(total), 8));
+
+            // Hien thi gio them mon + ngay neu khac ngay
+            if (item.addedTime) {
+                var d = new Date(item.addedTime);
+                var hh = d.getHours(), mm = d.getMinutes();
+                if (hh < 10) hh = '0' + hh;
+                if (mm < 10) mm = '0' + mm;
+                var timeStr = hh + ':' + mm;
+                if (d < todayStart) {
+                    var day = d.getDate(), mon = d.getMonth() + 1;
+                    if (day < 10) day = '0' + day;
+                    if (mon < 10) mon = '0' + mon;
+                    timeStr += ' ' + day + '/' + mon;
+                }
+                lines.push(padRight('  ' + timeStr, PW));
+            }
         }
     } else if (data.text) {
         lines.push(removeAccent(data.text));
@@ -558,5 +576,147 @@ function exportDebtHistoryPdf(data) {
         }, 500);
     } else {
         showToast('Trình duyệt đã chặn cửa sổ popup!', 'error');
+}
+}
+
+// ========== XUẤT PDF HÓA ĐƠN BÀN ==========
+function exportBillPDF(paymentData) {
+var shop = (typeof shopInfo !== 'undefined' && shopInfo) ? shopInfo : null;
+var storeName = paymentData.shopName || (shop ? shop.name : null) || 'MILANO COFFEE 259';
+var storeAddress = paymentData.shopAddress || (shop ? shop.address : null) || '';
+var storePhone = shop ? shop.phone : '';
+
+var orderType = paymentData.orderType || 'dinein';
+var tableName = paymentData.tableName || '';
+var customerName = paymentData.customer ? (paymentData.customer.name || '') : '';
+var tableTime = paymentData.tableTime || '';
+var startTime = paymentData.startTime || '';
+var endTime = paymentData.endTime || '';
+var totalAmount = paymentData.amount || 0;
+var paymentMethod = paymentData.paymentMethod || '';
+var changeAmount = paymentData.changeAmount || 0;
+var createdAt = paymentData.createdAt || new Date().toISOString();
+
+// Format ngày giờ
+var d = new Date(createdAt);
+var day = d.getDate(), mon = d.getMonth() + 1, year = d.getFullYear();
+var h = d.getHours(), m = d.getMinutes();
+if (day < 10) day = '0' + day;
+if (mon < 10) mon = '0' + mon;
+if (h < 10) h = '0' + h;
+if (m < 10) m = '0' + m;
+var dateStr = day + '/' + mon + '/' + year + ' ' + h + ':' + m;
+
+// Phương thức thanh toán
+var methodLabel = '';
+if (paymentMethod === 'cash') methodLabel = 'Tiền mặt';
+else if (paymentMethod === 'transfer') methodLabel = 'Chuyển khoản';
+else if (paymentMethod === 'debt') methodLabel = 'Trả sau';
+else if (paymentMethod === 'grab') methodLabel = 'Grab';
+else if (paymentMethod === 'manual_print') methodLabel = 'In thủ công';
+else methodLabel = paymentMethod;
+
+// Danh sách món
+var itemsHtml = '';
+var items = paymentData.items || [];
+var now = new Date();
+var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+for (var i = 0; i < items.length; i++) {
+var item = items[i];
+var itemName = escapeHtml(item.name || '');
+var qty = item.qty || 1;
+var price = item.price || 0;
+var total = qty * price;
+// Hiển thị giờ thêm món + ngày nếu khác ngày
+var timeLabel = '';
+if (item.addedTime) {
+    var d = new Date(item.addedTime);
+    var hh = d.getHours(), mm = d.getMinutes();
+    if (hh < 10) hh = '0' + hh;
+    if (mm < 10) mm = '0' + mm;
+    timeLabel = hh + ':' + mm;
+    if (d < todayStart) {
+        var day = d.getDate(), mon = d.getMonth() + 1;
+        if (day < 10) day = '0' + day;
+        if (mon < 10) mon = '0' + mon;
+        timeLabel += ' ' + day + '/' + mon;
     }
+}
+itemsHtml += '<tr>' +
+    '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">' + itemName + '</td>' +
+    '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:center;">' + qty + '</td>' +
+    '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right;">' + formatPrice(price) + '</td>' +
+    '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right;font-weight:600;">' + formatPrice(total) + '</td>' +
+'</tr>';
+// Dòng phụ hiển thị giờ gọi món
+if (timeLabel) {
+    itemsHtml += '<tr style="background:#f8fafc;">' +
+        '<td colspan="4" style="padding:2px 8px 6px 8px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#94a3b8;">🕐 ' + timeLabel + '</td>' +
+    '</tr>';
+}
+}
+
+// Thông tin order
+var orderInfo = '';
+if (orderType === 'dinein') orderInfo = 'Bàn: ' + escapeHtml(tableName);
+else if (orderType === 'takeaway') orderInfo = 'Mang đi';
+else if (orderType === 'grab') orderInfo = 'Grab';
+else orderInfo = 'Tại chỗ';
+
+var timeInfo = '';
+if (startTime) timeInfo += 'Giờ vào: ' + startTime;
+if (endTime) timeInfo += ' | Giờ ra: ' + endTime;
+if (tableTime) timeInfo += ' (' + tableTime + ')';
+
+var html = '<!DOCTYPE html><html><head><meta charset="utf-8">';
+html += '<title>Hoa don - ' + escapeHtml(tableName) + '</title>';
+html += '<style>';
+html += 'body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 30px; color: #1e293b; }';
+html += '.header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #1e293b; padding-bottom: 12px; }';
+html += '.header h1 { font-size: 20px; margin: 0 0 4px 0; color: #1e293b; }';
+html += '.header .sub { font-size: 13px; color: #64748b; }';
+html += '.info-row { display: flex; justify-content: space-between; font-size: 13px; color: #475569; margin: 4px 0; }';
+html += 'table { width: 100%; border-collapse: collapse; margin-top: 12px; }';
+html += 'th { background: #1e293b; color: #fff; padding: 8px; font-size: 13px; text-align: left; }';
+html += 'th.right { text-align: right; }';
+html += 'th.center { text-align: center; }';
+html += '.summary { margin-top: 16px; text-align: right; font-size: 15px; }';
+html += '.summary .total { font-weight: bold; font-size: 18px; color: #f97316; }';
+html += '.summary .method { font-size: 13px; color: #64748b; margin-top: 4px; }';
+html += '.footer { text-align: center; margin-top: 32px; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 12px; }';
+html += '@media print { body { margin: 10px; } }';
+html += '</style></head><body>';
+html += '<div class="header">';
+html += '<h1>' + escapeHtml(storeName) + '</h1>';
+if (storeAddress) html += '<div class="sub">' + escapeHtml(storeAddress) + '</div>';
+if (storePhone) html += '<div class="sub">Tel: ' + escapeHtml(storePhone) + '</div>';
+html += '</div>';
+html += '<div class="info-row"><span><strong>' + orderInfo + '</strong></span><span>' + dateStr + '</span></div>';
+if (customerName) html += '<div class="info-row"><span>Khách: <strong>' + escapeHtml(customerName) + '</strong></span></div>';
+if (timeInfo) html += '<div class="info-row"><span>' + timeInfo + '</span></div>';
+html += '<table><thead><tr>';
+html += '<th>Tên món</th><th class="center">SL</th><th class="right">Đơn giá</th><th class="right">Thành tiền</th>';
+html += '</tr></thead><tbody>';
+html += itemsHtml;
+html += '</tbody></table>';
+html += '<div class="summary">';
+html += '<div class="total">Tổng cộng: ' + formatPrice(totalAmount) + 'đ</div>';
+html += '<div class="method">Thanh toán: ' + methodLabel + '</div>';
+if (changeAmount > 0) html += '<div class="method">Tiền thừa: ' + formatPrice(changeAmount) + 'đ</div>';
+html += '</div>';
+html += '<div class="footer">Phần mềm quản lý bán hàng ' + escapeHtml(storeName) + '</div>';
+html += '</body></html>';
+
+// Mở cửa sổ in mới
+var printWindow = window.open('', '_blank', 'width=800,height=600');
+if (printWindow) {
+printWindow.document.write(html);
+printWindow.document.close();
+printWindow.focus();
+setTimeout(function() {
+    printWindow.print();
+}, 500);
+} else {
+showToast('Trình duyệt đã chặn cửa sổ popup!', 'error');
+}
 }

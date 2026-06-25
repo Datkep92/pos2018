@@ -394,8 +394,9 @@ function showTransactionDetail(transactionId) {
             var html =
                 '<div class="detail-section">' + infoHtml + '</div>' +
                 '<div class="detail-section">' + itemsHtml + '</div>' +
-                '<div class="form-actions" style="margin-top:8px;">' +
-                    '<button class="btn-save" onclick="printTransactionDetail(\'' + transactionId + '\')">🖨️ In hóa đơn</button>' +
+                '<div class="form-actions" style="margin-top:8px;display:flex;gap:8px;">' +
+                    '<button class="btn-save" style="flex:1;" onclick="printTransactionDetail(\'' + transactionId + '\')">🖨️ In nhiệt</button>' +
+                    '<button class="btn-save" style="flex:1;background:#f97316;" onclick="exportTransactionPDF(\'' + transactionId + '\')">📄 Xuất PDF</button>' +
                 '</div>';
             
             document.getElementById('transactionDetailBody').innerHTML = html;
@@ -487,6 +488,34 @@ function _doPrintTransaction(tx) {
             createdAt: tx.createdAt || tx.date
         });
     }
+}
+
+function exportTransactionPDF(transactionId) {
+    DB.get('transactions', transactionId).then(function(tx) {
+        if (!tx) {
+            showToast('❌ Không tìm thấy giao dịch', 'error');
+            return;
+        }
+        if (typeof exportBillPDF === 'function') {
+            exportBillPDF({
+                orderType: tx.type || 'dinein',
+                amount: tx.amount || 0,
+                paymentMethod: tx.paymentMethod || 'cash',
+                items: tx.items || [],
+                tableName: tx.tableName || null,
+                customer: tx.customer || null,
+                tableTime: tx.tableTime || null,
+                startTime: tx.startTime || null,
+                endTime: tx.endTime || null,
+                createdAt: tx.createdAt || tx.date
+            });
+        } else {
+            showToast('❌ Chức năng xuất PDF chưa sẵn sàng', 'error');
+        }
+    }).catch(function(err) {
+        console.error('[exportTransactionPDF] Lỗi:', err);
+        showToast('❌ Lỗi khi xuất PDF', 'error');
+    });
 }
 
 // ========== LÝ DO HỦY MẪU ==========
@@ -974,3 +1003,4 @@ window.showTransactionDetail = showTransactionDetail;
 window.printTransactionDetail = printTransactionDetail;
 window.renderHistoryByDateStr = renderHistoryByDateStr;
 window.renderHistoryByDate = renderHistoryByDate;
+window.exportTransactionPDF = exportTransactionPDF;
