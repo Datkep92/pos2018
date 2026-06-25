@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chính sách Thưởng Trách nhiệm</title>
+
+  <!-- Google Font (dễ đọc, thân thiện) -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet" />
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f9fafb;
+      color: #1f2937;
+      line-height: 1.6;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 24px;
+      padding: 40px 50px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      border-bottom: 2px dashed #e5e7eb;
+      padding-bottom: 30px;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: #0b3b5c;
+      letter-spacing: 1px;
+    }
+
+    .header .sub {
+      color: #4b5563;
+      font-size: 1.1rem;
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 6px 18px;
+      border-radius: 40px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-top: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Các section */
+    section {
+      margin-bottom: 42px;
+    }
+
+    section h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #0b3b5c;
+      border-left: 6px solid #f59e0b;
+      padding-left: 18px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    section h2 i {
+      font-size: 1.8rem;
+      font-style: normal;
+    }
+
+    .highlight-box {
+      background: #fffbeb;
+      border-left: 6px solid #f59e0b;
+      padding: 20px 25px;
+      border-radius: 12px;
+      margin: 20px 0;
+      font-size: 1.05rem;
+    }
+
+    .highlight-box strong {
+      color: #b45309;
+    }
+
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .card {
+      background: #f8fafc;
+      padding: 18px 22px;
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      transition: 0.2s;
+    }
+
+    .card:hover {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
+
+    .card h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 6px;
+    }
+
+    ul {
+      padding-left: 22px;
+      margin: 10px 0;
+    }
+
+    ul li {
+      margin-bottom: 8px;
+    }
+
+    ul li::marker {
+      color: #f59e0b;
+    }
+
+    .rule-list {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .rule-list li {
+      padding: 8px 0 8px 32px;
+      background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="%23f59e0b" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>') left center no-repeat;
+      background-size: 18px;
+    }
+
+    .table-ca {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+    }
+
+    .table-ca th,
+    .table-ca td {
+      border: 1px solid #e5e7eb;
+      padding: 12px 16px;
+      text-align: left;
+    }
+
+    .table-ca th {
+      background: #f1f5f9;
+      font-weight: 600;
+    }
+
+    .table-ca tr:hover {
+      background: #fafafa;
+    }
+
+    .message-box {
+      background: #ecfdf5;
+      border: 2px solid #10b981;
+      border-radius: 16px;
+      padding: 24px 30px;
+      margin: 30px 0 10px;
+      text-align: center;
+      font-size: 1.1rem;
+      color: #065f46;
+    }
+
+    .message-box strong {
+      font-size: 1.3rem;
+      display: block;
+      margin-bottom: 6px;
+      color: #047857;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: #6b7280;
+      font-size: 0.9rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 25px;
+      margin-top: 20px;
+    }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .container {
+        padding: 20px 18px;
+      }
+      .grid-2col {
+        grid-template-columns: 1fr;
+      }
+      .header h1 {
+        font-size: 1.8rem;
+      }
+    }
+
+    /* Icon nhỏ xinh */
+    .icon-em {
+      font-size: 1.4rem;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+
+    <!-- ===== HEADER ===== -->
+    <div class="header">
+      <h1>🏅 CHÍNH SÁCH THƯỞNG TRÁCH NHIỆM</h1>
+      <div class="sub">Sau quá trình tăng trưởng, Ghi nhận sự cẩn thận, trung thực và tinh thần trách nhiệm</div>
+      <span class="badge">💰 Quỹ trích doanh thu hàng ngày tạo quỹ chung Thưởng dành cho các bạn</span>
+    </div>
+
+    <!-- ===== 1. LỜI MỞ ĐẦU CỦA QUẢN LÝ ===== -->
+    <section>
+      <div class="highlight-box" style="border-left-color: #10b981;">
+        <p style="font-size:1.1rem;">
+          <strong>Anh luôn mong muốn xây dựng một môi trường làm việc vui vẻ, thoải mái, ổn định và lâu dài.</strong><br><br>
+          Trong quá trình làm việc, sai sót là điều có thể xảy ra. Anh ưu tiên <strong>nhắc nhở, hướng dẫn và hỗ trợ</strong> các bạn cải thiện, thay vì trách mắng hay trừ lương.
+          <br><br>
+          <span style="background: #d1fae5; padding: 2px 10px; border-radius: 40px;">🔹 Quỹ này là để <strong>THƯỞNG</strong>, tinh thần trách nhiệm.</span>
+          <br><br>
+          Từ trước tới nay, anh <strong>chưa từng phạt ai hay nặng lời với ai</strong>. Nhưng để quán vận hành tốt, mỗi người cần <strong>tôn trọng nhau và có trách nhiệm chung</strong> với công việc.
+          <br><br>
+          Mục tiêu của chính sách này là khuyến khích sự cẩn thận, trung thực và tinh thần trách nhiệm. Anh tin các bạn có thể làm tốt hơn mỗi ngày.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== 2. QUỸ THƯỞNG ===== -->
+    <section>
+      <h2><span class="icon-em">💰</span> Công bố Quỹ Thưởng</h2>
+      <div class="grid-2col">
+        <div class="card">
+          <h3>📊 Cách trích quỹ</h3>
+          <ul>
+            <li><strong>Hàng ngày</strong>, trích <strong>1% doanh thu thực tế</strong> của quán.</li>
+            <li>Quỹ dùng để thưởng cho các bạn thực hiện tốt nội quy, quy trình và bảo vệ tài sản.</li>
+            <li>Mức thưởng thực tế tính theo <strong>kết quả doanh thu của từng ngày</strong>.</li>
+            <li>Tỷ lệ % sẽ tăng nếu doanh thu tăng trưởng ổn định <strong>Tối thiểu mức trích doanh thu thấp nhất 1%</strong>.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🎯 Nguyên tắc thưởng</h3>
+          <ul>
+            <li><strong>Tổng doanh thu hàng ngày</strong> Tự động tính toán dựa trên các giao dịch thực hiện.</li>
+            <li>Cuối ngày chốt ca nếu có chênh lệch tiền mặt so với Pos, nhập thiếu,... <strong>Sẽ dùng tiền từ quỹ để bù chênh lệch</strong> nếu số tiền trong quỹ đủ.</li>
+            <li>Nếu thiệt hại lớn hơn quỹ, sẽ yêu cầu kiểm tra giao dịch và các bạn sẽ chịu trách nhiệm bù chênh lệch.</li>
+          </ul>
+        </div>
+      </div>
+      <div style="background: #f0f9ff; border-radius: 12px; padding: 16px 22px; border: 1px solid #bae6fd; margin-top: 10px;">
+        <p style="margin:0; font-weight:500;">
+<div style="background: #fffbeb; border-left: 6px solid #f59e0b; padding: 20px 24px; border-radius: 12px; margin: 20px 0;">
+  <p style="font-size: 1.1rem; line-height: 1.8; margin: 0;">
+    ⭐ <strong style="color: #b45309; font-size: 1.2rem;">Anh mong quỹ này sẽ ngày càng tăng trưởng bền vững.</strong><br />
+    <span style="color: #92400e;">Để điều đó thành hiện thực, chúng ta cần <strong style="color: #dc2626; background: #fee2e2; padding: 0 6px; border-radius: 6px;">hạn chế tối đa sai sót khi nhập máy</strong> – bởi quỹ này không nên phải dùng để bù đắp cho những chênh lệch không đáng có.</span><br />
+    <span style="color: #92400e;">Thay vào đó, mỗi người hãy cùng nhau <strong style="color: #16a34a; background: #dcfce7; padding: 0 6px; border-radius: 6px;">nâng cao trách nhiệm</strong> và <strong style="color: #16a34a; background: #dcfce7; padding: 0 6px; border-radius: 6px;">cải tiến cách vận hành</strong> để làm việc chính xác và hiệu quả hơn.</span><br />
+    <span style="color: #92400e;">Chỉ khi <strong style="color: #1e40af; background: #dbeafe; padding: 0 6px; border-radius: 6px;">cả đội đoàn kết và làm tốt hơn mỗi ngày</strong>, quỹ mới thực sự phát triển.</span><br />
+    <strong style="color: #b45309; font-size: 1.05rem;">Đây là mức trích tối thiểu; nếu hoạt động ổn định và doanh thu tăng trưởng, quỹ sẽ được điều chỉnh tăng theo.</strong>
+  </p>
+</div>        </p>
+      </div>
+    </section>
+
+    <!-- ===== 3. THỜI GIAN LÀM VIỆC ===== -->
+    <section>
+      <h2><span class="icon-em">⏰</span> Thời gian & Nội quy làm việc</h2>
+
+      <h3 style="margin:16px 0 8px; font-weight:600;">🕒 Các ca làm việc</h3>
+      <table class="table-ca">
+        <thead>
+          <tr><th>Loại ca</th><th>Giờ làm</th><th>Nghỉ giữa ca</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Full ca</strong></td><td>06:00 – 16:30</td><td>30 phút (10:00–11:00)</td></tr>
+          <tr><td><strong>Ca sáng</strong></td><td>06:00 – 11:00</td><td>—</td></tr>
+          <tr><td><strong>Linh động</strong></td><td>VD: 05:30 – 10:30</td><td>Phải được sắp xếp trước</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><strong>Đi làm đúng giờ.</strong> Giờ cao điểm tập trung, không việc riêng.</li>
+        <li>Giờ thấp điểm có thể thoải mái hơn, nhưng vẫn <strong>đảm bảo phục vụ khách và giữ quán gọn gàng</strong>.</li>
+      </ul>
+
+      <h3 style="margin:24px 0 8px; font-weight:600;">📅 Ngày nghỉ</h3>
+      <ul>
+        <li>Mỗi tuần nghỉ <strong>01 ngày</strong> (Thứ 7 hoặc Chủ nhật).</li>
+        <li>Không nghỉ trùng nhau để đảm bảo nhân sự.</li>
+        <li>Nghỉ ngày thường: <strong>báo trước</strong> và chủ động tìm người hỗ trợ.</li>
+      </ul>
+    </section>
+
+    <!-- ===== 4. THÁI ĐỘ LÀM VIỆC ===== -->
+    <section>
+      <h2><span class="icon-em">😊</span> Thái độ làm việc – Hình ảnh của quán</h2>
+      <div class="grid-2col">
+        <div class="card">
+          <h3>🙋 Với khách hàng</h3>
+          <ul class="rule-list">
+            <li>Vui vẻ, tích cực, tôn trọng khách</li>
+            <li>Chào hỏi, cảm ơn, giao tiếp lịch sự</li>
+            <li>Đưa / nhận đồ <strong>bằng hai tay</strong></li>
+            <li>Không tranh cãi, lớn tiếng với khách</li>
+            <li>Bình tĩnh xử lý vấn đề, báo anh hỗ trợ khi cần</li>
+            <li>Không nói xấu khách trước mặt khách</li>
+            <li>Chủ động quan sát, hỗ trợ không chờ yêu cầu</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🤝 Đồng đội & Tác phong</h3>
+          <ul class="rule-list">
+            <li>Hỗ trợ nhau khi đông khách</li>
+            <li>Không đùn đẩy trách nhiệm</li>
+            <li>Chủ động vệ sinh, sắp xếp, bổ sung hàng hóa</li>
+            <li>Tác phong gọn gàng, sạch sẽ, chuyên nghiệp</li>
+            <li>Mỗi các bạn khi tiếp xúc với khách đều là <strong>đại diện</strong> của quán, vậy nên hãy vui vẻ và chuyên nghiệp</li>
+          </ul>
+        </div>
+      </div>
+      <div style="background: #fef3c7; padding: 14px 20px; border-radius: 12px; margin-top: 12px;">
+        <p style="margin:0;">⚡ <strong>Giờ cao điểm:</strong> tập trung phục vụ, ưu tiên tốc độ nhưng vẫn giữ thái độ và chất lượng.</p>
+      </div>
+    </section>
+
+    <!-- ===== 5. CÔNG VIỆC HÀNG NGÀY ===== -->
+    <section>
+      <h2><span class="icon-em">📋</span> Công việc hàng ngày & Bàn giao cuối ca</h2>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+        <div style="flex:1; min-width:240px;">
+          <h3 style="font-weight:600;">🛎️ Phục vụ & Bán hàng</h3>
+          <ul>
+            <li><strong>100% đơn hàng</strong> nhập vào POS trước khi giao</li>
+            <li>Giờ cao điểm có thể nhập chậm nhưng <strong>phải bổ sung đầy đủ</strong> ngay sau</li>
+            <li>Chủ động đề xuất ý tưởng cải thiện tốc độ</li>
+          </ul>
+          <h3 style="font-weight:600; margin-top:16px;">🧹 Vệ sinh & Chuẩn bị</h3>
+          <ul>
+            <li>Vệ sinh bàn ghế, quầy, khu vực khách khi vắng</li>
+            <li>Giữ quán sạch sẽ, gọn gàng</li>
+            <li>Trước khi đóng: gửi hóa đơn / nhắc nợ qua Zalo</li>
+          </ul>
+        </div>
+        <div style="flex:1; min-width:240px; background: #f1f5f9; padding: 18px 22px; border-radius: 16px;">
+          <h3 style="font-weight:600; margin-top:0;">✅ Bàn giao cuối ngày (bắt buộc)</h3>
+          <ul>
+            <li>Nhập số dư tiền mặt thực tế vào POS</li>
+            <li>Đối chiếu: tiền mặt, chuyển khoản, Grab, khách nợ, bàn chưa thanh toán</li>
+            <li>Kiểm tra chi phí phát sinh</li>
+            <li><strong>Nhập chính xác số tiền tại Pos</strong></li>
+            <li>Báo ngay anh ngay nếu có chênh lệch</li>
+            <li>Vệ sinh, sắp xếp, chuẩn bị vật tư cho ngày mai</li>
+            <li>Tắt thiết bị không cần thiết</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+   
+
+    <!-- ===== FOOTER ===== -->
+    <div class="footer-note">
+      Mọi thắc mắc hoặc đề xuất, vui lòng trao đổi trực tiếp với anh.<br>
+      ✦ Cập nhật: tháng 6/2026 ✦
+    </div>
+
+  </div>
+
+</body>
+</html>
