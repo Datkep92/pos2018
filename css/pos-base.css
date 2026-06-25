@@ -6700,12 +6700,13 @@ html, body, .app, .main-content {
     .takeaway-cart {
         width: 100%;
         position: fixed;
-        bottom: 56px;
+        bottom: 80px;
         left: 0;
         right: 0;
         z-index: 100;
         border-radius: 16px 16px 0 0;
-        max-height: 45vh;
+        max-height: 48vh;
+        padding-bottom: 4px;
         box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
     }
     .takeaway-pay-btn {
