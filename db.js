@@ -1,4 +1,4 @@
-// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
+﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {
@@ -1306,6 +1306,15 @@
         
         // Helper: sync một collection (fullSync hoặc deltaSync tùy theo sync_meta)
         function syncCollection(collection) {
+            // FIX: Tables luôn dùng fullSync để đảm bảo dữ liệu khớp 100% với Firebase
+            // (tables chỉ ~20 items, fullSync rất nhẹ)
+            // Tránh trường hợp tables bị xóa trên Firebase nhưng local vẫn còn
+            if (collection === 'tables') {
+                console.log('  📦 Tables full sync (always):', collection);
+                syncResults.full.push(collection);
+                return fullSync(collection);
+            }
+            
             return getSyncMeta(collection).then(function(meta) {
                 if (!meta) {
                     console.log('  📦 New device, full sync:', collection);
