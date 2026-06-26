@@ -1319,9 +1319,33 @@
                 // Trường hợp: user xóa dữ liệu thiết bị (IndexedDB bị clear) nhưng sync_meta
                 // vẫn còn trong localStorage -> deltaSync chỉ tải items có _version > localMaxVersion
                 // mà không tải lại toàn bộ dữ liệu -> menu, danh mục, nguyên liệu bị thiếu
+                // Cải tiến: kiểm tra trực tiếp IndexedDB (loadFromLocal) thay vì chỉ dựa vào memoryCache
+                // vì smartSync() chạy trước khi memoryCache được load từ IndexedDB
                 var isLocalEmpty = !memoryCache[collection] || Object.keys(memoryCache[collection]).length === 0;
                 
                 if (!meta || isLocalEmpty) {
+                    // Nếu memoryCache rỗng, kiểm tra thêm IndexedDB để tránh fullSync không cần thiết
+                    // (trường hợp memoryCache chưa được load nhưng IndexedDB đã có dữ liệu)
+                    if (isLocalEmpty) {
+                        return loadFromLocal(collection).then(function(localData) {
+                            var hasLocalData = localData && (Array.isArray(localData) ? localData.length > 0 : Object.keys(localData).length > 0);
+                            if (hasLocalData) {
+                                // IndexedDB có dữ liệu -> load vào memoryCache và dùng deltaSync
+                                if (!memoryCache[collection]) memoryCache[collection] = {};
+                                for (var i = 0; i < localData.length; i++) {
+                                    memoryCache[collection][localData[i].id] = localData[i];
+                                }
+                                // Nếu có sync_meta, dùng deltaSync
+                                if (meta) {
+                                    syncResults.delta.push(collection);
+                                    return deltaSync(collection);
+                                }
+                            }
+                            // IndexedDB thực sự rỗng -> force fullSync
+                            syncResults.full.push(collection);
+                            return fullSync(collection);
+                        });
+                    }
                     syncResults.full.push(collection);
                     return fullSync(collection);
                 }
