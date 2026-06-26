@@ -3106,6 +3106,27 @@ body.modal-open {
     border: 1px solid var(--border);
 }
 
+.history-search {
+    margin-bottom: 12px;
+}
+
+.history-search .search-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    font-size: 14px;
+    background: var(--surface);
+    box-sizing: border-box;
+    -webkit-appearance: none;
+}
+
+.history-search .search-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
 .date-display { flex: 1; text-align: center; font-weight: 500; }
 
 .filter-select {
@@ -3182,6 +3203,22 @@ body.modal-open {
 .history-method.debt-payment-method {
     background: #dbeafe;
     color: #2563eb;
+}
+
+/* Method badge cho xóa bàn - màu đỏ cam */
+.history-method.delete-table-method {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+/* Item xóa bàn - background đỏ nhạt */
+.history-item.delete-table-item {
+    background: #fef2f2;
+    border-left: 3px solid #fca5a5;
+}
+
+.history-item.delete-table-item .history-amount.delete-table-amount {
+    color: #dc2626;
 }
 
 .history-line2 {
