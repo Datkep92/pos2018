@@ -1,4 +1,4 @@
-﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
+// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {
@@ -939,10 +939,13 @@
         var item = { id: key };
         for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
         
-        // OPTIMIZE: Kiểm tra _version — nếu local đã có version >= remote, bỏ qua
-        var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-        if (localItem && (localItem._version || 0) >= (item._version || 0)) {
-            return;
+        // FIX: Chỉ skip _version check cho transactions (chống trùng khi offline sync)
+        // KHÔNG skip cho tables, customers, menu v.v. vì có thể bàn bị xóa rồi tạo lại
+        if (collection !== 'tables') {
+            var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
+            if (localItem && (localItem._version || 0) >= (item._version || 0)) {
+                return;
+            }
         }
         
         // FIX: Chá»‘ng trÃ¹ng transaction tá»« Firebase realtime
@@ -953,7 +956,7 @@
             // Náº¿u local cÃ³ _version >= 1 vÃ  _syncedAt chÆ°a cÃ³, nghÄ©a lÃ  local chÆ°a sync
             // Giá»¯ nguyÃªn báº£n local, khÃ´ng ghi Ä‘Ã¨ báº±ng Firebase data
             if (localTx._version >= 1 && !localTx._syncedAt) {
-                console.log('â­ï¸ Skip Firebase overwrite for pending local transaction:', key);
+                console.log('⏭️ Skip Firebase overwrite for pending local transaction:', key);
                 return;
             }
         }
@@ -974,7 +977,7 @@
                         var timeDiff = Math.abs((existing.createdAt || 0) - (item.createdAt || 0));
                         if (timeDiff < 30000 && timeDiff > 0) {
                             // Transaction tá»« mÃ¡y khÃ¡c trÃ¹ng vá»›i local - Ä‘Ã¡nh dáº¥u refunded Ä‘á»ƒ áº©n
-                            console.warn('âš ï¸ Detected duplicate transaction from another device:', key, 'duplicates', ck);
+                            console.warn('⚠️ Detected duplicate transaction from another device:', key, 'duplicates', ck);
                             item.refunded = true;
                             item.note = (item.note || '') + ' [Tá»± Ä‘á»™ng Ä‘Ã¡nh dáº¥u trÃ¹ng láº·p]';
                             break;
@@ -993,10 +996,13 @@
         var item = { id: key };
         for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
         
-        // OPTIMIZE: Kiểm tra _version — nếu local đã có version >= remote, bỏ qua
-        var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-        if (localItem && (localItem._version || 0) >= (item._version || 0)) {
-            return;
+        // FIX: Chỉ skip _version check cho transactions
+        // KHÔNG skip cho tables vì có thể bàn bị xóa rồi tạo lại
+        if (collection !== 'tables') {
+            var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
+            if (localItem && (localItem._version || 0) >= (item._version || 0)) {
+                return;
+            }
         }
         
         saveToLocal(collection, item).then(emitUpdate);
@@ -1128,6 +1134,10 @@
                     }
                 });
             });
+            
+            // FIX: Polling cũng cần phát hiện deletions (item bị xóa trên Firebase không có _version)
+            // Chạy cleanupDeletedIds để xóa các item đã bị xóa khỏi local cache
+            _cleanupDeletedIds(collection);
         }, intervalSeconds * 1000);
         
         return function() {
@@ -1140,12 +1150,26 @@
     function initNetwork() {
         window.addEventListener('online', function() {
             isOnline = true;
-            showToast('ðŸ“¡ ÄÃ£ káº¿t ná»‘i máº¡ng', 'success');
+            showToast('📡 Đã kết nối mạng', 'success');
             processSyncQueue();
+            // FIX: Khi online trở lại, deltaSync master collections để phát hiện
+            // các item đã bị xóa/sửa/thêm bởi máy khác lúc offline.
+            // deltaSync chỉ tải items có _version > localMaxVersion (rất nhẹ),
+            // kết hợp _cleanupDeletedIds() để phát hiện deletions.
+            // Date-based collections (transactions, daily_balances...) cũng deltaSync
+            // để tải các giao dịch mới mà không cần tải toàn bộ lịch sử.
+            var masterKeys = Object.keys(MASTER_COLLECTIONS);
+            for (var i = 0; i < masterKeys.length; i++) {
+                deltaSync(masterKeys[i]);
+            }
+            var dateKeys = Object.keys(DATE_BASED_COLLECTIONS);
+            for (var j = 0; j < dateKeys.length; j++) {
+                deltaSync(dateKeys[j]);
+            }
         });
         window.addEventListener('offline', function() {
             isOnline = false;
-            showToast('âš ï¸ Máº¥t káº¿t ná»‘i', 'warning');
+            showToast('⚠️ Mất kết nối', 'warning');
         });
         isOnline = navigator.onLine;
     }
@@ -1994,6 +2018,8 @@
                             if (count > 0) {
                                 saveSyncMeta('menu', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                             }
+                            // FIX: Polling cũng cần phát hiện deletions
+                            _cleanupDeletedIds('menu');
                         });
                     });
                 }, 60000);
@@ -2023,6 +2049,8 @@
                             if (count > 0) {
                                 saveSyncMeta('menu_categories', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                             }
+                            // FIX: Polling cũng cần phát hiện deletions
+                            _cleanupDeletedIds('menu_categories');
                         });
                     });
                 }, 60000);
@@ -2052,6 +2080,8 @@
                             if (count > 0) {
                                 saveSyncMeta('ingredients', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                             }
+                            // FIX: Polling cũng cần phát hiện deletions
+                            _cleanupDeletedIds('ingredients');
                         });
                     });
                 }, 60000);
@@ -2081,6 +2111,8 @@
                             if (count > 0) {
                                 saveSyncMeta('messages', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                             }
+                            // FIX: Polling cũng cần phát hiện deletions
+                            _cleanupDeletedIds('messages');
                         });
                     });
                 }, 60000);
