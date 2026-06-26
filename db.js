@@ -1310,14 +1310,18 @@
             // (tables chỉ ~20 items, fullSync rất nhẹ)
             // Tránh trường hợp tables bị xóa trên Firebase nhưng local vẫn còn
             if (collection === 'tables') {
-                console.log('  📦 Tables full sync (always):', collection);
                 syncResults.full.push(collection);
                 return fullSync(collection);
             }
             
             return getSyncMeta(collection).then(function(meta) {
-                if (!meta) {
-                    console.log('  📦 New device, full sync:', collection);
+                // FIX: Kiểm tra nếu IndexedDB rỗng (memoryCache không có data) thì force fullSync
+                // Trường hợp: user xóa dữ liệu thiết bị (IndexedDB bị clear) nhưng sync_meta
+                // vẫn còn trong localStorage -> deltaSync chỉ tải items có _version > localMaxVersion
+                // mà không tải lại toàn bộ dữ liệu -> menu, danh mục, nguyên liệu bị thiếu
+                var isLocalEmpty = !memoryCache[collection] || Object.keys(memoryCache[collection]).length === 0;
+                
+                if (!meta || isLocalEmpty) {
                     syncResults.full.push(collection);
                     return fullSync(collection);
                 }
@@ -1326,12 +1330,10 @@
                 var timeSinceLastSync = now - (meta.lastSyncAt || 0);
                 
                 if (timeSinceLastSync > THIRTY_DAYS_MS) {
-                    console.log('  📦 Stale device (>30d), full sync:', collection);
                     syncResults.full.push(collection);
                     return fullSync(collection);
                 }
                 
-                console.log('  🔄 Recent device, delta sync:', collection);
                 syncResults.delta.push(collection);
                 return deltaSync(collection);
             });
@@ -1470,7 +1472,6 @@
                     saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
                     // Cập nhật maxVersion lên Firebase _meta
                     updateMetaOnFirebase(collection, maxVersion);
-                    console.log('  📥 Full synced ' + collection + ': ' + count + ' items, maxVersion=' + maxVersion);
                     resolve();
                 }).catch(function(err) {
                     console.error('  ❌ Error full syncing ' + collection + ': ', err);
@@ -1551,7 +1552,6 @@
                         return _cleanupDeletedIds(collection).then(function() {
                             saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: dateKeys });
                             updateMetaOnFirebase(collection, newMaxVersion);
-                            console.log('  🔄 Delta synced ' + collection + ': ' + count + ' new items, maxVersion=' + newMaxVersion);
                             resolve();
                         });
                     }).catch(function(err) {
@@ -1606,8 +1606,6 @@
                 }
                 
                 if (deletedIds.length === 0) return;
-                
-                console.log('  🗑️ Detected ' + deletedIds.length + ' deleted items in', collection);
                 
                 // Xóa từng ID khỏi local
                 var deleteChain = Promise.resolve();
