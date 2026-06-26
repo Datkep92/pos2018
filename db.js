@@ -1,4 +1,4 @@
-// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
+﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {

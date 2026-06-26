@@ -607,8 +607,14 @@ function _restoreFromSessionCache() {
             tablesCacheTime = 0;
         }
         
-        // Render UI ngay lập tức từ cache (UI tạm thời, sẽ được render lại sau)
-        renderTables();
+        // FIX: KHÔNG gọi renderTables() ở đây vì:
+        // 1. IndexedDB chưa sẵn sàng (dbReady = null) -> DB.getAll('tables') sẽ crash
+        // 2. Nếu IndexedDB đã sẵn sàng, dữ liệu chưa được cleanup (smartSync chưa chạy)
+        //    -> renderTables() sẽ hiển thị dữ liệu cũ (bao gồm bàn đã xóa trên Firebase)
+        // 3. Promise từ renderTables() có thể resolve SAU KHI switchTab() đã render UI đúng
+        //    -> ghi đè UI đúng bằng dữ liệu cũ (race condition)
+        // Việc render UI sẽ được thực hiện bởi switchTab() sau khi DB.init() hoàn tất
+        // Chỉ khôi phục dữ liệu vào bộ nhớ (cachedTables) để các component khác dùng
         updateRecentToast();
     } catch(e) {
         // Lỗi parse JSON hoặc sessionStorage không khả dụng
