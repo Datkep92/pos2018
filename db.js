@@ -1,4 +1,4 @@
-﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
+// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {
@@ -1406,6 +1406,20 @@
                     memoryCache[collection] = {};
                 }
                 
+                // FIX: Với tables, xóa toàn bộ dữ liệu cũ trong IndexedDB trước
+                // để tránh items đã xóa trên Firebase vẫn còn trong local
+                // Dùng store.clear() để xóa sạch object store, sau đó ghi dữ liệu mới từ Firebase
+                var preClear = Promise.resolve();
+                if (collection === 'tables') {
+                    preClear = new Promise(function(clearResolve) {
+                        var tx = localDB.transaction([collection], 'readwrite');
+                        var store = tx.objectStore(collection);
+                        var req = store.clear();
+                        req.onsuccess = function() { clearResolve(); };
+                        req.onerror = function() { clearResolve(); };
+                    });
+                }
+                
                 // Collection 'info' là special
                 if (collection === 'info') {
                     var infoItem = { id: 'shop_config' };
@@ -1423,8 +1437,8 @@
                     return;
                 }
                 
-                // Ghi từng item từ Firebase vào local
-                var saveChain = Promise.resolve();
+                // Ghi từng item từ Firebase vào local (sau khi đã clear nếu là tables)
+                var saveChain = preClear;
                 for (var key in remote) {
                     if (remote.hasOwnProperty(key)) {
                         (function(itemKey) {
