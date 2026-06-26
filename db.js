@@ -1,4 +1,4 @@
-﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
+// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {
@@ -1152,16 +1152,17 @@
             isOnline = true;
             showToast('📡 Đã kết nối mạng', 'success');
             processSyncQueue();
-            // FIX: Khi online trở lại, deltaSync master collections để phát hiện
-            // các item đã bị xóa/sửa/thêm bởi máy khác lúc offline.
-            // deltaSync chỉ tải items có _version > localMaxVersion (rất nhẹ),
-            // kết hợp _cleanupDeletedIds() để phát hiện deletions.
-            // Date-based collections (transactions, daily_balances...) cũng deltaSync
-            // để tải các giao dịch mới mà không cần tải toàn bộ lịch sử.
+            // FIX: Khi online trở lại, tables dùng fullSync để tải toàn bộ từ Firebase
+            // (tables chỉ ~20 items, đảm bảo dữ liệu luôn khớp với Firebase)
+            fullSync('tables');
+            // Các master collections khác dùng deltaSync (chỉ tải items có _version > localMaxVersion)
             var masterKeys = Object.keys(MASTER_COLLECTIONS);
             for (var i = 0; i < masterKeys.length; i++) {
-                deltaSync(masterKeys[i]);
+                if (masterKeys[i] !== 'tables') {
+                    deltaSync(masterKeys[i]);
+                }
             }
+            // Date-based collections dùng deltaSync (chỉ tải giao dịch mới, không tải lại lịch sử)
             var dateKeys = Object.keys(DATE_BASED_COLLECTIONS);
             for (var j = 0; j < dateKeys.length; j++) {
                 deltaSync(dateKeys[j]);
