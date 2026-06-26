@@ -118,9 +118,57 @@ function renderCustomerList() {
         }
         var oldDebt = (c.totalDebt || 0) - todayDebt + todayPayment;
         
+        // Tính tiền dư hôm nay từ creditHistory
+        var todayCredit = 0; // tiền dư thêm hôm nay (số dương)
+        var todayUsed = 0;   // tiền dư đã dùng hôm nay (số âm)
+        if (todayStr && c.creditHistory) {
+            for (var d = 0; d < c.creditHistory.length; d++) {
+                var entry = c.creditHistory[d];
+                if (_isTodayEntry(entry)) {
+                    var amt = entry.amount || 0;
+                    if (amt > 0) todayCredit += amt;
+                    else todayUsed += amt; // số âm
+                }
+            }
+        }
+        var oldCredit = (c.creditBalance || 0) - todayCredit - todayUsed; // todayUsed là số âm, trừ todayUsed = cộng
+        
         var balanceHtml = '';
         if (netBalance > 0) {
-            balanceHtml = '<span style="color:#16a34a;">+' + formatMoney(netBalance) + '</span>';
+            var totalCreditVal = c.creditBalance || 0;
+            if (todayCredit > 0 && todayUsed < 0) {
+                // Vừa thêm tiền dư vừa dùng tiền dư trong cùng ngày
+                var creditParts = '';
+                if (oldCredit > 0) {
+                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> +';
+                }
+                creditParts += '<span style="color:#16a34a;font-weight:700;">' + formatMoney(todayCredit) + '</span>' +
+                    ' -<span style="color:#f97316;font-weight:700;">' + formatMoney(Math.abs(todayUsed)) + '</span>' +
+                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
+                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
+            } else if (todayCredit > 0) {
+                // Chỉ thêm tiền dư hôm nay
+                var creditParts = '';
+                if (oldCredit > 0) {
+                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> +';
+                }
+                creditParts += '<span style="color:#16a34a;font-weight:700;">' + formatMoney(todayCredit) + '</span>' +
+                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
+                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
+            } else if (todayUsed < 0) {
+                // Chỉ dùng tiền dư hôm nay
+                var creditParts = '';
+                if (oldCredit > 0) {
+                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> -';
+                } else {
+                    creditParts += '0 -';
+                }
+                creditParts += '<span style="color:#f97316;font-weight:700;">' + formatMoney(Math.abs(todayUsed)) + '</span>' +
+                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
+                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
+            } else {
+                balanceHtml = '<span style="color:#16a34a;">+' + formatMoney(netBalance) + '</span>';
+            }
         } else if (netBalance < 0) {
             var totalDebtVal = c.totalDebt || 0;
             // Nếu có trả sau mới hôm nay: hiển thị dạng "Cũ + Mới = Tổng"

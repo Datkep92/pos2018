@@ -806,4 +806,11 @@ DB.subscribe('daily_balances', function() {
             }
         }, 200);
     }, 30);
+    
+    // FIX: Gọi updateRecentToast() ngay khi khởi tạo để hiển thị 5 giao dịch gần nhất
+    // Trước đây chỉ gọi khi có thay đổi transactions (qua callback subscribe)
+    // Nếu không có giao dịch mới, recent toast sẽ không bao giờ hiển thị
+    setTimeout(function() {
+        updateRecentToast();
+    }, 500);
 }

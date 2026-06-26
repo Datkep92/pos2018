@@ -265,15 +265,15 @@ function filterMenuBySearch(keyword) {
                     var variant = item.variants[v];
                     variantsHtml += '<button class="variant-btn" data-item-id="' + item.id + '" data-variant="' + escapeHtml(variant.name) + '" data-price="' + variant.price + '">' + escapeHtml(variant.name) + '</button>';
                 }
-                html += '<div class="menu-item-card" data-item-id="' + item.id + '">' +
-                    '<div class="menu-item-name">' + escapeHtml(item.name) + '</div>' +
-                    '<div class="menu-item-variants">' + variantsHtml + '</div>' +
+                html += '<div class="menu-item-variant" data-item-id="' + item.id + '">' +
+                    '<div class="menu-name">' + escapeHtml(item.name) + '</div>' +
+                    '<div class="variant-group">' + variantsHtml + '</div>' +
                 '</div>';
             } else {
                 var price = item.price || 0;
-                html += '<div class="menu-item-card" data-item-id="' + item.id + '" data-price="' + price + '">' +
-                    '<div class="menu-item-name">' + escapeHtml(item.name) + '</div>' +
-                    '<div class="menu-item-price">' + formatMoney(price) + '</div>' +
+                html += '<div class="menu-card" data-item-id="' + item.id + '" data-name="' + escapeHtml(item.name) + '" data-price="' + price + '">' +
+                    '<div class="menu-name">' + escapeHtml(item.name) + '</div>' +
+                    '<div class="menu-price">' + formatMoney(price) + '</div>' +
                 '</div>';
             }
         }

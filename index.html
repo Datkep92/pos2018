@@ -187,12 +187,54 @@
                         <option value="cancelled">❌ Đã hủy</option>
                     </select>
                 </div>
+                <div class="history-search">
+                    <input type="text" id="historySearchInput" class="search-input" placeholder="🔍 Tìm theo số tiền, tên món, tên khách..." oninput="onHistorySearch()">
+                </div>
                 <div class="history-list" id="historyList"></div>
             </div>
 
             <!-- TAB MENU - TỒN KHO (ADMIN) -->
             <div id="inventoryView" class="tab-content">
                 <div class="inventory-container">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🧂 Quản lý tồn kho</h2>
+                        </div>
+                        <div style="padding:6px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+                            <input class="inv-search-input" id="invIngredientSearch" type="text" placeholder="🔍 Tìm nguyên liệu..." oninput="filterInventoryIngredients(this.value)">
+                        </div>
+                        <div class="card-body">
+                            <div class="inv-section">
+                                <div class="inv-section-header">
+                                    <span class="inv-section-title">📦 Nguyên liệu</span>
+                                    <button class="btn-small btn-outline" onclick="showAddIngredientForm()">+ Thêm</button>
+                                </div>
+                                <div id="invIngredientList" class="inv-ingredient-list"></div>
+                                <div id="addIngredientForm" style="display:none;margin-top:8px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+                                    <input type="text" id="invIngredientName" class="form-input" placeholder="Tên nguyên liệu">
+                                    <input type="text" id="invIngredientUnit" class="form-input" placeholder="Đơn vị (VD: kg, lít, cái)" style="margin-top:6px;">
+                                    <input type="number" id="invIngredientStock" class="form-input" placeholder="Tồn kho hiện tại" style="margin-top:6px;" step="0.1">
+                                    <input type="number" id="invIngredientMinStock" class="form-input" placeholder="Cảnh báo tồn tối thiểu" style="margin-top:6px;" step="0.1">
+                                    <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
+                                        <strong style="font-size:13px;">🔄 Quy đổi đơn vị</strong>
+                                        <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                                            <span style="font-size:12px;color:#64748b;">1</span>
+                                            <input type="text" id="invIngredientConvFrom" class="form-input" placeholder="VD: kg" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                                            <span style="font-size:12px;color:#64748b;">→</span>
+                                            <input type="number" id="invIngredientConvRate" class="form-input" placeholder="SL" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;" step="0.1">
+                                            <input type="text" id="invIngredientConvTo" class="form-input" placeholder="VD: ml" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
+                                        </div>
+                                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">VD: 1 kg → 1600 ml (để trống nếu không quy đổi)</div>
+                                    </div>
+                                    <div style="display:flex;gap:6px;margin-top:8px;">
+                                        <button class="btn-small btn-save" onclick="handleSaveIngredient()">💾 Lưu</button>
+                                        <button class="btn-small btn-cancel" onclick="hideAddIngredientForm()">Hủy</button>
+                                    </div>
+                                    <div id="invIngredientError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="card">
                         <div class="card-header">
                             <h2>📋 Quản lý thực đơn</h2>
@@ -243,45 +285,6 @@
                                         <button class="btn-small btn-cancel" onclick="hideAddMenuItemForm()">Hủy</button>
                                     </div>
                                     <div id="invMenuItemError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>🧂 Quản lý tồn kho</h2>
-                        </div>
-                        <div style="padding:6px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
-                            <input class="inv-search-input" id="invIngredientSearch" type="text" placeholder="🔍 Tìm nguyên liệu..." oninput="filterInventoryIngredients(this.value)">
-                        </div>
-                        <div class="card-body">
-                            <div class="inv-section">
-                                <div class="inv-section-header">
-                                    <span class="inv-section-title">📦 Nguyên liệu</span>
-                                    <button class="btn-small btn-outline" onclick="showAddIngredientForm()">+ Thêm</button>
-                                </div>
-                                <div id="invIngredientList" class="inv-ingredient-list"></div>
-                                <div id="addIngredientForm" style="display:none;margin-top:8px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
-                                    <input type="text" id="invIngredientName" class="form-input" placeholder="Tên nguyên liệu">
-                                    <input type="text" id="invIngredientUnit" class="form-input" placeholder="Đơn vị (VD: kg, lít, cái)" style="margin-top:6px;">
-                                    <input type="number" id="invIngredientStock" class="form-input" placeholder="Tồn kho hiện tại" style="margin-top:6px;" step="0.1">
-                                    <input type="number" id="invIngredientMinStock" class="form-input" placeholder="Cảnh báo tồn tối thiểu" style="margin-top:6px;" step="0.1">
-                                    <div style="margin-top:8px;padding:8px;background:#fff;border-radius:6px;border:1px solid #e2e8f0;">
-                                        <strong style="font-size:13px;">🔄 Quy đổi đơn vị</strong>
-                                        <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap;">
-                                            <span style="font-size:12px;color:#64748b;">1</span>
-                                            <input type="text" id="invIngredientConvFrom" class="form-input" placeholder="VD: kg" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
-                                            <span style="font-size:12px;color:#64748b;">→</span>
-                                            <input type="number" id="invIngredientConvRate" class="form-input" placeholder="SL" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;" step="0.1">
-                                            <input type="text" id="invIngredientConvTo" class="form-input" placeholder="VD: ml" style="flex:0.8;min-width:60px;padding:6px 8px;font-size:12px;">
-                                        </div>
-                                        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">VD: 1 kg → 1600 ml (để trống nếu không quy đổi)</div>
-                                    </div>
-                                    <div style="display:flex;gap:6px;margin-top:8px;">
-                                        <button class="btn-small btn-save" onclick="handleSaveIngredient()">💾 Lưu</button>
-                                        <button class="btn-small btn-cancel" onclick="hideAddIngredientForm()">Hủy</button>
-                                    </div>
-                                    <div id="invIngredientError" style="color:#ef4444;font-size:12px;margin-top:4px;"></div>
                                 </div>
                             </div>
                         </div>

@@ -490,6 +490,23 @@ function doDeleteTable(table) {
     if (table.items && table.items.length) {
         restoreIngredients(table.items);
     }
+    
+    // Ghi lịch sử xóa bàn trước khi xóa
+    var user = DB.getCurrentUser();
+    addHistory({
+        type: 'delete_table',
+        amount: table.total || 0,
+        paymentMethod: 'delete',
+        tableName: table.name,
+        tableId: table.id,
+        items: itemsSnapshot,
+        customer: table.customer || null,
+        createdByName: (user && user.displayName) ? user.displayName : (table.createdByName || ''),
+        startTime: table.startTime || null,
+        endTime: new Date().toISOString(),
+        tableTime: table.tableTime || ''
+    });
+    
     DB.remove('tables', String(pendingDeleteTableId)).then(function() {
         // Log xóa bàn vào Firebase delete_logs
         var details = {

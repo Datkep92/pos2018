@@ -55,14 +55,35 @@ function _toLocalDateStr(dateObj) {
     return y + '-' + m + '-' + d;
 }
 
+// Helper: tính thời gian đã trôi qua (format giống tableTime: 12p, 2h15p, 5h30p)
+function _getElapsedTime(dateStr) {
+    var now = new Date();
+    var txDate = new Date(dateStr);
+    var diffMs = now.getTime() - txDate.getTime();
+    if (diffMs < 0) return '0p';
+    var totalMin = Math.floor(diffMs / 60000);
+    if (totalMin < 1) return 'mới xong';
+    if (totalMin < 60) return totalMin + 'p';
+    var hours = Math.floor(totalMin / 60);
+    var mins = totalMin % 60;
+    if (mins === 0) return hours + 'h';
+    return hours + 'h' + mins + 'p';
+}
+
 function _renderTxItem(tx, index) {
     var isRefunded = tx.refunded === true;
     var txDate = new Date(tx.createdAt || tx.date);
-    var time = txDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var elapsedTime = _getElapsedTime(tx.createdAt || tx.date);
+    var exactTime = txDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    var time = elapsedTime + ' 🕐' + exactTime;
+    
+    var isDeleteTable = (tx.type === 'delete_table');
     
     var location = '';
     var tableTimeBadge = '';
-    if (tx.tableName) {
+    if (isDeleteTable) {
+        location = '🗑️ ' + escapeHtml(tx.tableName || 'Đã xóa');
+    } else if (tx.tableName) {
         var displayLabel = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
         location = '🪑 ' + escapeHtml(displayLabel);
         if (tx.tableTime) {
@@ -73,12 +94,15 @@ function _renderTxItem(tx, index) {
     else location = '🍽️ Tại chỗ';
 
     var isDebtRecord = (tx.type === 'debt_payment' && tx.paymentMethod === 'debt');
-    var isDebtPayment = (tx.type === 'debt_payment' && tx.paymentMethod === 'cash');
+    var isDebtPayment = (tx.type === 'debt_payment' && tx.paymentMethod !== 'debt');
     var isCredit = (tx.type === 'credit');
 
     var method = '';
     var methodClass = '';
-    if (isRefunded) {
+    if (isDeleteTable) {
+        method = '🗑️ Xóa bàn';
+        methodClass = 'delete-table-method';
+    } else if (isRefunded) {
         method = '❌ Đã hủy';
         methodClass = 'refunded-method';
     } else if (isCredit) {
@@ -113,14 +137,16 @@ function _renderTxItem(tx, index) {
     }
 
     var itemClass = 'history-item';
-    if (isRefunded) itemClass += ' refunded';
+    if (isDeleteTable) itemClass += ' delete-table-item';
+    else if (isRefunded) itemClass += ' refunded';
     else if (isCredit) itemClass += ' credit-item';
     else if (isDebtRecord) itemClass += ' debt-record';
     else if (isDebtPayment) itemClass += ' debt-payment';
 
     var amountSign = isRefunded ? '-' : (isDebtRecord ? '📝' : (isCredit ? '+' : '+'));
     var amountClass = 'history-amount';
-    if (isRefunded) amountClass += ' refunded-amount';
+    if (isDeleteTable) amountClass += ' delete-table-amount';
+    else if (isRefunded) amountClass += ' refunded-amount';
     else if (isCredit) amountClass += ' credit-amount';
     else if (isDebtRecord) amountClass += ' debt-record-amount';
     else if (isDebtPayment) amountClass += ' debt-payment-amount';
@@ -174,6 +200,111 @@ function _renderTxItem(tx, index) {
         itemsListHtml +
         swipeHtml +
     '</div>';
+}
+
+// ========== HÀM TÌM KIẾM LỊCH SỬ ==========
+// Bỏ dấu tiếng Việt, chuẩn hóa khoảng trắng để tìm kiếm
+function _removeDiacritics(str) {
+    if (!str) return '';
+    var map = {
+        'à':'a','á':'a','ạ':'a','ả':'a','ã':'a','â':'a','ầ':'a','ấ':'a','ậ':'a','ẩ':'a','ẫ':'a','ă':'a','ằ':'a','ắ':'a','ặ':'a','ẳ':'a','ẵ':'a',
+        'è':'e','é':'e','ẹ':'e','ẻ':'e','ẽ':'e','ê':'e','ề':'e','ế':'e','ệ':'e','ể':'e','ễ':'e',
+        'ì':'i','í':'i','ị':'i','ỉ':'i','ĩ':'i',
+        'ò':'o','ó':'o','ọ':'o','ỏ':'o','õ':'o','ô':'o','ồ':'o','ố':'o','ộ':'o','ổ':'o','ỗ':'o','ơ':'o','ờ':'o','ớ':'o','ợ':'o','ở':'o','ỡ':'o',
+        'ù':'u','ú':'u','ụ':'u','ủ':'u','ũ':'u','ư':'u','ừ':'u','ứ':'u','ự':'u','ử':'u','ữ':'u',
+        'ỳ':'y','ý':'y','ỵ':'y','ỷ':'y','ỹ':'y',
+        'đ':'d',
+        'À':'A','Á':'A','Ạ':'A','Ả':'A','Ã':'A','Â':'A','Ầ':'A','Ấ':'A','Ậ':'A','Ẩ':'A','Ẫ':'A','Ă':'A','Ằ':'A','Ắ':'A','Ặ':'A','Ẳ':'A','Ẵ':'A',
+        'È':'E','É':'E','Ẹ':'E','Ẻ':'E','Ẽ':'E','Ê':'E','Ề':'E','Ế':'E','Ệ':'E','Ể':'E','Ễ':'E',
+        'Ì':'I','Í':'I','Ị':'I','Ỉ':'I','Ĩ':'I',
+        'Ò':'O','Ó':'O','Ọ':'O','Ỏ':'O','Õ':'O','Ô':'O','Ồ':'O','Ố':'O','Ộ':'O','Ổ':'O','Ỗ':'O','Ơ':'O','Ờ':'O','Ớ':'O','Ợ':'O','Ở':'O','Ỡ':'O',
+        'Ù':'U','Ú':'U','Ụ':'U','Ủ':'U','Ũ':'U','Ư':'U','Ừ':'U','Ứ':'U','Ự':'U','Ử':'U','Ữ':'U',
+        'Ỳ':'Y','Ý':'Y','Ỵ':'Y','Ỷ':'Y','Ỹ':'Y',
+        'Đ':'D'
+    };
+    return str.replace(/[^a-zA-Z0-9\s]/g, function(ch) { return map[ch] || ch; });
+}
+
+// Chuẩn hóa keyword: bỏ dấu, lowercase, trim khoảng trắng
+function _normalizeKeyword(str) {
+    return _removeDiacritics(str).toLowerCase().trim();
+}
+
+// Hàm tìm kiếm được gọi từ oninput của ô tìm kiếm
+function onHistorySearch() {
+    var input = document.getElementById('historySearchInput');
+    if (!input) return;
+    var keyword = _normalizeKeyword(input.value);
+    
+    var container = document.getElementById('historyList');
+    if (!container) return;
+    
+    // Nếu không có keyword, hiển thị lại tất cả
+    if (!keyword) {
+        // Re-render lại history với filter hiện tại
+        var dateEl = document.getElementById('historyDate');
+        var dateStr = dateEl ? dateEl.getAttribute('data-date') : '';
+        if (dateStr) {
+            _renderHistoryCore(dateStr);
+        }
+        return;
+    }
+    
+    // Lấy tất cả các item history đang hiển thị
+    var items = container.querySelectorAll('.history-item');
+    if (!items.length) return;
+    
+    var hasMatch = false;
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var match = false;
+        
+        // Lấy text content của item (bao gồm tất cả text trong item)
+        var itemText = item.textContent || '';
+        var normalizedText = _normalizeKeyword(itemText);
+        
+        // Kiểm tra keyword có trong text không
+        if (normalizedText.indexOf(keyword) !== -1) {
+            match = true;
+        } else {
+            // Kiểm tra số tiền: nếu keyword là số, so sánh với amount
+            var amountNum = parseInt(keyword.replace(/[^0-9]/g, ''), 10);
+            if (amountNum > 0) {
+                // Tìm số tiền trong item (format: + 50,000 hoặc - 20,000)
+                var amountMatch = itemText.match(/[\+\-]\s*([\d,]+)/);
+                if (amountMatch) {
+                    var itemAmount = parseInt(amountMatch[1].replace(/,/g, ''), 10);
+                    if (itemAmount === amountNum) {
+                        match = true;
+                    }
+                }
+            }
+        }
+        
+        item.style.display = match ? '' : 'none';
+        if (match) hasMatch = true;
+    }
+    
+    // Ẩn/hiện summary
+    var summary = container.querySelector('.history-summary');
+    if (summary) {
+        summary.style.display = hasMatch ? '' : 'none';
+    }
+    
+    // Nếu không có kết quả, hiển thị thông báo
+    var emptyMsg = container.querySelector('.history-search-empty');
+    if (!hasMatch) {
+        if (!emptyMsg) {
+            emptyMsg = document.createElement('div');
+            emptyMsg.className = 'history-search-empty';
+            emptyMsg.style.cssText = 'text-align:center;padding:30px 16px;color:#94a3b8;font-size:14px;';
+            emptyMsg.textContent = '🔍 Không tìm thấy giao dịch phù hợp';
+            container.appendChild(emptyMsg);
+        }
+        emptyMsg.style.display = '';
+    } else {
+        if (emptyMsg) emptyMsg.style.display = 'none';
+    }
 }
 
 // FIX: Gộp renderHistoryByDate và renderHistoryByDateStr thành 1 hàm core duy nhất
@@ -243,7 +374,7 @@ function _renderHistoryCore(dateStr) {
                 if (filter === 'cash') return t.paymentMethod === 'cash';
                 if (filter === 'transfer') return t.paymentMethod === 'transfer';
                 if (filter === 'debt') return t.type === 'debt_payment' && t.paymentMethod === 'debt';
-                if (filter === 'debt_payment') return t.type === 'debt_payment' && t.paymentMethod === 'cash';
+                if (filter === 'debt_payment') return t.type === 'debt_payment' && t.paymentMethod !== 'debt';
                 if (filter === 'cancelled') return t.refunded === true;
                 if (filter === 'credit') return t.type === 'credit';
                 // Filter staff: value là 'staff:TenNhanVien'
@@ -278,6 +409,7 @@ function _renderHistoryCore(dateStr) {
             var tx = transactions[i];
             if (tx.refunded) continue;
             if (tx.type === 'credit') continue;
+            if (tx.type === 'delete_table') continue;
             // Nếu filter = 'all', bỏ qua giao dịch debt (vì đã có bộ lọc riêng)
             if (!isDebtFilter && tx.type === 'debt_payment' && tx.paymentMethod === 'debt') continue;
             totalCount++;
@@ -334,12 +466,14 @@ function showTransactionDetail(transactionId) {
         }
         
         // Phân biệt Trả sau (mua chịu) vs Thanh toán trả sau (trả tiền)
+        var isDeleteTable = (tx.type === 'delete_table');
         var isDebtRecord = (tx.type === 'debt_payment' && tx.paymentMethod === 'debt');
-        var isDebtPayment = (tx.type === 'debt_payment' && tx.paymentMethod === 'cash');
+        var isDebtPayment = (tx.type === 'debt_payment' && tx.paymentMethod !== 'debt');
         var isCredit = (tx.type === 'credit');
         
         var typeName = '';
-        if (tx.type === 'dinein') typeName = 'Tại chỗ';
+        if (isDeleteTable) typeName = '🗑️ Xóa bàn';
+        else if (tx.type === 'dinein') typeName = 'Tại chỗ';
         else if (tx.type === 'takeaway') typeName = 'Mang đi';
         else if (tx.type === 'grab') typeName = 'Grab';
         else if (isCredit) typeName = '💰 Tiền dư (trả trước)';
@@ -347,7 +481,8 @@ function showTransactionDetail(transactionId) {
         else if (isDebtPayment) typeName = '💵 Thanh toán nợ (trả tiền)';
         
         var paymentMethodText = '';
-        if (tx.paymentMethod === 'cash') paymentMethodText = '💰 Tiền mặt';
+        if (isDeleteTable) paymentMethodText = '🗑️ Xóa bàn';
+        else if (tx.paymentMethod === 'cash') paymentMethodText = '💰 Tiền mặt';
         else if (tx.paymentMethod === 'transfer') paymentMethodText = '💳 Chuyển khoản';
         else if (tx.paymentMethod === 'debt') paymentMethodText = '📝 Ghi nợ';
         else if (tx.paymentMethod === 'grab') paymentMethodText = '🚕 Grab';
@@ -381,11 +516,12 @@ function showTransactionDetail(transactionId) {
         
         // Hàm render HTML hoàn chỉnh (dùng callback sau khi lấy thông tin bàn)
         function renderDetail(tableTimeHtml) {
+            var tableIcon = isDeleteTable ? '🗑️' : '🪑';
             var infoHtml =
                 timeHtml +
                 '<div class="detail-row"><span>🍽️ Loại:</span><span>' + typeName + '</span></div>' +
                 '<div class="detail-row"><span>💳 Thanh toán:</span><span>' + paymentMethodText + '</span></div>' +
-                (tx.tableName ? '<div class="detail-row"><span>🪑 Bàn:</span><span>' + escapeHtml(tx.customer && tx.customer.name ? tx.customer.name : tx.tableName) + '</span></div>' : '') +
+                (tx.tableName ? '<div class="detail-row"><span>' + tableIcon + ' Bàn:</span><span>' + escapeHtml(tx.customer && tx.customer.name ? tx.customer.name : tx.tableName) + '</span></div>' : '') +
                 (tx.createdByName ? '<div class="detail-row"><span>👤 Nhân viên:</span><span>' + escapeHtml(tx.createdByName) + '</span></div>' : '') +
                 tableTimeHtml +
                 '<div class="detail-row" style="margin-top:4px;padding-top:6px;border-top:1px dashed #e2e8f0;"><span>💰 Tổng tiền:</span><span class="detail-amount">' + formatMoney(tx.amount) + '</span></div>' +
@@ -621,6 +757,12 @@ function refundTransaction(transactionId) {
     
     DB.get('transactions', transactionId).then(function(trans) {
         if (!trans || trans.refunded) return;
+        
+        // Chặn hoàn tác giao dịch xóa bàn
+        if (trans.type === 'delete_table') {
+            showToast('❌ Không thể hoàn tác giao dịch xóa bàn', 'error');
+            return;
+        }
         
         // YÊU CẦU 1: Chặn hoàn tác giao dịch ngày trước đó
         // Fix timezone: nếu không có dateKey, parse trans.date theo giờ địa phương
