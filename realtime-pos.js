@@ -423,6 +423,17 @@ function updateTablesDiff(newTables) {
 
 // ========== RENDER TABLES ==========
 function renderTables() {
+    // FIX: Nếu cachedTables đã được load gần đây (bởi loadData hoặc subscription),
+    // dùng luôn để tránh đọc IndexedDB khi chưa kịp sync từ Firebase.
+    // Chỉ đọc từ IndexedDB nếu cachedTables chưa có hoặc đã cũ (>30s).
+    var now = Date.now();
+    if (cachedTables && cachedTables.length > 0 && (now - tablesCacheTime) < 30000) {
+        updateTablesDiff(cachedTables);
+        if (currentTab === 'tables' && typeof startTableTimer === 'function') {
+            startTableTimer();
+        }
+        return Promise.resolve();
+    }
     return DB.getAll('tables').then(function(tables) {
         cachedTables = tables;
         tablesCacheTime = Date.now();

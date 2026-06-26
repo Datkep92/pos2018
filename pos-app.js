@@ -139,6 +139,7 @@ function loadData() {
     var menuCatFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('menu_categories') : null;
     var customersFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('customers') : null;
     var ingredientsFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('ingredients') : null;
+    var tablesFromCache = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('tables') : null;
     
     // Nếu memoryCache có đủ menu + customers -> dùng luôn, không cần đợi IndexedDB
     if (menuFromCache && customersFromCache) {
@@ -151,6 +152,11 @@ function loadData() {
         menuCategories = menuCatFromCache || [];
         customers = customersFromCache;
         ingredients = ingredientsFromCache || [];
+        // FIX: Load tables từ memoryCache (đã được smartSync cập nhật)
+        if (tablesFromCache) {
+            cachedTables = tablesFromCache;
+            tablesCacheTime = Date.now();
+        }
         window.menuItems = menuItems;
         window.customers = customers;
         window.ingredients = ingredients;
@@ -196,6 +202,7 @@ function loadData() {
         DB.getAll('customers'),
         DB.getAll('info'),
         DB.getAll('ingredients'),
+        DB.getAll('tables'), // FIX: Load tables từ IndexedDB (đã được smartSync cập nhật)
         // Đọc trực tiếp từ Firebase để đảm bảo shopConfig luôn đúng
         DB.getShopConfig()
     ]).then(function(results) {
@@ -223,8 +230,12 @@ function loadData() {
         }
         // Load ingredients
         ingredients = results[4] || [];
-        // Shop config: ưu tiên dữ liệu từ Firebase (results[5]), fallback về IndexedDB (shopInfo), rồi hardcode
-        var fbConfig = results[5] || {};
+        // FIX: Load tables từ IndexedDB (đã được smartSync cập nhật)
+        var tablesData = results[5] || [];
+        cachedTables = tablesData;
+        tablesCacheTime = Date.now();
+        // Shop config: ưu tiên dữ liệu từ Firebase (results[6]), fallback về IndexedDB (shopInfo), rồi hardcode
+        var fbConfig = results[6] || {};
         window.shopConfig = {
             telegramBotToken: fbConfig.telegramBotToken || (shopInfo && shopInfo.telegramBotToken) || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
             telegramChatId: fbConfig.telegramChatId || (shopInfo && shopInfo.telegramChatId) || '6372876364',
@@ -591,10 +602,12 @@ function _restoreFromSessionCache() {
         }
         if (tablesData) {
             cachedTables = JSON.parse(tablesData);
-            tablesCacheTime = Date.now();
+            // FIX: Set tablesCacheTime về 0 để renderTables() sau đó (từ switchTab)
+            // không dùng cachedTables cũ từ sessionStorage mà đọc từ IndexedDB đã sync
+            tablesCacheTime = 0;
         }
         
-        // Render UI ngay lập tức từ cache
+        // Render UI ngay lập tức từ cache (UI tạm thời, sẽ được render lại sau)
         renderTables();
         updateRecentToast();
     } catch(e) {
