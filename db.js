@@ -1548,42 +1548,57 @@
         var isMaster = MASTER_COLLECTIONS[collection];
         if (!isMaster) return Promise.resolve();
         if (!isOnline) return Promise.resolve();
-        if (!memoryCache[collection]) return Promise.resolve();
         
-        var localIds = Object.keys(memoryCache[collection]);
-        if (localIds.length === 0) return Promise.resolve();
-        
-        // Query Firebase để lấy tất cả keys hiện tại (chỉ lấy keys, không lấy data - nhẹ)
-        var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-        return ref.once('value').then(function(snapshot) {
-            var remoteData = snapshot.val() || {};
-            var remoteIds = Object.keys(remoteData);
-            
-            // Tìm ID có trong local nhưng không trong remote (= đã bị xóa)
-            var deletedIds = [];
-            for (var i = 0; i < localIds.length; i++) {
-                if (remoteIds.indexOf(localIds[i]) === -1) {
-                    deletedIds.push(localIds[i]);
+        // FIX: Nếu memoryCache chưa được khởi tạo, load từ IndexedDB trước
+        // Tránh trường hợp _cleanupDeletedIds return sớm vì memoryCache rỗng
+        // trong khi IndexedDB vẫn còn items cũ (đã bị xóa trên Firebase)
+        var loadMemory = Promise.resolve();
+        if (!memoryCache[collection]) {
+            loadMemory = loadFromLocal(collection).then(function(data) {
+                if (data) {
+                    memoryCache[collection] = data;
                 }
-            }
+            });
+        }
+        
+        return loadMemory.then(function() {
+            if (!memoryCache[collection]) return;
             
-            if (deletedIds.length === 0) return;
-            
-            console.log('  🗑️ Detected ' + deletedIds.length + ' deleted items in', collection);
-            
-            // Xóa từng ID khỏi local
-            var deleteChain = Promise.resolve();
-            for (var d = 0; d < deletedIds.length; d++) {
-                (function(delId) {
-                    deleteChain = deleteChain.then(function() {
-                        return deleteFromLocal(collection, delId);
-                    });
-                })(deletedIds[d]);
-            }
-            return deleteChain;
-        }).catch(function(err) {
-            // Fallback: nếu lỗi thì vẫn tiếp tục, không block sync
-            console.warn('  ⚠️ Could not check deleted IDs for', collection, ':', err.message);
+            var localIds = Object.keys(memoryCache[collection]);
+            if (localIds.length === 0) return;
+        
+            // Query Firebase để lấy tất cả keys hiện tại (chỉ lấy keys, không lấy data - nhẹ)
+            var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
+            return ref.once('value').then(function(snapshot) {
+                var remoteData = snapshot.val() || {};
+                var remoteIds = Object.keys(remoteData);
+                
+                // Tìm ID có trong local nhưng không trong remote (= đã bị xóa)
+                var deletedIds = [];
+                for (var i = 0; i < localIds.length; i++) {
+                    if (remoteIds.indexOf(localIds[i]) === -1) {
+                        deletedIds.push(localIds[i]);
+                    }
+                }
+                
+                if (deletedIds.length === 0) return;
+                
+                console.log('  🗑️ Detected ' + deletedIds.length + ' deleted items in', collection);
+                
+                // Xóa từng ID khỏi local
+                var deleteChain = Promise.resolve();
+                for (var d = 0; d < deletedIds.length; d++) {
+                    (function(delId) {
+                        deleteChain = deleteChain.then(function() {
+                            return deleteFromLocal(collection, delId);
+                        });
+                    })(deletedIds[d]);
+                }
+                return deleteChain;
+            }).catch(function(err) {
+                // Fallback: nếu lỗi thì vẫn tiếp tục, không block sync
+                console.warn('  ⚠️ Could not check deleted IDs for', collection, ':', err.message);
+            });
         });
     }
     
@@ -1977,148 +1992,156 @@
             // OPTIMIZE: transactions dÃ¹ng limitToLast(200) Ä‘á»ƒ chá»‰ láº¥y 200 giao dá»‹ch gáº§n nháº¥t
             // Giáº£m dung lÆ°á»£ng download tá»« hÃ ng ngÃ n item xuá»‘ng 200 item
             subscribeToCollection('tables');
-            subscribeToCollection('customers');
-            subscribeToCollection('transactions', null, { orderByChild: 'createdAt', limitToLast: 200 });
-            subscribeToCollection('notifications');
-            subscribeToCollection('info');
-            subscribeToCollection('daily_balances');
-            // FIX: ThÃªm subscribe cho cost_categories vÃ  cost_transactions
-            // Ä‘á»ƒ loadExpenseData() vÃ  managerApplyFilter() cÃ³ dá»¯ liá»‡u
-            subscribeToCollection('cost_categories');
-            subscribeToCollection('cost_transactions');
-            // OPTIMIZE: CÃ¡c collection Ã­t thay Ä‘á»•i dÃ¹ng polling thay vÃ¬ realtime
-            // menu, menu_categories, ingredients, messages: refresh má»—i 60s
-            // FIX: KhÃ´ng gá»i subscribeWithPolling vá»›i callback null á»Ÿ Ä‘Ã¢y
-            // VÃ¬ subscribeWithPolling sáº½ Ä‘Æ°á»£c gá»i tá»« initRealtime() vá»›i callback tháº­t
-            // Náº¿u gá»i vá»›i null trÆ°á»›c, láº§n gá»i sau tá»« initRealtime() sáº½ hit early return
-            // vÃ  cÃ³ thá»ƒ bá» lá»¡ callback náº¿u memoryCache chÆ°a sáºµn sÃ ng
-            // Thay vÃ o Ä‘Ã³, chá»‰ khá»Ÿi táº¡o polling timer náº¿u chÆ°a cÃ³
-            if (!_pollingTimers['menu']) {
-                _pollingTimers['menu'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/menu');
-                    getSyncMeta('menu').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['menu'] ? memoryCache['menu'][key] : null;
-                                    saveToLocal('menu', item, localItem ? 'changed' : 'added');
-                                    count++;
+            // FIX: Cleanup deleted IDs ngay sau khi subscribe tables
+            // Đảm bảo IndexedDB không chứa items cũ đã bị xóa trên Firebase
+            // trước khi loadData() đọc tables
+            // QUAN TRỌNG: Không dùng return ở đây để tránh làm hỏng luồng code
+            // Các polling timers và code phía sau vẫn cần được thực thi
+            _cleanupDeletedIds('tables').then(function() {
+                subscribeToCollection('customers');
+                subscribeToCollection('transactions', null, { orderByChild: 'createdAt', limitToLast: 200 });
+                subscribeToCollection('notifications');
+                subscribeToCollection('info');
+                subscribeToCollection('daily_balances');
+                // FIX: ThÃªm subscribe cho cost_categories vÃ  cost_transactions
+                // Ä‘á»ƒ loadExpenseData() vÃ  managerApplyFilter() cÃ³ dá»¯ liá»‡u
+                subscribeToCollection('cost_categories');
+                subscribeToCollection('cost_transactions');
+
+                // OPTIMIZE: CÃ¡c collection Ã­t thay Ä‘á»•i dÃ¹ng polling thay vÃ¬ realtime
+                // menu, menu_categories, ingredients, messages: refresh má»—i 60s
+                // FIX: KhÃ´ng gá»i subscribeWithPolling vá»›i callback null á»Ÿ Ä‘Ã¢y
+                // VÃ¬ subscribeWithPolling sáº½ Ä‘Æ°á»£c gá»i tá»« initRealtime() vá»›i callback tháº­t
+                // Náº¿u gá»i vá»›i null trÆ°á»›c, láº§n gá»i sau tá»« initRealtime() sáº½ hit early return
+                // vÃ  cÃ³ thá»ƒ bá» lá»¡ callback náº¿u memoryCache chÆ°a sáºµn sÃ ng
+                // Thay vÃ o Ä‘Ã³, chá»‰ khá»Ÿi táº¡o polling timer náº¿u chÆ°a cÃ³
+                if (!_pollingTimers['menu']) {
+                    _pollingTimers['menu'] = setInterval(function() {
+                        if (!isOnline) return;
+                        var ref = db.ref(CURRENT_SHOP_ID + '/menu');
+                        getSyncMeta('menu').then(function(meta) {
+                            var localMaxVersion = (meta && meta.maxVersion) || 0;
+                            ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
+                                if (!snapshot.exists()) return;
+                                var remote = snapshot.val() || {};
+                                var count = 0, newMaxVersion = localMaxVersion;
+                                for (var key in remote) {
+                                    if (remote.hasOwnProperty(key)) {
+                                        var src = remote[key];
+                                        var item = { id: key };
+                                        for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
+                                        if (item._version === undefined) item._version = 1;
+                                        if (item._version > newMaxVersion) newMaxVersion = item._version;
+                                        var localItem = memoryCache['menu'] ? memoryCache['menu'][key] : null;
+                                        saveToLocal('menu', item, localItem ? 'changed' : 'added');
+                                        count++;
+                                    }
                                 }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('menu', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                            // FIX: Polling cũng cần phát hiện deletions
-                            _cleanupDeletedIds('menu');
-                        });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['menu_categories']) {
-                _pollingTimers['menu_categories'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/menu_categories');
-                    getSyncMeta('menu_categories').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['menu_categories'] ? memoryCache['menu_categories'][key] : null;
-                                    saveToLocal('menu_categories', item, localItem ? 'changed' : 'added');
-                                    count++;
+                                if (count > 0) {
+                                    saveSyncMeta('menu', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                                 }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('menu_categories', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                            // FIX: Polling cũng cần phát hiện deletions
-                            _cleanupDeletedIds('menu_categories');
+                                // FIX: Polling cũng cần phát hiện deletions
+                                _cleanupDeletedIds('menu');
+                            });
                         });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['ingredients']) {
-                _pollingTimers['ingredients'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/ingredients');
-                    getSyncMeta('ingredients').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['ingredients'] ? memoryCache['ingredients'][key] : null;
-                                    saveToLocal('ingredients', item, localItem ? 'changed' : 'added');
-                                    count++;
+                    }, 60000);
+                }
+                if (!_pollingTimers['menu_categories']) {
+                    _pollingTimers['menu_categories'] = setInterval(function() {
+                        if (!isOnline) return;
+                        var ref = db.ref(CURRENT_SHOP_ID + '/menu_categories');
+                        getSyncMeta('menu_categories').then(function(meta) {
+                            var localMaxVersion = (meta && meta.maxVersion) || 0;
+                            ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
+                                if (!snapshot.exists()) return;
+                                var remote = snapshot.val() || {};
+                                var count = 0, newMaxVersion = localMaxVersion;
+                                for (var key in remote) {
+                                    if (remote.hasOwnProperty(key)) {
+                                        var src = remote[key];
+                                        var item = { id: key };
+                                        for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
+                                        if (item._version === undefined) item._version = 1;
+                                        if (item._version > newMaxVersion) newMaxVersion = item._version;
+                                        var localItem = memoryCache['menu_categories'] ? memoryCache['menu_categories'][key] : null;
+                                        saveToLocal('menu_categories', item, localItem ? 'changed' : 'added');
+                                        count++;
+                                    }
                                 }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('ingredients', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                            // FIX: Polling cũng cần phát hiện deletions
-                            _cleanupDeletedIds('ingredients');
-                        });
-                    });
-                }, 60000);
-            }
-            if (!_pollingTimers['messages']) {
-                _pollingTimers['messages'] = setInterval(function() {
-                    if (!isOnline) return;
-                    var ref = db.ref(CURRENT_SHOP_ID + '/messages');
-                    getSyncMeta('messages').then(function(meta) {
-                        var localMaxVersion = (meta && meta.maxVersion) || 0;
-                        ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
-                            if (!snapshot.exists()) return;
-                            var remote = snapshot.val() || {};
-                            var count = 0, newMaxVersion = localMaxVersion;
-                            for (var key in remote) {
-                                if (remote.hasOwnProperty(key)) {
-                                    var src = remote[key];
-                                    var item = { id: key };
-                                    for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                                    if (item._version === undefined) item._version = 1;
-                                    if (item._version > newMaxVersion) newMaxVersion = item._version;
-                                    var localItem = memoryCache['messages'] ? memoryCache['messages'][key] : null;
-                                    saveToLocal('messages', item, localItem ? 'changed' : 'added');
-                                    count++;
+                                if (count > 0) {
+                                    saveSyncMeta('menu_categories', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
                                 }
-                            }
-                            if (count > 0) {
-                                saveSyncMeta('messages', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                            }
-                            // FIX: Polling cũng cần phát hiện deletions
-                            _cleanupDeletedIds('messages');
+                                // FIX: Polling cũng cần phát hiện deletions
+                                _cleanupDeletedIds('menu_categories');
+                            });
                         });
-                    });
-                }, 60000);
-            }
-            console.log('âœ… Database ready, device:', CURRENT_DEVICE_ID);
-            return { isOnline: isOnline, deviceId: CURRENT_DEVICE_ID };
+                    }, 60000);
+                }
+                if (!_pollingTimers['ingredients']) {
+                    _pollingTimers['ingredients'] = setInterval(function() {
+                        if (!isOnline) return;
+                        var ref = db.ref(CURRENT_SHOP_ID + '/ingredients');
+                        getSyncMeta('ingredients').then(function(meta) {
+                            var localMaxVersion = (meta && meta.maxVersion) || 0;
+                            ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
+                                if (!snapshot.exists()) return;
+                                var remote = snapshot.val() || {};
+                                var count = 0, newMaxVersion = localMaxVersion;
+                                for (var key in remote) {
+                                    if (remote.hasOwnProperty(key)) {
+                                        var src = remote[key];
+                                        var item = { id: key };
+                                        for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
+                                        if (item._version === undefined) item._version = 1;
+                                        if (item._version > newMaxVersion) newMaxVersion = item._version;
+                                        var localItem = memoryCache['ingredients'] ? memoryCache['ingredients'][key] : null;
+                                        saveToLocal('ingredients', item, localItem ? 'changed' : 'added');
+                                        count++;
+                                    }
+                                }
+                                if (count > 0) {
+                                    saveSyncMeta('ingredients', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
+                                }
+                                // FIX: Polling cũng cần phát hiện deletions
+                                _cleanupDeletedIds('ingredients');
+                            });
+                        });
+                    }, 60000);
+                }
+                if (!_pollingTimers['messages']) {
+                    _pollingTimers['messages'] = setInterval(function() {
+                        if (!isOnline) return;
+                        var ref = db.ref(CURRENT_SHOP_ID + '/messages');
+                        getSyncMeta('messages').then(function(meta) {
+                            var localMaxVersion = (meta && meta.maxVersion) || 0;
+                            ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
+                                if (!snapshot.exists()) return;
+                                var remote = snapshot.val() || {};
+                                var count = 0, newMaxVersion = localMaxVersion;
+                                for (var key in remote) {
+                                    if (remote.hasOwnProperty(key)) {
+                                        var src = remote[key];
+                                        var item = { id: key };
+                                        for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
+                                        if (item._version === undefined) item._version = 1;
+                                        if (item._version > newMaxVersion) newMaxVersion = item._version;
+                                        var localItem = memoryCache['messages'] ? memoryCache['messages'][key] : null;
+                                        saveToLocal('messages', item, localItem ? 'changed' : 'added');
+                                        count++;
+                                    }
+                                }
+                                if (count > 0) {
+                                    saveSyncMeta('messages', { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
+                                }
+                                // FIX: Polling cũng cần phát hiện deletions
+                                _cleanupDeletedIds('messages');
+                            });
+                        });
+                    }, 60000);
+                }
+                console.log('âœ… Database ready, device:', CURRENT_DEVICE_ID);
+                return { isOnline: isOnline, deviceId: CURRENT_DEVICE_ID };
+            });
         });
     }
 
