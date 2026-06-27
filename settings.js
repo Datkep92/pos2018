@@ -666,12 +666,14 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
         html += '        <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
         html += '        <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
 
-        // 💵 Số tiền tại POS hiện tại
-        var staffPosCashDisplay = countedTotal > 0 ? countedTotal : data.expectedClosing;
-        html += '        <div class="pos-cash-row" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
-        html += '          <span>💵 Số tiền tại POS hiện tại:</span>';
-        html += '          <span class="' + (staffPosCashDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative') + '" id="staffPosCashValue">' + formatMoney(staffPosCashDisplay) + '</span>';
-        html += '        </div>';
+        // 💵 Tổng số tiền đếm được - hiển thị khi nhân viên đã nhập mệnh giá (countedTotal > 0)
+        // Khi chưa nhập mệnh giá: ẩn hoàn toàn, không hiển thị số dự kiến
+        if (countedTotal > 0) {
+            html += '        <div class="pos-cash-row" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
+            html += '          <span>🔢 Tổng số tiền đếm được:</span>';
+            html += '          <span class="pos-cash-positive" style="font-weight:700;font-size:15px;" id="staffPosCashValue">' + formatMoney(countedTotal) + '</span>';
+            html += '        </div>';
+        }
         html += '      </div>';
 
         html += '    </div>'; // end flex row
@@ -753,12 +755,22 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
     // ===== NÚT HÀNH ĐỘNG =====
     var displayDate = data.dateKey || (typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10));
     var dateLabel = formatDateDisplay(displayDate);
+    var hasPickupHistory = data.pickupHistory && data.pickupHistory.length > 0;
     if (isAdmin) {
         html += '  <div class="cash-counter-actions">';
         html += '    <button class="cash-action-btn cash-reset-btn" onclick="resetCashCounter()">🔄 Làm lại</button>';
-        if (data.isClosed) {
+        if (!data.isClosed) {
+            // NÂNG CẤP: Admin cũng có nút chốt ngày để chốt thay nhân viên
+            html += '    <button class="cash-action-btn cash-close-btn" onclick="staffCloseDay()">🔒 Chốt ngày ' + dateLabel + '</button>';
+        } else {
             // Admin có nút "Hủy chốt" để mở khóa cho nhân viên chốt lại
             html += '    <button class="cash-action-btn cash-unlock-btn" onclick="unlockDayClose()">🔓 Hủy chốt ' + dateLabel + '</button>';
+            // Nút in phiếu chốt ca cho admin
+            html += '    <button class="cash-action-btn" style="background:#27ae60;color:#fff;" onclick="printStaffCloseReceipt()">🖨️ In chốt ca</button>';
+        }
+        // Nút in phiếu QL nhận tiền - nằm trong cash-counter-actions cho admin
+        if (hasPickupHistory) {
+            html += '    <button class="cash-action-btn" style="background:#2c3e50;color:#fff;" onclick="printManagerPickup()">🖨️ In QL nhận</button>';
         }
         html += '  </div>';
     } else {
@@ -766,6 +778,9 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
         html += '    <button class="cash-action-btn cash-reset-btn" onclick="resetCashCounter()">🔄 Làm lại</button>';
         if (!data.isClosed) {
             html += '    <button class="cash-action-btn cash-close-btn" onclick="staffCloseDay()">🔒 Chốt ngày ' + dateLabel + '</button>';
+        } else {
+            // Nút in phiếu chốt ca cho nhân viên
+            html += '    <button class="cash-action-btn" style="background:#27ae60;color:#fff;" onclick="printStaffCloseReceipt()">🖨️ In chốt ca</button>';
         }
         html += '  </div>';
     }
@@ -797,9 +812,11 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
                     timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
                 }
                 var pickupId = ph.id || '';
+                var remainingStr = ph.remainingPosCash !== undefined ? formatMoney(ph.remainingPosCash) : '...';
                 html += '    <div class="pos-cash-row pos-cash-pickup-log">';
                 html += '      <span>🕐 ' + timeStr + '</span>';
                 html += '      <span>-' + formatMoney(ph.amount) + '</span>';
+                html += '      <span style="font-size:11px;color:#64748b;margin-left:8px;">📦 Còn: ' + remainingStr + '</span>';
                 html += '      <button class="cash-action-btn" style="padding:2px 6px;font-size:10px;margin-left:auto;color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:4px;cursor:pointer;" onclick="deleteManagerPickup(\'' + pickupId + '\')" title="Xóa">🗑️</button>';
                 html += '    </div>';
             }
@@ -872,14 +889,20 @@ function updateCashGrandTotal() {
         diffEl.className = diffClass;
     }
 
-    // Cập nhật Số tiền tại POS hiện tại (staff)
-    // - Nếu đã đếm tiền (total > 0): hiển thị số đếm được
-    // - Nếu chưa đếm (total === 0): hiển thị expectedClosing (dự kiến còn trong két)
+    // Cập nhật Tổng số tiền đếm được (staff) - realtime khi nhập mệnh giá
     var staffPosCashEl = document.getElementById('staffPosCashValue');
     if (staffPosCashEl) {
-        var staffDisplay = total > 0 ? total : (_posCashData ? _posCashData.expectedClosing : 0);
-        staffPosCashEl.textContent = formatMoney(staffDisplay);
-        staffPosCashEl.className = staffDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
+        if (total > 0) {
+            staffPosCashEl.textContent = formatMoney(total);
+            staffPosCashEl.className = 'pos-cash-positive';
+            // Hiện dòng nếu đang bị ẩn (lần đầu nhập mệnh giá)
+            var parentRow = staffPosCashEl.closest('.pos-cash-row');
+            if (parentRow) parentRow.style.display = '';
+        } else {
+            // Ẩn dòng số tiền khi chưa nhập mệnh giá
+            var parentRow = staffPosCashEl.closest('.pos-cash-row');
+            if (parentRow) parentRow.style.display = 'none';
+        }
     }
 }
 
@@ -964,13 +987,19 @@ function saveManagerPickup() {
     var now = Date.now();
     var pickupId = 'pickup_' + now.toString(36) + '_' + Math.random().toString(36).substr(2, 4);
 
+    // Tính số tiền POS còn lại sau khi QL nhận
+    var currentPosCash = _posCashData ? _posCashData.expectedClosing : 0;
+    var remainingPosCash = currentPosCash - amount;
+    if (remainingPosCash < 0) remainingPosCash = 0;
+
     var pickupData = {
         id: pickupId,
         amount: amount,
         dateKey: today,
         createdAt: now,
         createdBy: (DB.getCurrentUser && DB.getCurrentUser() && DB.getCurrentUser().id) || window.currentDeviceId || 'admin',
-        note: 'Quản lý nhận tiền mặt'
+        note: 'Quản lý nhận tiền mặt',
+        remainingPosCash: remainingPosCash
     };
 
     // Bước 1: Lưu vào IndexedDB qua DB.create trước -> memoryCache được cập nhật ngay
@@ -2405,4 +2434,419 @@ function showActiveTablesModal() {
         document.body.appendChild(div.firstElementChild);
         openBottomSheet(modalId);
     });
+}
+
+// ========== IN PHIẾU QUẢN LÝ NHẬN TIỀN ==========
+function printManagerPickup() {
+    var data = _posCashData;
+    if (!data || !data.pickupHistory || data.pickupHistory.length === 0) {
+        showToast('⚠️ Không có dữ liệu QL nhận tiền', 'warning');
+        return;
+    }
+
+    // Dùng ngày đã chọn (nếu có) để in theo ngày tương ứng
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+
+    // Tạo nội dung in
+    var lines = [];
+    lines.push('================================');
+    lines.push('   PHIẾU QUẢN LÝ NHẬN TIỀN');
+    lines.push('   Ngày: ' + dateLabel);
+    lines.push('================================');
+    lines.push('');
+
+    for (var i = 0; i < data.pickupHistory.length; i++) {
+        var ph = data.pickupHistory[i];
+        var timeStr = '';
+        if (ph.createdAt) {
+            var d = new Date(ph.createdAt);
+            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        }
+        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr);
+        lines.push('  QL nhận: ' + formatMoney(ph.amount));
+        var remaining = ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0;
+        lines.push('  POS còn: ' + formatMoney(remaining));
+        lines.push('  ------------------------------');
+    }
+
+    lines.push('');
+    lines.push('  Tổng QL nhận: ' + formatMoney(data.managerPickupTotal));
+    lines.push('  Số tiền POS đầu ngày: ' + formatMoney(data.openingBalance || 0));
+    lines.push('');
+    lines.push('================================');
+    lines.push('  ' + new Date().toLocaleString('vi-VN'));
+    lines.push('================================');
+
+    var text = lines.join('\n');
+
+    // Hiển thị popup modal để in / xem
+    var modalId = 'printPickupModal';
+    var html = '<div id="' + modalId + '" class="modal" onclick="if(event.target===this)window.closeModal(\'' + modalId + '\')">' +
+        '<div class="modal-content" style="max-width:400px;">' +
+        '<div class="modal-header">' +
+            '<span class="modal-title">🖨️ Phiếu QL nhận tiền</span>' +
+            '<span class="modal-close" onclick="window.closeModal(\'' + modalId + '\')">&times;</span>' +
+        '</div>' +
+        '<div class="modal-body">' +
+            '<pre style="font-family:monospace;font-size:13px;line-height:1.6;background:#f8f9fa;padding:16px;border-radius:8px;white-space:pre-wrap;word-break:break-word;margin:0;">' + text + '</pre>' +
+            '<div style="display:flex;gap:8px;margin-top:12px;">' +
+                '<button class="cash-action-btn" style="flex:1;padding:10px;background:#2c3e50;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;" onclick="printPickupContent(\'' + modalId + '\')">🖨️ In</button>' +
+                '<button class="cash-action-btn" style="flex:1;padding:10px;background:#3498db;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;" onclick="copyPickupContent()">📋 Sao chép</button>' +
+            '</div>' +
+        '</div>' +
+        '</div>' +
+    '</div>';
+
+    // Xóa modal cũ nếu còn (tránh cache khi chọn ngày khác)
+    var oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.parentNode.removeChild(oldModal);
+
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    document.body.appendChild(div.firstElementChild);
+    openBottomSheet(modalId);
+}
+
+// Sao chép nội dung phiếu QL nhận tiền
+function copyPickupContent() {
+    var data = _posCashData;
+    if (!data || !data.pickupHistory) return;
+
+    var today = data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(today);
+
+    var lines = [];
+    lines.push('PHIẾU QUẢN LÝ NHẬN TIỀN');
+    lines.push('Ngày: ' + dateLabel);
+    lines.push('');
+
+    for (var i = 0; i < data.pickupHistory.length; i++) {
+        var ph = data.pickupHistory[i];
+        var timeStr = '';
+        if (ph.createdAt) {
+            var d = new Date(ph.createdAt);
+            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        }
+        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr + ': ' + formatMoney(ph.amount) + ' (POS còn: ' + formatMoney(ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0) + ')');
+    }
+
+    lines.push('');
+    lines.push('Tổng QL nhận: ' + formatMoney(data.managerPickupTotal));
+    lines.push('Số tiền POS đầu ngày: ' + formatMoney(data.openingBalance || 0));
+
+    var text = lines.join('\n');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            showToast('✅ Đã sao chép', 'success');
+        }).catch(function() {
+            fallbackCopy(text);
+        });
+    } else {
+        fallbackCopy(text);
+    }
+}
+
+// In nội dung phiếu QL nhận tiền qua máy in nhiệt (dùng print.js)
+function printPickupContent(modalId) {
+    var data = _posCashData;
+    if (!data || !data.pickupHistory) return;
+
+    var today = data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(today);
+
+    var textLines = [];
+    textLines.push('================================');
+    textLines.push('   PHIEU QUAN LY NHAN TIEN');
+    textLines.push('   Ngay: ' + dateLabel);
+    textLines.push('================================');
+    textLines.push('');
+
+    for (var i = 0; i < data.pickupHistory.length; i++) {
+        var ph = data.pickupHistory[i];
+        var timeStr = '';
+        if (ph.createdAt) {
+            var d = new Date(ph.createdAt);
+            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        }
+        textLines.push('  Lan ' + (i + 1) + ' - ' + timeStr);
+        textLines.push('  QL nhan: ' + formatMoney(ph.amount));
+        var remaining = ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0;
+        textLines.push('  POS con: ' + formatMoney(remaining));
+        textLines.push('  ------------------------------');
+    }
+
+    textLines.push('');
+    textLines.push('  Tong QL nhan: ' + formatMoney(data.managerPickupTotal));
+    textLines.push('  So tien POS dau ngay: ' + formatMoney(data.openingBalance || 0));
+    textLines.push('');
+    textLines.push('================================');
+    textLines.push('  ' + new Date().toLocaleString('vi-VN'));
+    textLines.push('================================');
+
+    var text = textLines.join('\n');
+
+    // Đóng modal
+    closeModal(modalId);
+
+    // Dùng printViaSunmi từ print.js với data.text
+    if (typeof printViaSunmi === 'function') {
+        printViaSunmi({ text: text }).then(function() {
+            showToast('✅ Da in phieu QL nhan tien', 'success');
+        }).catch(function(err) {
+            console.warn('Print pickup failed:', err);
+            showToast('⚠️ In that bai: ' + (err ? err.message : 'Loi'), 'error');
+        });
+    } else {
+        // Fallback: mở cửa sổ in mới
+        var printWindow = window.open('', '_blank', 'width=300,height=600');
+        if (printWindow) {
+            printWindow.document.write('<html><head><title>In phieu QL nhan tien</title>');
+            printWindow.document.write('<style>body{font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;}@media print{@page{margin:0;}}</style>');
+            printWindow.document.write('</head><body>');
+            printWindow.document.write('<pre>' + text + '</pre>');
+            printWindow.document.write('<script>window.onload=function(){window.print();window.close();}<\/script>');
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+        } else {
+            showToast('⚠️ Khong the mo cua so in. Hay sao chep noi dung.', 'warning');
+        }
+    }
+}
+
+// ========== IN PHIẾU CHỐT CA CHO NHÂN VIÊN ==========
+function printStaffCloseReceipt() {
+    var data = _posCashData;
+    if (!data || !data.isClosed) {
+        showToast('⚠️ Chưa chốt ngày, không thể in', 'warning');
+        return;
+    }
+
+    // Dùng ngày đã chọn (nếu có) để in theo ngày tương ứng
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+
+    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    var countedTotal = 0;
+    for (var i = 0; i < CASH_DENOMS.length; i++) {
+        countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
+    }
+    // Nếu đã chốt, dùng cashKept thay vì countedTotal (số đã chốt)
+    var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
+    var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
+
+    var textLines = [];
+    textLines.push('================================');
+    textLines.push('   PHIEU CHOT CA');
+    textLines.push('   Ngay: ' + dateLabel);
+    textLines.push('================================');
+    textLines.push('');
+
+    // Thời gian chốt
+    if (data.closedAtTime) {
+        textLines.push('  Thoi gian chot: ' + data.closedAtTime);
+        textLines.push('');
+    }
+
+    textLines.push('  --- DOANH THU ---');
+    textLines.push('  Tong doanh thu: ' + formatMoney(data.totalRevenue));
+    textLines.push('  Tien mat: ' + formatMoney(data.cashRevenue));
+    textLines.push('  Chuyen khoan: ' + formatMoney(data.transferAmount));
+    textLines.push('  Grab: ' + formatMoney(data.grabAmount));
+    if (data.debtAmount > 0) {
+        textLines.push('  No trong ngay: ' + formatMoney(data.debtAmount));
+    }
+    textLines.push('');
+
+    textLines.push('  --- THONG TIN ---');
+    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance));
+    textLines.push('  Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
+    textLines.push('  QL nhan: ' + formatMoney(data.managerPickupTotal));
+    textLines.push('');
+
+    textLines.push('  --- KET QUA CHOT ---');
+    textLines.push('  So tien dem duoc tai POS: ' + formatMoney(actualCash));
+    textLines.push('  So tien du kien con lai: ' + formatMoney(expectedClosing));
+    var diffSign = diff >= 0 ? '+' : '';
+    textLines.push('  Chenh lech: ' + diffSign + formatMoney(diff));
+    textLines.push('');
+
+    textLines.push('================================');
+    // Dùng targetDate để hiển thị ngày in đúng với ngày đã chọn
+    var printTime = targetDate === getTodayDateKey() ? new Date().toLocaleString('vi-VN') : formatDateDisplay(targetDate) + ' 23:59';
+    textLines.push('  ' + printTime);
+    textLines.push('================================');
+
+    var text = textLines.join('\n');
+
+    // Hiển thị popup modal để in / xem trước
+    var modalId = 'printStaffCloseModal';
+    var html = '<div id="' + modalId + '" class="modal" onclick="if(event.target===this)window.closeModal(\'' + modalId + '\')">' +
+        '<div class="modal-content" style="max-width:400px;">' +
+        '<div class="modal-header">' +
+            '<span class="modal-title">🖨️ Phiếu chốt ca</span>' +
+            '<span class="modal-close" onclick="window.closeModal(\'' + modalId + '\')">&times;</span>' +
+        '</div>' +
+        '<div class="modal-body">' +
+            '<pre style="font-family:monospace;font-size:13px;line-height:1.6;background:#f8f9fa;padding:16px;border-radius:8px;white-space:pre-wrap;word-break:break-word;margin:0;">' + text + '</pre>' +
+            '<div style="display:flex;gap:8px;margin-top:12px;">' +
+                '<button class="cash-action-btn" style="flex:1;padding:10px;background:#2c3e50;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;" onclick="printStaffCloseContent(\'' + modalId + '\')">🖨️ In</button>' +
+                '<button class="cash-action-btn" style="flex:1;padding:10px;background:#3498db;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;" onclick="copyStaffCloseContent()">📋 Sao chép</button>' +
+            '</div>' +
+        '</div>' +
+        '</div>' +
+    '</div>';
+
+    // Xóa modal cũ nếu còn (tránh cache khi chọn ngày khác)
+    var oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.parentNode.removeChild(oldModal);
+
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    document.body.appendChild(div.firstElementChild);
+    openBottomSheet(modalId);
+}
+
+// In nội dung phiếu chốt ca qua máy in nhiệt
+function printStaffCloseContent(modalId) {
+    var data = _posCashData;
+    if (!data || !data.isClosed) return;
+
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+
+    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    var countedTotal = 0;
+    for (var i = 0; i < CASH_DENOMS.length; i++) {
+        countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
+    }
+    var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
+    var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
+
+    var textLines = [];
+    textLines.push('================================');
+    textLines.push('   PHIEU CHOT CA');
+    textLines.push('   Ngay: ' + dateLabel);
+    textLines.push('================================');
+    textLines.push('');
+
+    if (data.closedAtTime) {
+        textLines.push('  Thoi gian chot: ' + data.closedAtTime);
+        textLines.push('');
+    }
+
+    textLines.push('  --- DOANH THU ---');
+    textLines.push('  Tong doanh thu: ' + formatMoney(data.totalRevenue));
+    textLines.push('  Tien mat: ' + formatMoney(data.cashRevenue));
+    textLines.push('  Chuyen khoan: ' + formatMoney(data.transferAmount));
+    textLines.push('  Grab: ' + formatMoney(data.grabAmount));
+    if (data.debtAmount > 0) {
+        textLines.push('  No trong ngay: ' + formatMoney(data.debtAmount));
+    }
+    textLines.push('');
+
+    textLines.push('  --- THONG TIN ---');
+    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance));
+    textLines.push('  Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
+    textLines.push('  QL nhan: ' + formatMoney(data.managerPickupTotal));
+    textLines.push('');
+
+    textLines.push('  --- KET QUA CHOT ---');
+    textLines.push('  So tien dem duoc tai POS: ' + formatMoney(actualCash));
+    textLines.push('  So tien du kien con lai: ' + formatMoney(expectedClosing));
+    var diffSign = diff >= 0 ? '+' : '';
+    textLines.push('  Chenh lech: ' + diffSign + formatMoney(diff));
+    textLines.push('');
+
+    textLines.push('================================');
+    var printTime = targetDate === getTodayDateKey() ? new Date().toLocaleString('vi-VN') : formatDateDisplay(targetDate) + ' 23:59';
+    textLines.push('  ' + printTime);
+    textLines.push('================================');
+
+    var text = textLines.join('\n');
+
+    // Đóng modal
+    closeModal(modalId);
+
+    // In qua printViaSunmi
+    if (typeof printViaSunmi === 'function') {
+        printViaSunmi({ text: text }).then(function() {
+            showToast('✅ Da in phieu chot ca', 'success');
+        }).catch(function(err) {
+            console.warn('Print staff close failed:', err);
+            showToast('⚠️ In that bai: ' + (err ? err.message : 'Loi'), 'error');
+        });
+    } else {
+        // Fallback: mo cua so in moi
+        var printWindow = window.open('', '_blank', 'width=300,height=600');
+        if (printWindow) {
+            printWindow.document.write('<html><head><title>In phieu chot ca</title>');
+            printWindow.document.write('<style>body{font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;}@media print{@page{margin:0;}}</style>');
+            printWindow.document.write('</head><body>');
+            printWindow.document.write('<pre>' + text + '</pre>');
+            printWindow.document.write('<script>window.onload=function(){window.print();window.close();}<\/script>');
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+        } else {
+            showToast('⚠️ Khong the mo cua so in. Hay sao chep noi dung.', 'warning');
+        }
+    }
+}
+
+// Sao chép nội dung phiếu chốt ca
+function copyStaffCloseContent() {
+    var data = _posCashData;
+    if (!data || !data.isClosed) return;
+
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+
+    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    var countedTotal = 0;
+    for (var i = 0; i < CASH_DENOMS.length; i++) {
+        countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
+    }
+    var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
+    var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
+
+    var lines = [];
+    lines.push('PHIEU CHOT CA');
+    lines.push('Ngay: ' + dateLabel);
+    lines.push('');
+    if (data.closedAtTime) {
+        lines.push('Thoi gian chot: ' + data.closedAtTime);
+        lines.push('');
+    }
+    lines.push('--- DOANH THU ---');
+    lines.push('Tong doanh thu: ' + formatMoney(data.totalRevenue));
+    lines.push('Tien mat: ' + formatMoney(data.cashRevenue));
+    lines.push('Chuyen khoan: ' + formatMoney(data.transferAmount));
+    lines.push('Grab: ' + formatMoney(data.grabAmount));
+    if (data.debtAmount > 0) {
+        lines.push('No trong ngay: ' + formatMoney(data.debtAmount));
+    }
+    lines.push('');
+    lines.push('--- THONG TIN ---');
+    lines.push('So du dau ky: ' + formatMoney(data.openingBalance));
+    lines.push('Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
+    lines.push('QL nhan: ' + formatMoney(data.managerPickupTotal));
+    lines.push('');
+    lines.push('--- KET QUA CHOT ---');
+    lines.push('So tien dem duoc tai POS: ' + formatMoney(actualCash));
+    lines.push('So tien du kien con lai: ' + formatMoney(expectedClosing));
+    var diffSign = diff >= 0 ? '+' : '';
+    lines.push('Chenh lech: ' + diffSign + formatMoney(diff));
+
+    var text = lines.join('\n');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            showToast('✅ Da sao chep', 'success');
+        }).catch(function() {
+            fallbackCopy(text);
+        });
+    } else {
+        fallbackCopy(text);
+    }
 }

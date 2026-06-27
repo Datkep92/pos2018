@@ -151,17 +151,17 @@ function _renderTxItem(tx, index) {
     else if (isDebtRecord) amountClass += ' debt-record-amount';
     else if (isDebtPayment) amountClass += ' debt-payment-amount';
 
-    // Vuốt trái: giao dịch thường → nút Hoàn tác, giao dịch đã hủy → nút Xóa (chỉ admin)
+    // Vuốt trái: nút Hoàn tác (giao dịch chưa hoàn tác)
+    // Vuốt phải: nút Xóa (chỉ admin, mọi giao dịch)
     var swipeHtml = '';
     var currentUser = DB.getCurrentUser();
-    if (isRefunded) {
-        if (currentUser && currentUser.role === 'admin') {
-            swipeHtml = '<div class="history-swipe-actions"><button class="swipe-delete-btn" onclick="event.stopPropagation(); deleteTransaction(\'' + tx.id + '\')">🗑️ Xóa</button></div>';
-        }
-    } else {
+    var isAdmin = currentUser && currentUser.role === 'admin';
+    
+    // Nút hoàn tác (vuốt trái) - cho giao dịch chưa hoàn tác
+    if (!isRefunded) {
         // Staff chỉ được hoàn tác giao dịch trong ngày hôm nay
         var canRefund = true;
-        if (currentUser && currentUser.role !== 'admin') {
+        if (!isAdmin) {
             var dateEl = document.getElementById('historyDate');
             var viewingDate = dateEl ? dateEl.getAttribute('data-date') : '';
             var todayStr = '';
@@ -175,8 +175,13 @@ function _renderTxItem(tx, index) {
             if (viewingDate && viewingDate !== todayStr) canRefund = false;
         }
         if (canRefund) {
-            swipeHtml = '<div class="history-swipe-actions"><button class="swipe-refund-btn" onclick="event.stopPropagation(); refundTransaction(\'' + tx.id + '\')">↩️ Hoàn tác</button></div>';
+            swipeHtml += '<div class="history-swipe-actions"><button class="swipe-refund-btn" onclick="event.stopPropagation(); refundTransaction(\'' + tx.id + '\')">↩️ Hoàn tác</button></div>';
         }
+    }
+    
+    // Nút xóa (vuốt phải) - chỉ admin, mọi giao dịch (đã hoàn tác hoặc chưa)
+    if (isAdmin) {
+        swipeHtml += '<div class="history-swipe-left-actions"><button class="swipe-delete-btn" onclick="event.stopPropagation(); deleteTransaction(\'' + tx.id + '\')">🗑️ Xóa</button></div>';
     }
 
     var staffHtml = tx.createdByName ? '<span class="history-staff">👤 ' + escapeHtml(tx.createdByName) + '</span>' : '';
@@ -758,12 +763,6 @@ function refundTransaction(transactionId) {
     DB.get('transactions', transactionId).then(function(trans) {
         if (!trans || trans.refunded) return;
         
-        // Chặn hoàn tác giao dịch xóa bàn
-        if (trans.type === 'delete_table') {
-            showToast('❌ Không thể hoàn tác giao dịch xóa bàn', 'error');
-            return;
-        }
-        
         // YÊU CẦU 1: Chặn hoàn tác giao dịch ngày trước đó
         // Fix timezone: nếu không có dateKey, parse trans.date theo giờ địa phương
         var transDate = trans.dateKey;
@@ -799,7 +798,13 @@ function proceedRefund(trans, needPassword) {
     function doRefund() {
         showRefundReasonModal(function(reason) {
             if (!reason) return;
-            restoreIngredients(trans.items).then(function() {
+            // NÂNG CẤP: Khi hoàn tác xóa bàn, không gọi restoreIngredients lần nữa
+            // vì restoreIngredients đã được gọi trong doDeleteTable() khi xóa bàn
+            var ingPromise = Promise.resolve();
+            if (trans.type !== 'delete_table') {
+                ingPromise = restoreIngredients(trans.items);
+            }
+            ingPromise.then(function() {
                 // Xử lý hoàn tác trả sau: trả về Promise để đợi hoàn thành trước khi update transaction
                 var debtPromise = Promise.resolve();
                 
@@ -909,7 +914,7 @@ function proceedRefund(trans, needPassword) {
                     }
                 }
                 
-                // Khôi phục bàn nếu là giao dịch tại bàn (dinein) hoặc trả sau tại bàn
+                // Khôi phục bàn nếu là giao dịch tại bàn (dinein), trả sau tại bàn, hoặc xóa bàn
                 // KHÔNG khôi phục bàn khi thanh toán trả sau (paymentMethod === 'cash')
                 var tablePromise = Promise.resolve();
                 if (trans.tableId) {
@@ -917,6 +922,12 @@ function proceedRefund(trans, needPassword) {
                         tablePromise = restoreTable(trans);
                     } else if (trans.type === 'debt_payment' && trans.paymentMethod === 'debt') {
                         // Trả sau tại bàn: khôi phục bàn
+                        tablePromise = restoreTable(trans);
+                    } else if (trans.type === 'delete_table') {
+                        // NÂNG CẤP: Hoàn tác xóa bàn = khôi phục bàn
+                        // Kiểm tra không trùng id: restoreTable() đã có logic kiểm tra cachedTables
+                        // Nếu bàn đã tồn tại và có dữ liệu → không ghi đè
+                        // Nếu bàn chưa tồn tại → tạo mới
                         tablePromise = restoreTable(trans);
                     }
                 }
@@ -1064,7 +1075,7 @@ function addHistory(transaction) {
     });
 }
 
-// ========== SWIPE TO REFUND ==========
+// ========== SWIPE: TRÁI = HOÀN TÁC, PHẢI = XÓA ==========
 // FIX 6: Dùng data attribute để đánh dấu item đã có listener, tránh gắn listener chồng chéo
 function _initHistorySwipe() {
     var items = document.querySelectorAll('.history-item');
@@ -1085,8 +1096,13 @@ function _initHistorySwipe() {
                 currentX = e.touches[0].clientX;
                 var diff = startX - currentX;
                 if (diff > 0) {
+                    // Vuốt trái: hiện nút hoàn tác (bên phải)
                     el.style.transition = 'none';
                     el.style.transform = 'translateX(' + (-Math.min(diff, 80)) + 'px)';
+                } else {
+                    // Vuốt phải: hiện nút xóa (bên trái)
+                    el.style.transition = 'none';
+                    el.style.transform = 'translateX(' + Math.min(-diff, 80) + 'px)';
                 }
             }, { passive: true });
             el.addEventListener('touchend', function(e) {
@@ -1095,10 +1111,18 @@ function _initHistorySwipe() {
                 el.style.transition = 'transform 0.2s ease';
                 var diff = startX - currentX;
                 if (diff > 50) {
+                    // Vuốt trái đủ xa: hiện nút hoàn tác
                     el.classList.add('swipe-reveal');
+                    el.classList.remove('swipe-left-reveal');
+                    el.style.transform = '';
+                } else if (diff < -50) {
+                    // Vuốt phải đủ xa: hiện nút xóa
+                    el.classList.add('swipe-left-reveal');
+                    el.classList.remove('swipe-reveal');
                     el.style.transform = '';
                 } else {
                     el.classList.remove('swipe-reveal');
+                    el.classList.remove('swipe-left-reveal');
                     el.style.transform = '';
                 }
             }, { passive: true });
@@ -1106,24 +1130,28 @@ function _initHistorySwipe() {
     }
 }
 
-// ========== XÓA GIAO DỊCH ĐÃ HOÀN TÁC ==========
+// ========== XÓA GIAO DỊCH (CHỈ ADMIN) ==========
 function deleteTransaction(transactionId) {
     if (!transactionId) return;
-    if (!confirm('🗑️ Xác nhận xóa giao dịch này?\n\nGiao dịch đã hoàn tác sẽ bị xóa vĩnh viễn khỏi lịch sử.')) return;
+    
+    // Kiểm tra quyền admin
+    var currentUser = DB.getCurrentUser();
+    if (!currentUser || currentUser.role !== 'admin') {
+        showToast('👑 Chỉ quản lý mới có thể xóa giao dịch', 'warning');
+        return;
+    }
+    
+    if (!confirm('🗑️ Xác nhận xóa giao dịch này?\n\nGiao dịch sẽ bị xóa vĩnh viễn khỏi lịch sử.')) return;
     
     DB.get('transactions', transactionId).then(function(trans) {
         if (!trans) {
             showToast('Giao dịch không tồn tại!', 'warning');
             return;
         }
-        if (!trans.refunded) {
-            showToast('Chỉ có thể xóa giao dịch đã hoàn tác!', 'warning');
-            return;
-        }
         
         // Xóa vĩnh viễn khỏi DB
         DB.remove('transactions', transactionId).then(function() {
-            showToast('✅ Đã xóa giao dịch hoàn tác', 'success');
+            showToast('✅ Đã xóa giao dịch', 'success');
             // Refresh lại danh sách
             var dateEl = document.getElementById('historyDate');
             if (dateEl) {

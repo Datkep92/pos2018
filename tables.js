@@ -116,50 +116,15 @@ function getTableLockInfo(table) {
 
 // ========== YÊU CẦU MẬT KHẨU ==========
 function requirePassword(action, callback) {
-    // Tạo overlay modal động (thay thế prompt() - không hoạt động trên mobile)
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
-    
-    var modal = document.createElement('div');
-    modal.style.cssText = 'background:#fff;border-radius:16px;padding:24px;width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
-    modal.innerHTML =
-        '<div style="font-size:18px;font-weight:700;margin-bottom:16px;text-align:center;">🔒 Nhập mật khẩu</div>' +
-        '<div style="font-size:14px;color:#64748b;margin-bottom:16px;text-align:center;">Cần mật khẩu để ' + action + '</div>' +
-        '<input type="password" id="requirePasswordInput" style="width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;font-size:16px;text-align:center;box-sizing:border-box;-webkit-appearance:none;" placeholder="Nhập mật khẩu..." inputmode="numeric">' +
-        '<div style="display:flex;gap:8px;margin-top:16px;">' +
-            '<button id="requirePasswordCancelBtn" style="flex:1;padding:12px;border-radius:40px;border:2px solid #e2e8f0;background:#fff;color:#475569;font-weight:600;font-size:14px;cursor:pointer;-webkit-appearance:none;">Hủy</button>' +
-            '<button id="requirePasswordConfirmBtn" style="flex:1;padding:12px;border-radius:40px;border:none;background:#f97316;color:#fff;font-weight:700;font-size:14px;cursor:pointer;-webkit-appearance:none;">Xác nhận</button>' +
-        '</div>';
-    
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    
-    var input = document.getElementById('requirePasswordInput');
-    var confirmBtn = document.getElementById('requirePasswordConfirmBtn');
-    var cancelBtn = document.getElementById('requirePasswordCancelBtn');
-    
-    function closeModal() {
-        if (overlay.parentNode) overlay.remove();
+    // NÂNG CẤP: Admin không cần nhập mật khẩu
+    var currentUser = DB.getCurrentUser();
+    if (currentUser && currentUser.role === 'admin') {
+        callback();
+        return;
     }
     
-    function doSubmit() {
-        var pwd = input.value;
-        closeModal();
-        if (pwd === _getLockPassword()) {
-            callback();
-        } else {
-            showToast('❌ Sai mật khẩu!', 'error');
-        }
-    }
-    
-    confirmBtn.onclick = doSubmit;
-    cancelBtn.onclick = closeModal;
-    input.onkeydown = function(e) {
-        if (e.key === 'Enter') doSubmit();
-    };
-    
-    setTimeout(function() { input.focus(); }, 100);
+    // NÂNG CẤP: Staff không được phép, hiển thị thông báo liên hệ quản lý
+    showToast('👑 Vui lòng liên hệ quản lý để ' + action, 'warning');
 }
 
 // ========== LOG XÓA VÀO FIREBASE ==========

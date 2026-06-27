@@ -38,6 +38,15 @@ function _safeText(selector, parent) {
     return el ? el.innerText.trim() : '';
 }
 
+// Global helper: tra cứu tên nguyên liệu theo ID
+function _lookupIngName(id) {
+    var ings = window.ingredients || ingredients || [];
+    for (var j = 0; j < ings.length; j++) {
+        if (ings[j].id === id) return ings[j].name;
+    }
+    return '';
+}
+
 function _collectSelectValues(containerSelector, selectSelector, qtySelector, unitSelector) {
     // Collect paired values from multiple rows: select, qty, unit
     var container = document.querySelector(containerSelector);

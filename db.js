@@ -115,9 +115,137 @@
     // FIX: Local callbacks - notify UI ngay sau khi ghi local, khÃ´ng chá» Firebase
     var _localCallbacks = {};
     
+    // NÃ‚NG Cáº¤P: Event Bus - Reactive Layer Giai Ä‘oáº¡n 1
+    // Cho phÃ©p UI subscribe vÃ o cÃ¡c sá»± kiá»‡n cá»¥ thá»ƒ thay vÃ¬ nháº­n toÃ n bá»™ collection
+    // Event types: 'collection:added', 'collection:changed', 'collection:removed'
+    // VÃ­ dá»¥: 'tables:added', 'tables:changed', 'tables:removed'
+    var _eventBus = {};
+    
+    // ÄÄƒng kÃ½ listener cho má»™t event type
+    function _on(eventType, callback) {
+        if (!_eventBus[eventType]) _eventBus[eventType] = [];
+        _eventBus[eventType].push(callback);
+        return function() {
+            _off(eventType, callback);
+        };
+    }
+    
+    // Há»§y Ä‘Äƒng kÃ½ listener
+    function _off(eventType, callback) {
+        var cbs = _eventBus[eventType];
+        if (!cbs) return;
+        for (var i = cbs.length - 1; i >= 0; i--) {
+            if (cbs[i] === callback) {
+                cbs.splice(i, 1);
+            }
+        }
+    }
+    
+    // PhÃ¡t sá»± kiá»‡n - gá»i táº¥t cáº£ listeners Ä‘Ã£ Ä‘Äƒng kÃ½
+    function _emit(eventType, data) {
+        var cbs = _eventBus[eventType];
+        if (cbs) {
+            for (var i = 0; i < cbs.length; i++) {
+                try { cbs[i](data); } catch(e) { console.error('[EventBus] Lá»—i handler ' + eventType + ':', e); }
+            }
+        }
+        // Wildcard listener: 'collection:*' nháº­n táº¥t cáº£ events cá»§a collection Ä‘Ã³
+        var parts = eventType.split(':');
+        if (parts.length === 2) {
+            var wildcard = parts[0] + ':*';
+            var wildcardCbs = _eventBus[wildcard];
+            if (wildcardCbs) {
+                for (var i = 0; i < wildcardCbs.length; i++) {
+                    try { wildcardCbs[i]({ type: parts[1], collection: parts[0], data: data }); } catch(e) { console.error('[EventBus] Lá»—i wildcard handler ' + wildcard + ':', e); }
+                }
+            }
+        }
+    }
+    
     // OPTIMIZE: CÆ¡ cháº¿ suppress realtime notifications khi batch operations
     // Khi _suppressRealtime > 0, _notifyLocal sáº½ khÃ´ng gá»i callbacks
     // DÃ¹ng cho thanh toÃ¡n, nháº­p hÃ ng loáº¡t, etc.
+    // NÂNG CẤP: Component Registry + Fine Render API (Giai đoạn 3)
+    // Cho phép UI components đăng ký với 1 collection + 1 selector function
+    // Chỉ re-render khi dữ liệu thay đổi, tránh re-render toàn bộ
+    var _componentRegistry = {};  // { collection: [ { id, selector, renderFn, lastData } ] }
+    var _componentIdCounter = 0;
+
+    // Đăng ký 1 component: renderFn(data) sẽ được gọi khi collection thay đổi
+    // selector nhận (oldData, newData) và trả về true nếu cần re-render
+    // selector có thể là:
+    //   - function(oldData, newData): return true nếu cần render lại
+    //   - null/undefined: luôn render lại khi có change event
+    // Trả về hàm unsubscribe
+    function _renderOn(collection, selector, renderFn) {
+        if (!_componentRegistry[collection]) {
+            _componentRegistry[collection] = [];
+        }
+        var id = ++_componentIdCounter;
+        var entry = {
+            id: id,
+            selector: typeof selector === 'function' ? selector : null,
+            renderFn: renderFn,
+            lastData: null
+        };
+        _componentRegistry[collection].push(entry);
+        // Gọi render ngay lập tức với dữ liệu hiện tại
+        if (memoryCache[collection]) {
+            var data = [];
+            for (var key in memoryCache[collection]) {
+                if (memoryCache[collection].hasOwnProperty(key)) {
+                    data.push(memoryCache[collection][key]);
+                }
+            }
+            entry.lastData = data;
+            try { renderFn(data); } catch(e) { console.error('[ComponentRegistry] Lỗi render lần đầu:', e); }
+        }
+        // Trả về hàm hủy đăng ký
+        return function() {
+            var entries = _componentRegistry[collection];
+            if (!entries) return;
+            for (var i = entries.length - 1; i >= 0; i--) {
+                if (entries[i].id === id) {
+                    entries.splice(i, 1);
+                    break;
+                }
+            }
+        };
+    }
+
+    // Thông báo cho tất cả components của 1 collection
+    function _notifyComponents(collection, changeInfo) {
+        var entries = _componentRegistry[collection];
+        if (!entries || entries.length === 0) return;
+        var newData = null;
+        if (memoryCache[collection]) {
+            newData = [];
+            for (var key in memoryCache[collection]) {
+                if (memoryCache[collection].hasOwnProperty(key)) {
+                    newData.push(memoryCache[collection][key]);
+                }
+            }
+        }
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            var shouldRender = true;
+            if (entry.selector) {
+                try {
+                    shouldRender = entry.selector(entry.lastData, newData, changeInfo);
+                } catch(e) {
+                    console.error('[ComponentRegistry] Lỗi selector:', e);
+                    shouldRender = true;
+                }
+            }
+            if (shouldRender) {
+                entry.lastData = newData;
+                try { entry.renderFn(newData, changeInfo); } catch(e) {
+                    console.error('[ComponentRegistry] Lỗi render:', e);
+                }
+            }
+        }
+    }
+
     var _suppressRealtime = 0;
     var _pendingNotifyCollections = {};
 
@@ -180,6 +308,21 @@
             _pendingNotifyCollections[collection] = true;
             return;
         }
+        // NÃ‚NG Cáº¤P: PhÃ¡t sá»± kiá»‡n Event Bus trÆ°á»›c, sau Ä‘Ã³ má»›i gá»i callbacks cÅ©
+        // Äáº£m báº£o UI nháº­n Ä‘Æ°á»£c changeInfo chi tiáº¿t
+        if (changeInfo && changeInfo.type) {
+            var eventType = collection + ':' + changeInfo.type;
+            _emit(eventType, {
+                collection: collection,
+                type: changeInfo.type,
+                item: changeInfo.item || null,
+                timestamp: Date.now()
+            });
+        }
+        
+        // NÂNG CẤP: Thông báo cho Component Registry (Giai đoạn 3)
+        _notifyComponents(collection, changeInfo);
+        
         var cbs = _localCallbacks[collection];
         if (!cbs || cbs.length === 0) return;
         var data = [];
@@ -330,12 +473,49 @@
             deviceId: CURRENT_DEVICE_ID,
             timestamp: Date.now(),
             retryCount: 0,
-            status: 'pending'
+            status: 'pending',
+            lastError: null,   // Lưu lỗi gần nhất để debug
+            dirtyAt: Date.now() // Thời điểm đánh dấu dirty
         };
         syncQueue.push(item);
         saveToLocal('sync_queue', item);
+        // Đánh dấu dirty flag cho collection để biết có dữ liệu chưa sync
+        _markDirty(collection);
         if (isOnline) processSyncQueue();
         return item.id;
+    }
+    
+    // DIRTY FLAG: Đánh dấu collection có dữ liệu chưa được đồng bộ lên Firebase
+    // Dùng để ưu tiên sync các collection có dirty flag khi online trở lại
+    var _dirtyCollections = {};
+    function _markDirty(collection) {
+        _dirtyCollections[collection] = true;
+        try {
+            localStorage.setItem('dirty_collections_' + CURRENT_SHOP_ID, JSON.stringify(Object.keys(_dirtyCollections)));
+        } catch (e) {}
+    }
+    function _clearDirty(collection) {
+        delete _dirtyCollections[collection];
+        try {
+            var remaining = Object.keys(_dirtyCollections);
+            if (remaining.length > 0) {
+                localStorage.setItem('dirty_collections_' + CURRENT_SHOP_ID, JSON.stringify(remaining));
+            } else {
+                localStorage.removeItem('dirty_collections_' + CURRENT_SHOP_ID);
+            }
+        } catch (e) {}
+    }
+    // Khôi phục dirty flags từ localStorage khi khởi động
+    function _restoreDirtyFlags() {
+        try {
+            var stored = localStorage.getItem('dirty_collections_' + CURRENT_SHOP_ID);
+            if (stored) {
+                var arr = JSON.parse(stored);
+                for (var i = 0; i < arr.length; i++) {
+                    _dirtyCollections[arr[i]] = true;
+                }
+            }
+        } catch (e) {}
     }
 
     function processSyncQueue() {
@@ -432,18 +612,25 @@
             var idx = syncQueue.findIndex(function(q) { return q.id === item.id; });
             if (idx !== -1) syncQueue.splice(idx, 1);
             console.log('âœ… Synced:', item.action, item.collection, item.targetId);
+            // Kiểm tra nếu không còn pending items cho collection này thì clear dirty flag
+            var hasPending = syncQueue.some(function(q) { return q.collection === item.collection && q.status === 'pending'; });
+            if (!hasPending) {
+                _clearDirty(item.collection);
+            }
         });
     }
     
     // FIX: Retry limit + exponential backoff + lưu retryCount vào IndexedDB
     function _handleSyncError(item, err) {
         item.retryCount = (item.retryCount || 0) + 1;
+        item.lastError = err.message || String(err);
         var MAX_RETRY = 5;
         if (item.retryCount < MAX_RETRY) {
             item.status = 'pending';
-            // Lưu retryCount vào IndexedDB để không bị mất khi reload
+            // Lưu retryCount + lastError vào IndexedDB để không bị mất khi reload
             return saveToLocal('sync_queue', item).then(function() {
                 var delay = Math.min(2000 * Math.pow(2, item.retryCount - 1), 30000); // exponential backoff, max 30s
+                console.warn('  âš ï¸� Retry', item.retryCount, 'for', item.collection, item.targetId, 'in', delay + 'ms');
                 return new Promise(function(r) { setTimeout(r, delay); });
             }).then(function() {
                 // Gọi lại processSyncQueue thay vì syncToFirebase trực tiếp
@@ -452,7 +639,7 @@
             });
         } else {
             item.status = 'failed';
-            console.error('Sync failed after ' + MAX_RETRY + ' retries:', item.action, item.collection, item.targetId);
+            console.error('â�Œ Sync failed after ' + MAX_RETRY + ' retries:', item.action, item.collection, item.targetId, 'Error:', item.lastError);
             return saveToLocal('sync_queue', item);
         }
     }
@@ -1146,6 +1333,32 @@
         };
     }
     
+    // Quick Sync: Hàm debounced để đồng bộ nhanh khi tab resume
+    // Dùng debounce 500ms để tránh gọi nhiều lần khi visibilitychange + focus cùng lúc
+    var _quickSyncTimer = null;
+    function _quickSync() {
+        if (_quickSyncTimer) clearTimeout(_quickSyncTimer);
+        _quickSyncTimer = setTimeout(function() {
+            _quickSyncTimer = null;
+            if (!isOnline) return;
+            console.log('📡 Quick sync on resume...');
+            // Tables luôn dùng fullSync để mirror chính xác
+            fullSync('tables');
+            // Các master collections khác dùng deltaSync
+            var masterKeys = Object.keys(MASTER_COLLECTIONS);
+            for (var i = 0; i < masterKeys.length; i++) {
+                if (masterKeys[i] !== 'tables') {
+                    deltaSync(masterKeys[i]);
+                }
+            }
+            // Date-based collections dùng deltaSync
+            var dateKeys = Object.keys(DATE_BASED_COLLECTIONS);
+            for (var j = 0; j < dateKeys.length; j++) {
+                deltaSync(dateKeys[j]);
+            }
+        }, 500);
+    }
+    
     // Network listener
     function initNetwork() {
         window.addEventListener('online', function() {
@@ -1172,6 +1385,19 @@
             isOnline = false;
             showToast('⚠️ Mất kết nối', 'warning');
         });
+        
+        // QUICK SYNC: Khi tab resume (visibilitychange + focus)
+        // Giải quyết vấn đề: user chuyển tab khác, quay lại thì dữ liệu đã thay đổi
+        // trên Firebase (từ máy khác) nhưng chưa được đồng bộ
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                _quickSync();
+            }
+        });
+        window.addEventListener('focus', function() {
+            _quickSync();
+        });
+        
         isOnline = navigator.onLine;
     }
 
@@ -1427,16 +1653,21 @@
                 var maxVersion = 0;
                 var dateKeys = [];
                 
+                // NÂNG CẤP: Suppress realtime trong fullSync để tránh hàng loạt event added riêng lẻ
+                // Sau khi ghi xong tất cả, phát 1 event synced duy nhất
+                _setSuppressRealtime(true);
+                
                 // Xóa local cache trước (chỉ cho master collections)
                 if (isMaster && memoryCache[collection]) {
                     memoryCache[collection] = {};
                 }
                 
-                // FIX: Với tables, xóa toàn bộ dữ liệu cũ trong IndexedDB trước
+                // MIRROR SYNC: Với master collections, xóa toàn bộ dữ liệu cũ trong IndexedDB trước
                 // để tránh items đã xóa trên Firebase vẫn còn trong local
                 // Dùng store.clear() để xóa sạch object store, sau đó ghi dữ liệu mới từ Firebase
+                // Áp dụng cho TẤT CẢ master collections (tables, menu, menu_categories, ingredients, customers, staffs, cost_categories, info)
                 var preClear = Promise.resolve();
-                if (collection === 'tables') {
+                if (isMaster) {
                     preClear = new Promise(function(clearResolve) {
                         var tx = localDB.transaction([collection], 'readwrite');
                         var store = tx.objectStore(collection);
@@ -1457,6 +1688,9 @@
                     if (infoItem._version === undefined) infoItem._version = 1;
                     saveToLocal(collection, infoItem).then(function() {
                         saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: infoItem._version || 1, dateKeys: [] });
+                        // Phát 1 event synced duy nhất
+                        _setSuppressRealtime(false);
+                        _emit(collection + ':synced', { collection: collection, count: 1, timestamp: Date.now() });
                         console.log('  📥 Full synced info: 1 item');
                         resolve();
                     });
@@ -1496,13 +1730,18 @@
                     saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
                     // Cập nhật maxVersion lên Firebase _meta
                     updateMetaOnFirebase(collection, maxVersion);
+                    // NÂNG CẤP: Phát 1 event synced duy nhất thay vì hàng loạt added
+                    _setSuppressRealtime(false);
+                    _emit(collection + ':synced', { collection: collection, count: count, timestamp: Date.now() });
                     resolve();
                 }).catch(function(err) {
                     console.error('  ❌ Error full syncing ' + collection + ': ', err);
+                    _setSuppressRealtime(false);
                     resolve();
                 });
             }, function(err) {
                 console.error('  ❌ Firebase read error for ' + collection + ': ', err);
+                _setSuppressRealtime(false);
                 resolve();
             });
         });
@@ -1645,6 +1884,31 @@
                 // Fallback: nếu lỗi thì vẫn tiếp tục, không block sync
                 console.warn('  ⚠️ Could not check deleted IDs for', collection, ':', err.message);
             });
+        });
+    }
+    
+    // SNAPSHOT RECONCILE: Kết hợp _cleanupDeletedIds() + fullSync() cho master collections
+    // Giải quyết triệt để vấn đề: dữ liệu local lệch với Firebase do:
+    // 1. Items bị xóa trên Firebase nhưng local chưa được cleanup
+    // 2. Items được cập nhật trên Firebase nhưng local chưa sync
+    // 3. sync_meta bị lệch (maxVersion sai) dẫn đến deltaSync bỏ sót items
+    // Dùng khi: online trở lại, tab resume, hoặc phát hiện dữ liệu bất thường
+    function reconcileSnapshot(collection) {
+        if (!isOnline) return Promise.resolve();
+        var isMaster = MASTER_COLLECTIONS[collection];
+        if (!isMaster) {
+            // Date-based collections không cần reconcile (dùng dateKey)
+            return Promise.resolve();
+        }
+        console.log('🔄 Reconcile snapshot for:', collection);
+        // Bước 1: Xóa các items đã bị xóa trên Firebase
+        return _cleanupDeletedIds(collection).then(function() {
+            // Bước 2: Reset sync_meta để force fullSync tải lại toàn bộ
+            // Xóa maxVersion để fullSync() không bị giới hạn bởi version cũ
+            return saveSyncMeta(collection, { lastSyncAt: 0, maxVersion: 0, dateKeys: [] });
+        }).then(function() {
+            // Bước 3: FullSync tải toàn bộ dữ liệu mới từ Firebase
+            return fullSync(collection);
         });
     }
     
@@ -2020,6 +2284,8 @@
 
     // Init Database
     function initDatabase() {
+        // Khôi phục dirty flags từ localStorage để biết collection nào chưa sync
+        _restoreDirtyFlags();
         return initLocalDB().then(function() {
             initNetwork();
             if (isOnline) return smartSync();
@@ -2061,6 +2327,19 @@
                 // Náº¿u gá»i vá»›i null trÆ°á»›c, láº§n gá»i sau tá»« initRealtime() sáº½ hit early return
                 // vÃ  cÃ³ thá»ƒ bá» lá»¡ callback náº¿u memoryCache chÆ°a sáºµn sÃ ng
                 // Thay vÃ o Ä‘Ã³, chá»‰ khá»Ÿi táº¡o polling timer náº¿u chÆ°a cÃ³
+                // WATCHDOG: Polling riêng cho tables (30s) để phát hiện thay đổi từ máy khác
+                // Tables là collection quan trọng nhất, cần độ trễ thấp nhất
+                if (!_pollingTimers['tables']) {
+                    _pollingTimers['tables'] = setInterval(function() {
+                        if (!isOnline) return;
+                        // Dùng _cleanupDeletedIds trước để xóa bàn đã bị xóa trên Firebase
+                        _cleanupDeletedIds('tables').then(function() {
+                            // Sau đó deltaSync để lấy các bàn mới hoặc đã cập nhật
+                            return deltaSync('tables');
+                        });
+                    }, 30000);
+                }
+                
                 if (!_pollingTimers['menu']) {
                     _pollingTimers['menu'] = setInterval(function() {
                         if (!isOnline) return;
@@ -2527,6 +2806,9 @@
         getTransactionsByDateRange: getTransactionsByDateRange,
         subscribe: subscribeToCollection,
         subscribeWithPolling: subscribeWithPolling,
+        // NANG CAP: Event Bus API - Reactive Layer Giai doan 1
+        on: function(eventType, callback) { return _on(eventType, callback); },
+        off: function(eventType, callback) { _off(eventType, callback); },
         isOnline: function() { return isOnline; },
         getDeviceId: function() { return CURRENT_DEVICE_ID; },
         processSyncQueue: processSyncQueue,
@@ -2552,7 +2834,18 @@
         ensureCollection: ensureCollection,
         whenSyncComplete: whenSyncComplete,
         batchUpdateSortOrder: batchUpdateSortOrder,
-        getShopConfig: getShopConfig
+        getShopConfig: getShopConfig,
+        // NÂNG CẤP: reconcileSnapshot - đồng bộ hoàn chỉnh 1 master collection
+        reconcileSnapshot: reconcileSnapshot,
+        // NÂNG CẤP: getDirtyCollections - lấy danh sách collections chưa sync
+        getDirtyCollections: function() { return Object.keys(_dirtyCollections); },
+        // NÂNG CẤP: Fine Render API - Component Registry (Giai đoạn 3)
+        // renderOn(collection, selector, renderFn) - đăng ký component tự động render
+        // selector: function(oldData, newData, changeInfo) => true nếu cần render lại
+        // Trả về hàm unsubscribe
+        renderOn: function(collection, selector, renderFn) {
+            return _renderOn(collection, selector, renderFn);
+        }
     };
 })();
 

@@ -573,7 +573,10 @@ function _updateRecentToastTimes() {
 
 // ========== INIT REALTIME (RÚT GỌN) ==========
 function initRealtime() {
-    // Tables - cập nhật bàn realtime + doanh thu
+    // ============================================================
+    // TABLES
+    // ============================================================
+    // Subscribe cũ: cập nhật cachedTables + doanh thu
     DB.subscribe('tables', function(newTables) {
         if (!newTables) return;
         cachedTables = newTables;
@@ -582,6 +585,7 @@ function initRealtime() {
         if (typeof loadPosCashData === 'function') {
             loadPosCashData();
         }
+        // Fallback: nếu đang ở tab tables, re-render toàn bộ (dự phòng)
         if (currentTab !== 'tables') return;
         _renderNow('tables_render', function() {
             updateTablesDiff(newTables);
@@ -590,28 +594,108 @@ function initRealtime() {
             }
         });
     });
+    
+    // NÂNG CẤP: Event Bus handler cho tables - xử lý targeted updates
+    DB.on('tables:*', function(event) {
+        if (!event || !event.data) return;
+        var item = event.data.item;
+        if (!item) return;
+        if (currentTab !== 'tables') return;
+        var grid = document.getElementById('tablesGrid');
+        if (!grid) return;
+        if (event.type === 'added') {
+            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            if (!existingCard) {
+                grid.appendChild(createTableCard(item));
+                _tableCardCacheDirty = true;
+            }
+        } else if (event.type === 'changed') {
+            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            if (existingCard) {
+                updateTableCard(existingCard, item);
+            } else {
+                grid.appendChild(createTableCard(item));
+                _tableCardCacheDirty = true;
+            }
+        } else if (event.type === 'removed') {
+            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            if (existingCard && existingCard.parentNode) {
+                existingCard.remove();
+                _tableCardCacheDirty = true;
+            }
+        }
+    });
+    
+    // NÂNG CẤP: Khi fullSync hoàn thành, re-render toàn bộ tables
+    DB.on('tables:synced', function() {
+        if (currentTab !== 'tables') return;
+        DB.getAll('tables').then(function(allTables) {
+            cachedTables = allTables;
+            tablesCacheTime = Date.now();
+            updateTablesDiff(allTables);
+            if (typeof startTableTimer === 'function') startTableTimer();
+        });
+    });
 
-    // Customers - cập nhật danh sách khách hàng
+    // ============================================================
+    // CUSTOMERS
+    // ============================================================
+    // Subscribe cũ: cập nhật biến customers
     DB.subscribe('customers', function(data) {
         if (!data) return;
         _debounceRealtime('customers', function() {
             DB.getAll('customers').then(function(list) {
                 customers = list;
                 window.customers = customers;
-                if (currentTab === 'customers') {
-                    renderCustomerList();
-                }
             });
         }, 200);
     });
+    // NÂNG CẤP: Event Bus handler cho customers
+    DB.on('customers:*', function(event) {
+        if (!event || !event.data) return;
+        if (currentTab !== 'customers') return;
+        _debounceRealtime('customers_ui', function() {
+            DB.getAll('customers').then(function(list) {
+                customers = list;
+                window.customers = customers;
+                renderCustomerList();
+            });
+        }, 100);
+    });
+    // NÂNG CẤP: Khi fullSync hoàn thành, re-render customers
+    DB.on('customers:synced', function() {
+        if (currentTab !== 'customers') return;
+        DB.getAll('customers').then(function(list) {
+            customers = list;
+            window.customers = customers;
+            renderCustomerList();
+        });
+    });
 
-    // Menu - cập nhật thực đơn (dùng polling 60s thay vì realtime)
+    // ============================================================
+    // MENU (polling 60s)
+    // ============================================================
+    // Subscribe cũ: cập nhật menuItems
     DB.subscribeWithPolling('menu', function(data) {
         if (!data) return;
         _debounceRealtime('menu', function() {
             DB.getAll('menu').then(function(list) {
                 menuItems = list;
-                // Sắp xếp theo sortOrder để giữ đúng thứ tự kéo thả
+                menuItems.sort(function(a, b) {
+                    var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
+                    var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
+                    return orderA - orderB;
+                });
+                window.menuItems = menuItems;
+            });
+        }, 200);
+    }, 60);
+    // NÂNG CẤP: Event Bus handler cho menu
+    DB.on('menu:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('menu_ui', function() {
+            DB.getAll('menu').then(function(list) {
+                menuItems = list;
                 menuItems.sort(function(a, b) {
                     var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
                     var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
@@ -624,13 +708,41 @@ function initRealtime() {
                     renderMenuByCategory(currentMenuCategory);
                 }
             });
-        }, 200);
-    }, 60);
+        }, 100);
+    });
+    // NÂNG CẤP: Khi fullSync hoàn thành, re-render menu
+    DB.on('menu:synced', function() {
+        DB.getAll('menu').then(function(list) {
+            menuItems = list;
+            menuItems.sort(function(a, b) {
+                var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
+                var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
+                return orderA - orderB;
+            });
+            window.menuItems = menuItems;
+            var orderModal = document.getElementById('orderModal');
+            if (orderModal && orderModal.style.display === 'flex') {
+                renderMenuByCategory(currentMenuCategory);
+            }
+        });
+    });
 
-    // Menu categories - cập nhật danh mục (dùng polling 60s thay vì realtime)
+    // ============================================================
+    // MENU CATEGORIES (polling 60s)
+    // ============================================================
+    // Subscribe cũ: cập nhật menuCategories
     DB.subscribeWithPolling('menu_categories', function(data) {
         if (!data) return;
         _debounceRealtime('menu_categories', function() {
+            DB.getAll('menu_categories').then(function(list) {
+                menuCategories = list;
+            });
+        }, 200);
+    }, 60);
+    // NÂNG CẤP: Event Bus handler cho menu_categories
+    DB.on('menu_categories:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('menu_categories_ui', function() {
             DB.getAll('menu_categories').then(function(list) {
                 menuCategories = list;
                 // Cập nhật danh mục trong order modal nếu đang mở
@@ -639,19 +751,36 @@ function initRealtime() {
                     renderOrderCategoriesColumn();
                 }
             });
-        }, 200);
-    }, 60);
+        }, 100);
+    });
 
-    // Cost categories - cập nhật realtime danh mục chi phí
+    // ============================================================
+    // COST CATEGORIES
+    // ============================================================
+    // Subscribe cũ: cập nhật costCategories
     DB.subscribe('cost_categories', function(data) {
         if (typeof costCategories !== 'undefined') {
             costCategories = data || [];
         }
         _debounceRealtime('cost_categories', function() {
-            // Luôn refresh cache expenseData
             if (typeof loadExpenseData === 'function') {
                 loadExpenseData().then(function() {
-                    // Render nếu đang ở tab cost hoặc manager
+                    if (currentTab === 'cost') {
+                        if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                        if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                        managerApplyFilter();
+                    }
+                });
+            }
+        }, 100);
+    });
+    // NÂNG CẤP: Event Bus handler cho cost_categories
+    DB.on('cost_categories:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('cost_categories_ui', function() {
+            if (typeof loadExpenseData === 'function') {
+                loadExpenseData().then(function() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
@@ -663,16 +792,33 @@ function initRealtime() {
         }, 100);
     });
 
-    // Cost transactions - cập nhật realtime giao dịch chi phí
+    // ============================================================
+    // COST TRANSACTIONS
+    // ============================================================
+    // Subscribe cũ: cập nhật costTransactions
     DB.subscribe('cost_transactions', function(data) {
         if (typeof costTransactions !== 'undefined') {
             costTransactions = data || [];
         }
         _debounceRealtime('cost_transactions', function() {
-            // Luôn refresh cache expenseData
             if (typeof loadExpenseData === 'function') {
                 loadExpenseData().then(function() {
-                    // Render nếu đang ở tab cost hoặc manager
+                    if (currentTab === 'cost') {
+                        if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                        if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                        managerApplyFilter();
+                    }
+                });
+            }
+        }, 100);
+    });
+    // NÂNG CẤP: Event Bus handler cho cost_transactions
+    DB.on('cost_transactions:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('cost_transactions_ui', function() {
+            if (typeof loadExpenseData === 'function') {
+                loadExpenseData().then(function() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
@@ -684,51 +830,86 @@ function initRealtime() {
         }, 100);
     });
 
-// Manager cash pickups - cập nhật realtime tiền quản lý nhận (cho report.js)
-DB.subscribe('manager_cash_pickups', function(data) {
-    window.managerCashPickups = data || [];
-    _debounceRealtime('manager_cash_pickups', function() {
-        if (currentTab === 'report') {
-            renderReport(currentReportDate);
-        }
-    }, 100);
-});
+    // ============================================================
+    // MANAGER CASH PICKUPS
+    // ============================================================
+    // Subscribe cũ: cập nhật managerCashPickups
+    DB.subscribe('manager_cash_pickups', function(data) {
+        window.managerCashPickups = data || [];
+        _debounceRealtime('manager_cash_pickups', function() {
+            if (currentTab === 'report') {
+                renderReport(currentReportDate);
+            }
+        }, 100);
+    });
+    // NÂNG CẤP: Event Bus handler cho manager_cash_pickups
+    DB.on('manager_cash_pickups:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('manager_cash_pickups_ui', function() {
+            if (currentTab === 'report') {
+                renderReport(currentReportDate);
+            }
+        }, 100);
+    });
 
-// Daily balances - cập nhật realtime cash counter (settings + staff view)
-// Khi nhân viên chốt ngày ở máy khác, máy quản lý tự động cập nhật số tiền thực tế
-DB.subscribe('daily_balances', function() {
-    _debounceRealtime('daily_balances', function() {
-        if (typeof loadPosCashData === 'function') {
-            loadPosCashData();
-        }
-    }, 200);
-});
+    // ============================================================
+    // DAILY BALANCES
+    // ============================================================
+    // Subscribe cũ: cập nhật daily_balances
+    DB.subscribe('daily_balances', function() {
+        _debounceRealtime('daily_balances', function() {
+            if (typeof loadPosCashData === 'function') {
+                loadPosCashData();
+            }
+        }, 200);
+    });
+    // NÂNG CẤP: Event Bus handler cho daily_balances
+    DB.on('daily_balances:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('daily_balances_ui', function() {
+            if (typeof loadPosCashData === 'function') {
+                loadPosCashData();
+            }
+        }, 100);
+    });
 
-    // Ingredients - cập nhật tồn kho nguyên liệu (dùng polling 60s thay vì realtime)
+    // ============================================================
+    // INGREDIENTS (polling 60s)
+    // ============================================================
+    // Subscribe cũ: cập nhật window.ingredients
     DB.subscribeWithPolling('ingredients', function(data) {
         if (!data) return;
         _debounceRealtime('ingredients', function() {
             DB.getAll('ingredients').then(function(list) {
                 window.ingredients = list;
-                // Invalidate lookup maps trong ingredients.js
                 if (typeof _invalidateLookups === 'function') _invalidateLookups();
-                // Nếu đang ở tab cost, render lại danh sách nguyên liệu trong modal
+            });
+        }, 200);
+    }, 60);
+    // NÂNG CẤP: Event Bus handler cho ingredients
+    DB.on('ingredients:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('ingredients_ui', function() {
+            DB.getAll('ingredients').then(function(list) {
+                window.ingredients = list;
+                if (typeof _invalidateLookups === 'function') _invalidateLookups();
                 if (currentTab === 'cost') {
                     if (typeof renderIngredientList === 'function') renderIngredientList();
                 }
-                // Nếu đang ở tab inventory, render lại tồn kho
                 if (currentTab === 'inventory') {
                     if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
                 }
             });
-        }, 200);
-    }, 60);
-    
-        // Transactions - cập nhật lịch sử, recent toast và doanh thu pos-cash-info
+        }, 100);
+    });
+
+    // ============================================================
+    // TRANSACTIONS
+    // ============================================================
+    // Subscribe cũ: cập nhật transactions cache
     DB.subscribe('transactions', function() {
         _debounceRealtime('transactions', function() {
             updateRecentToast();
-            // Cập nhật doanh thu pos-cash-info realtime (settings + staff view)
             if (typeof loadPosCashData === 'function') {
                 loadPosCashData();
             }
@@ -737,12 +918,27 @@ DB.subscribe('daily_balances', function() {
             }
         }, 300);
     });
+    // NÂNG CẤP: Event Bus handler cho transactions
+    DB.on('transactions:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('transactions_ui', function() {
+            updateRecentToast();
+            if (typeof loadPosCashData === 'function') {
+                loadPosCashData();
+            }
+            if (currentTab === 'history') {
+                renderHistoryByDate(currentHistoryDate);
+            }
+        }, 200);
+    });
 
-    // Info (shop config) - cập nhật realtime khi thay đổi giờ lock, telegram, v.v.
+    // ============================================================
+    // INFO (shop config)
+    // ============================================================
+    // Subscribe cũ: cập nhật shopConfig
     DB.subscribe('info', function(data) {
         if (!data || data.length === 0) return;
         _debounceRealtime('info', function() {
-            // Lấy item shop_config từ mảng (chỉ có 1 item duy nhất)
             var infoItem = null;
             for (var i = 0; i < data.length; i++) {
                 if (data[i].id === 'shop_config') {
@@ -751,15 +947,11 @@ DB.subscribe('daily_balances', function() {
                 }
             }
             if (!infoItem) return;
-            
-            // Kiểm tra: nếu infoItem không có bất kỳ field lock nào (local cache rỗng),
-            // thì giữ nguyên oldConfig để tránh ghi đè bằng undefined
             var hasLockData = (infoItem.lockStartHour !== undefined ||
                                infoItem.lockEndHour !== undefined ||
                                infoItem.lockEndMinute !== undefined ||
                                infoItem.tableLockHours !== undefined ||
                                infoItem.lockPassword !== undefined);
-            
             var oldConfig = window.shopConfig || {};
             window.shopConfig = {
                 telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
@@ -773,43 +965,231 @@ DB.subscribe('daily_balances', function() {
                 lockEndMinute: hasLockData && infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
                 tableLockHours: hasLockData && infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
             };
-            
-            // Cập nhật tên quán trên header nếu có
             if (infoItem.name) {
                 window.shopInfo = window.shopInfo || {};
                 window.shopInfo.name = infoItem.name;
                 var shopNameEl = document.getElementById('shopNameHeader');
                 if (shopNameEl) shopNameEl.textContent = infoItem.name;
             }
-            
         }, 200);
     });
-    
-    // Messages - cập nhật chat (dùng polling 30s thay vì realtime)
-    // Chat cần polling nhanh hơn để nhận tin nhắn mới kịp thời
+    // NÂNG CẤP: Event Bus handler cho info
+    DB.on('info:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('info_ui', function() {
+            DB.getAll('info').then(function(data) {
+                if (!data || data.length === 0) return;
+                var infoItem = null;
+                for (var i = 0; i < data.length; i++) {
+                    if (data[i].id === 'shop_config') {
+                        infoItem = data[i];
+                        break;
+                    }
+                }
+                if (!infoItem) return;
+                var hasLockData = (infoItem.lockStartHour !== undefined ||
+                                   infoItem.lockEndHour !== undefined ||
+                                   infoItem.lockEndMinute !== undefined ||
+                                   infoItem.tableLockHours !== undefined ||
+                                   infoItem.lockPassword !== undefined);
+                var oldConfig = window.shopConfig || {};
+                window.shopConfig = {
+                    telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+                    telegramChatId: infoItem.telegramChatId || oldConfig.telegramChatId || '6372876364',
+                    telegramShiftCloseToken: infoItem.telegramShiftCloseToken || oldConfig.telegramShiftCloseToken || '',
+                    telegramWarningToken: infoItem.telegramWarningToken || oldConfig.telegramWarningToken || '',
+                    telegramExpenseToken: infoItem.telegramExpenseToken || oldConfig.telegramExpenseToken || '',
+                    lockPassword: hasLockData && infoItem.lockPassword ? infoItem.lockPassword : (oldConfig.lockPassword || '28122020'),
+                    lockStartHour: hasLockData && infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 22),
+                    lockEndHour: hasLockData && infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
+                    lockEndMinute: hasLockData && infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
+                    tableLockHours: hasLockData && infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
+                };
+                if (infoItem.name) {
+                    window.shopInfo = window.shopInfo || {};
+                    window.shopInfo.name = infoItem.name;
+                    var shopNameEl = document.getElementById('shopNameHeader');
+                    if (shopNameEl) shopNameEl.textContent = infoItem.name;
+                }
+            });
+        }, 100);
+    });
+
+    // ============================================================
+    // MESSAGES (polling 30s)
+    // ============================================================
+    // Subscribe cũ: cập nhật messages
     DB.subscribeWithPolling('messages', function(data) {
         if (!data) return;
         _debounceRealtime('messages', function() {
-            // Cập nhật badge
             if (typeof updateChatBadge === 'function') {
                 updateChatBadge();
             }
-            // Nếu popup đang mở, render lại danh sách
             if (_chatPopupVisible) {
                 if (typeof renderChatMessages === 'function') {
                     renderChatMessages();
                 }
             }
-            // Kiểm tra tin nhắn mới để hiển thị popup tự động + âm thanh
             if (typeof checkNewMessages === 'function') {
                 checkNewMessages();
             }
         }, 200);
     }, 30);
-    
+    // NÂNG CẤP: Event Bus handler cho messages
+    DB.on('messages:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('messages_ui', function() {
+            if (typeof updateChatBadge === 'function') {
+                updateChatBadge();
+            }
+            if (_chatPopupVisible) {
+                if (typeof renderChatMessages === 'function') {
+                    renderChatMessages();
+                }
+            }
+            if (typeof checkNewMessages === 'function') {
+                checkNewMessages();
+            }
+        }, 100);
+    });
+
+    // ============================================================
+    // SYNCED HANDLERS: Khi fullSync hoàn tất, re-render toàn bộ UI
+    // ============================================================
+
+    // NÂNG CẤP: Khi fullSync menu_categories hoàn thành
+    DB.on('menu_categories:synced', function() {
+        DB.getAll('menu_categories').then(function(list) {
+            menuCategories = list;
+            var orderModal = document.getElementById('orderModal');
+            if (orderModal && orderModal.style.display === 'flex') {
+                renderOrderCategoriesColumn();
+            }
+        });
+    });
+
+    // NÂNG CẤP: Khi fullSync cost_categories hoàn thành
+    DB.on('cost_categories:synced', function() {
+        if (typeof loadExpenseData === 'function') {
+            loadExpenseData().then(function() {
+                if (currentTab === 'cost') {
+                    if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                    if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                    managerApplyFilter();
+                }
+            });
+        }
+    });
+
+    // NÂNG CẤP: Khi fullSync cost_transactions hoàn thành
+    DB.on('cost_transactions:synced', function() {
+        if (typeof loadExpenseData === 'function') {
+            loadExpenseData().then(function() {
+                if (currentTab === 'cost') {
+                    if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
+                    if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
+                } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
+                    managerApplyFilter();
+                }
+            });
+        }
+    });
+
+    // NÂNG CẤP: Khi fullSync manager_cash_pickups hoàn thành
+    DB.on('manager_cash_pickups:synced', function() {
+        if (currentTab === 'report') {
+            renderReport(currentReportDate);
+        }
+    });
+
+    // NÂNG CẤP: Khi fullSync daily_balances hoàn thành
+    DB.on('daily_balances:synced', function() {
+        if (typeof loadPosCashData === 'function') {
+            loadPosCashData();
+        }
+    });
+
+    // NÂNG CẤP: Khi fullSync ingredients hoàn thành
+    DB.on('ingredients:synced', function() {
+        DB.getAll('ingredients').then(function(list) {
+            window.ingredients = list;
+            if (typeof _invalidateLookups === 'function') _invalidateLookups();
+            if (currentTab === 'cost') {
+                if (typeof renderIngredientList === 'function') renderIngredientList();
+            }
+            if (currentTab === 'inventory') {
+                if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
+            }
+        });
+    });
+
+    // NÂNG CẤP: Khi fullSync transactions hoàn thành
+    DB.on('transactions:synced', function() {
+        updateRecentToast();
+        if (typeof loadPosCashData === 'function') {
+            loadPosCashData();
+        }
+        if (currentTab === 'history') {
+            renderHistoryByDate(currentHistoryDate);
+        }
+    });
+
+    // NÂNG CẤP: Khi fullSync info hoàn thành
+    DB.on('info:synced', function() {
+        DB.getAll('info').then(function(data) {
+            if (!data || data.length === 0) return;
+            var infoItem = null;
+            for (var i = 0; i < data.length; i++) {
+                if (data[i].id === 'shop_config') {
+                    infoItem = data[i];
+                    break;
+                }
+            }
+            if (!infoItem) return;
+            var hasLockData = (infoItem.lockStartHour !== undefined ||
+                               infoItem.lockEndHour !== undefined ||
+                               infoItem.lockEndMinute !== undefined ||
+                               infoItem.tableLockHours !== undefined ||
+                               infoItem.lockPassword !== undefined);
+            var oldConfig = window.shopConfig || {};
+            window.shopConfig = {
+                telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+                telegramChatId: infoItem.telegramChatId || oldConfig.telegramChatId || '6372876364',
+                telegramShiftCloseToken: infoItem.telegramShiftCloseToken || oldConfig.telegramShiftCloseToken || '',
+                telegramWarningToken: infoItem.telegramWarningToken || oldConfig.telegramWarningToken || '',
+                telegramExpenseToken: infoItem.telegramExpenseToken || oldConfig.telegramExpenseToken || '',
+                lockPassword: hasLockData && infoItem.lockPassword ? infoItem.lockPassword : (oldConfig.lockPassword || '28122020'),
+                lockStartHour: hasLockData && infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 22),
+                lockEndHour: hasLockData && infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
+                lockEndMinute: hasLockData && infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
+                tableLockHours: hasLockData && infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
+            };
+            if (infoItem.name) {
+                window.shopInfo = window.shopInfo || {};
+                window.shopInfo.name = infoItem.name;
+                var shopNameEl = document.getElementById('shopNameHeader');
+                if (shopNameEl) shopNameEl.textContent = infoItem.name;
+            }
+        });
+    });
+
+    // NÂNG CẤP: Khi fullSync messages hoàn thành
+    DB.on('messages:synced', function() {
+        if (typeof updateChatBadge === 'function') {
+            updateChatBadge();
+        }
+        if (_chatPopupVisible) {
+            if (typeof renderChatMessages === 'function') {
+                renderChatMessages();
+            }
+        }
+        if (typeof checkNewMessages === 'function') {
+            checkNewMessages();
+        }
+    });
+
     // FIX: Gọi updateRecentToast() ngay khi khởi tạo để hiển thị 5 giao dịch gần nhất
-    // Trước đây chỉ gọi khi có thay đổi transactions (qua callback subscribe)
-    // Nếu không có giao dịch mới, recent toast sẽ không bao giờ hiển thị
     setTimeout(function() {
         updateRecentToast();
     }, 500);
