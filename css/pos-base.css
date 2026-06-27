@@ -3247,6 +3247,21 @@ body.modal-open {
 .history-item.swipe-reveal .history-swipe-actions {
     transform: translateX(0);
 }
+.history-swipe-left-actions {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 2;
+}
+.history-item.swipe-left-reveal .history-swipe-left-actions {
+    transform: translateX(0);
+}
 .swipe-refund-btn {
     background: #ef4444;
     color: white;
