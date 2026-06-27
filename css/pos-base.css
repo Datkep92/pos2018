@@ -1021,6 +1021,24 @@ body {
     background: #7c3aed;
 }
 
+/* Nút đóng modal (mobile portrait) */
+.action-btn.btn-close-modal,
+.header-action-btn.btn-close-modal {
+    background: #64748b;
+    color: white;
+    border: none;
+    border-radius: 40px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-appearance: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.action-btn.btn-close-modal:active,
+.header-action-btn.btn-close-modal:active {
+    background: #475569;
+}
+
 /* Responsive cho draft bubbles */
 @media (max-width: 480px) {
     .draft-bubble-container {
@@ -2606,7 +2624,7 @@ body.modal-open {
         border-radius: 0 !important;
     }
 
-    /* Modal body chứa order-three-columns - overflow hidden để layout chuẩn */
+    /* Modal body chứa order-three-columns */
     .order-modal-body {
         overflow: hidden !important;
     }
@@ -2618,17 +2636,50 @@ body.modal-open {
         overflow: hidden;
     }
 
-    /* Ẩn thanh categories ngang cũ, dùng dropdown select thay thế */
+    /* Hiển thị thanh categories dạng cuộn ngang thay vì dropdown */
     .order-categories-column {
+        display: flex !important;
+        flex-direction: row;
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        flex-shrink: 0;
+        padding: 6px 0;
+        gap: 4px;
+        background: #f8fafc;
+        border-radius: 12px;
+        scrollbar-width: none;
+    }
+    .order-categories-column::-webkit-scrollbar {
+        display: none;
+    }
+    .order-categories-column .category-item {
+        flex: 0 0 auto;
+        flex-direction: row;
+        padding: 8px 14px;
+        margin: 0 2px;
+        gap: 6px;
+        white-space: nowrap;
+        border-radius: 20px;
+    }
+    .order-categories-column .category-item .cat-icon {
+        font-size: 16px;
+        margin-bottom: 0;
+    }
+    .order-categories-column .category-item span:last-child {
+        font-size: 12px;
+    }
+    .order-categories-column .category-sort-btn {
+        display: none;
+    }
+
+    /* Ẩn dropdown select cũ trên mobile */
+    .order-category-select {
         display: none !important;
     }
 
-    /* Dropdown select cách đều */
-    .order-category-select {
-        margin-bottom: 6px;
-    }
-
-    /* Menu column: flex:1 để chiếm phần còn lại sau cart, scroll dọc */
+    /* Menu column: chiếm toàn bộ không gian còn lại, scroll dọc */
     .order-menu-column {
         flex: 1 1 auto;
         min-height: 0;
@@ -2657,33 +2708,36 @@ body.modal-open {
         font-size: 11px;
     }
 
-    /* Giỏ hàng: chiếm 45% màn hình, scroll nội dung */
+    /* Giỏ hàng: chỉ chiếm không gian đúng bằng nội dung (header + items + footer) */
+    /* items-list scroll nội bộ khi quá nhiều, không đẩy cart column to hơn */
     .order-cart-column {
         width: 100%;
         min-width: 0;
-        max-height: 45vh;
-        flex-shrink: 0;
+        flex: 0 0 auto;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
+        max-height: 70%;
     }
 
-    /* Header giỏ hàng - gọn nhẹ */
+    /* Header giỏ hàng */
     .cart-header {
-        padding: 6px 10px;
-        font-size: 13px;
+        padding: 10px 12px;
+        font-size: 14px;
         flex-shrink: 0;
     }
 
-    /* Danh sách item trong giỏ - scroll, chiếm phần lớn không gian */
+    /* Danh sách item - scroll nội bộ khi nhiều món, không làm cart column phình to */
     .cart-items-list {
-        flex: 1;
+        flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
-    /* Phần tổng tiền + nút thanh toán - gọn nhẹ */
+    /* Phần tổng tiền + nút thanh toán - cố định đáy, không bị đẩy xuống */
     .cart-total-section {
-        padding: 6px 10px 10px;
+        padding: 10px 12px 12px;
         flex-shrink: 0;
     }
 
@@ -2700,7 +2754,7 @@ body.modal-open {
     }
 }
 
-/* Màn hình rất nhỏ (< 400px) - 2 cột menu, cart dùng flex */
+/* Màn hình rất nhỏ (< 400px) - cart không giới hạn max-height */
 @media (orientation: portrait) and (max-width: 400px) {
     .menu-grid {
         grid-template-columns: repeat(2, 1fr) !important;
@@ -2716,14 +2770,14 @@ body.modal-open {
         font-size: 10px;
     }
     .order-cart-column {
-        max-height: 42vh;
+        max-height: none;
     }
     .cart-header {
-        padding: 4px 8px;
-        font-size: 12px;
+        padding: 10px 12px;
+        font-size: 14px;
     }
     .cart-total-section {
-        padding: 4px 8px 8px;
+        padding: 10px 12px 12px;
     }
     .cart-action-buttons .action-btn {
         padding: 5px 6px;
@@ -2757,11 +2811,9 @@ body.modal-open {
     box-shadow: 0 0 0 2px rgba(249,115,22,0.15);
 }
 
-/* Hiện dropdown select trên portrait/mobile, ẩn thanh categories ngang */
-@media (orientation: portrait), (max-width: 600px) {
-    .order-category-select {
-        display: block;
-    }
+/* Dropdown select luôn ẩn - dùng thanh categories cuộn ngang thay thế */
+.order-category-select {
+    display: none !important;
 }
 
 /* ========== TABLES GRID ========== */
