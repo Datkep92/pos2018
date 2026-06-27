@@ -57,6 +57,11 @@ function _cloneArr(arr) {
     return result;
 }
 
+// Helper: Kiểm tra xem có đang ở chế độ portrait (dọc) hay không
+function _isPortrait() {
+    return window.innerHeight > window.innerWidth;
+}
+
 // ========== MỞ MODAL ==========
 function openAddMenuForTable(tableId) {
     currentAddToTableId = tableId;
@@ -1070,10 +1075,14 @@ function _doRenderCart() {
     '<button class="action-btn btn-grab" onclick="handleGrabOrder()">🚕 GR</button>' +
     '<button class="action-btn btn-debt" onclick="handleDebtOrder()">💢 Nợ</button>' +
 '</div>' +
-                // Nút lưu nháp - luôn hiển thị khi có món
-                '<div class="cart-draft-row">' +
-                    '<button class="action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>' +
-                '</div>'
+                // Nút lưu nháp (landscape) hoặc nút đóng (portrait)
+                (_isPortrait()
+                    ? '<div class="cart-draft-row">' +
+                        '<button class="action-btn btn-close-modal" onclick="closeModal(\'orderModal\')">✕ Đóng</button>' +
+                    '</div>'
+                    : '<div class="cart-draft-row">' +
+                        '<button class="action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>' +
+                    '</div>')
         }
     }
 }
@@ -1091,14 +1100,18 @@ function _renderOrderHeaderActionsFast(headerActions) {
     if (currentAddToTableId) {
         html = '<span class="header-action-btn btn-total">' + formatMoney(total) + '</span>' +
             '<button class="header-action-btn btn-table" onclick="handleAddToExistingTable()">🍽️ Nhập vào bàn</button>' +
-            '<button class="header-action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>';
+            (_isPortrait()
+                ? '<button class="header-action-btn btn-close-modal" onclick="closeModal(\'orderModal\')">✕ Đóng</button>'
+                : '<button class="header-action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>');
     } else {
         html = '<span class="header-action-btn btn-total">' + formatMoney(total) + '</span>' +
             '<button class="header-action-btn btn-table" onclick="handleCreateNewTable()">🍽️ Tạo bàn mới</button>' +
             '<button class="header-action-btn btn-cash" onclick="handleTakeawayPayment(\'cash\')">💰 Tiền mặt</button>' +
             '<button class="header-action-btn btn-transfer" onclick="handleTakeawayPayment(\'transfer\')">💳 Chuyển khoản</button>' +
             '<button class="header-action-btn btn-debt" onclick="handleDebtOrder()">💢 Nợ</button>' +
-            '<button class="header-action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>' +
+            (_isPortrait()
+                ? '<button class="header-action-btn btn-close-modal" onclick="closeModal(\'orderModal\')">✕ Đóng</button>'
+                : '<button class="header-action-btn btn-draft" onclick="minimizeCurrentOrderToDraft()">💬 Lưu nháp</button>') +
             '<button class="header-action-btn btn-sort" onclick="toggleReorderMode()" id="reorderToggleBtn">🔀 Sắp xếp</button>';
     }
     headerActions.innerHTML = html;
