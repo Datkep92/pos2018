@@ -239,21 +239,27 @@ function addCustomer(name, phone) {
 var _customerHistoryExpanded = false;
 
 function showCustomerDetail(customerId) {
+    // Tìm trong memory cache
     var c = null;
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return;
-    _customerHistoryExpanded = false; // reset mỗi lần mở
     
-    // OPTIMIZE: Dùng memory cache (costTransactions) thay vì DB.getAll('transactions')
+    // Render ngay từ memory cache
+    _renderCustomerDetail(c, customerId);
+}
+
+// Hàm render UI
+function _renderCustomerDetail(c, customerId) {
+    _customerHistoryExpanded = false;
     var allTransactions = window.costTransactions || [];
-    
     var all = [];
     
     // Lấy từ debtHistory và paymentHistory
+    // Dùng index trong array (debtIndex) làm định danh duy nhất cho mỗi entry
     if (c.debtHistory) {
         for (var i = 0; i < c.debtHistory.length; i++) {
             var debtEntry = c.debtHistory[i];
-            var allItem = { type: 'debt', date: debtEntry.date, amount: debtEntry.amount, note: debtEntry.note, transactionId: null };
+            var allItem = { type: 'debt', date: debtEntry.date, amount: debtEntry.amount, note: debtEntry.note, transactionId: null, debtIndex: i };
             if (debtEntry.items && debtEntry.items.length > 0) {
                 allItem.items = debtEntry.items;
             }
@@ -265,14 +271,13 @@ function showCustomerDetail(customerId) {
             all.push({ type: 'payment', date: c.paymentHistory[i].date, amount: c.paymentHistory[i].amount, note: c.paymentHistory[i].note, transactionId: null });
         }
     }
-    // Lấy từ creditHistory
     if (c.creditHistory) {
         for (var i = 0; i < c.creditHistory.length; i++) {
             all.push({ type: 'credit', date: c.creditHistory[i].date, amount: c.creditHistory[i].amount, note: c.creditHistory[i].note, transactionId: null });
         }
     }
     
-    // Map transactionId cho debt records từ transactions collection (memory cache)
+    // Map transactionId cho debt records từ transactions collection
     for (var i = 0; i < allTransactions.length; i++) {
         var tx = allTransactions[i];
         if (tx.type === 'debt_payment' && tx.customer && tx.customer.id === customerId) {
@@ -290,22 +295,18 @@ function showCustomerDetail(customerId) {
     
     all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
     
-    // Render history: chỉ 5 cái đầu, có nút mở rộng
-    var historyHtml = _renderCustomerHistoryHtml(all, false);
+    var historyHtml = _renderCustomerHistoryHtml(all, false, customerId);
     var hasMore = all.length > 5;
     
     var content = document.getElementById('customerDetailContent');
     if (!content) return;
     content.setAttribute('data-customer-id', customerId);
     
-    // Tính số dư thực: creditBalance - totalDebt
     var netBalance = (c.creditBalance || 0) - (c.totalDebt || 0);
     var balanceColor = netBalance >= 0 ? '#16a34a' : '#ef4444';
-    var balanceSign = netBalance >= 0 ? '+' : '';
     var showPayBtn = netBalance < 0;
     var debtForPayment = Math.abs(netBalance);
     
-    // Set modal title + balance badge
     var titleEl = document.getElementById('customerDetailTitle');
     if (titleEl) titleEl.innerHTML = '👤 ' + escapeHtml(c.name);
     var balanceEl = document.getElementById('customerDetailBalance');
@@ -319,14 +320,18 @@ function showCustomerDetail(customerId) {
         }
     }
     
-    // Build nội dung: payment inline (nếu có nợ) + history - 2 cột trên tablet ngang
     var leftHtml = '';
     if (showPayBtn) {
         leftHtml = '<div class="cus-pay-inline"><input type="number" id="inlineDebtAmount" class="cus-pay-input" value="' + debtForPayment + '" step="1000" placeholder="Số tiền"><div class="cus-pay-btns"><button class="cus-pay-btn cus-pay-cash" onclick="confirmInlineDebtPayment(\'' + c.id + '\',\'cash\')">💰 TM</button><button class="cus-pay-btn cus-pay-transfer" onclick="confirmInlineDebtPayment(\'' + c.id + '\',\'transfer\')">💳 CK</button></div></div>';
     }
-    // Nút sửa/xóa - chỉ admin, đặt bên left column
     if (DB.isAdmin && DB.isAdmin()) {
-        leftHtml += '<div class="cus-admin-actions"><button class="cus-edit-btn" onclick="editCustomerInfo(\'' + c.id + '\')">✏️ Sửa</button><button class="cus-delete-btn" onclick="deleteCustomer(\'' + c.id + '\')">🗑️ Xóa</button></div>';
+        leftHtml += '<div class="cus-admin-actions">' +
+            '<button class="cus-edit-btn" onclick="editCustomerInfo(\'' + c.id + '\')">✏️ Sửa</button>' +
+            '<button class="cus-delete-btn" onclick="deleteCustomer(\'' + c.id + '\')">🗑️ Xóa</button>' +
+            '</div>' +
+            '<div class="cus-admin-actions" style="margin-top:6px;">' +
+            '<button class="cus-add-debt-btn" onclick="showAddOldDebtForm(\'' + c.id + '\')" style="padding:8px 12px;font-size:13px;border:none;border-radius:6px;background:#f59e0b;color:#fff;cursor:pointer;width:100%;">➕ Thêm nợ cũ</button>' +
+            '</div>';
     }
     
     var rightHtml = '<div class="cus-history-title">📜 Lịch sử <span style="font-size:12px;font-weight:normal;color:#64748b;">(' + all.length + ' giao dịch)</span></div>' +
@@ -341,9 +346,12 @@ function showCustomerDetail(customerId) {
 }
 
 // Render danh sách lịch sử, nếu expanded=false chỉ lấy 5 cái đầu
-function _renderCustomerHistoryHtml(all, expanded) {
+// customerId được truyền trực tiếp từ nơi gọi, không đọc từ DOM (tránh sai lệch)
+function _renderCustomerHistoryHtml(all, expanded, customerId) {
     var html = '';
     var limit = expanded ? all.length : Math.min(5, all.length);
+    var isAdmin = DB.isAdmin && DB.isAdmin();
+    
     for (var i = 0; i < limit; i++) {
         var h = all[i];
         var amountClass = h.type === 'debt' ? 'var(--danger)' : (h.type === 'credit' ? 'var(--warning)' : 'var(--success)');
@@ -367,7 +375,17 @@ function _renderCustomerHistoryHtml(all, expanded) {
             itemsHtml += '</div>';
         }
         
-        html += '<div class="cart-item"><span>' + new Date(h.date).toLocaleString('vi-VN') + ' ' + typeLabel + '</span><span style="color:' + amountClass + '">' + sign + formatMoney(h.amount) + '</span></div><div style="font-size:11px; margin-bottom:4px;">📝 ' + escapeHtml(h.note || '') + '</div>' + itemsHtml;
+        // Nút Sửa/Xóa cho dòng nợ (chỉ admin)
+        // Dùng debtIndex (index trong debtHistory array) làm định danh, không phụ thuộc vào id field
+        var actionBtns = '';
+        if (isAdmin && h.type === 'debt' && customerId && h.debtIndex !== undefined && h.debtIndex !== null) {
+            actionBtns = '<div style="display:flex;gap:4px;margin-top:2px;">' +
+                '<button onclick="editDebtEntryUI(\'' + customerId + '\',' + h.debtIndex + ')" style="padding:2px 8px;font-size:11px;border:1px solid #f59e0b;border-radius:4px;background:#fef3c7;color:#92400e;cursor:pointer;">✏️ Sửa</button>' +
+                '<button onclick="deleteDebtEntry(\'' + customerId + '\',' + h.debtIndex + ')" style="padding:2px 8px;font-size:11px;border:1px solid #ef4444;border-radius:4px;background:#fee2e2;color:#991b1b;cursor:pointer;">🗑️ Xóa</button>' +
+                '</div>';
+        }
+        
+        html += '<div class="cart-item"><span>' + new Date(h.date).toLocaleString('vi-VN') + ' ' + typeLabel + '</span><span style="color:' + amountClass + '">' + sign + formatMoney(h.amount) + '</span></div><div style="font-size:11px; margin-bottom:4px;">📝 ' + escapeHtml(h.note || '') + '</div>' + itemsHtml + actionBtns;
     }
     return html;
 }
@@ -375,16 +393,17 @@ function _renderCustomerHistoryHtml(all, expanded) {
 // Toggle mở rộng lịch sử
 function toggleCustomerHistory(customerId) {
     _customerHistoryExpanded = !_customerHistoryExpanded;
+    // Dùng memory cache
     var c = null;
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return;
     
-    // Gom all records từ memory cache (không cần query DB lại)
     var allTransactions = window.costTransactions || [];
     var all = [];
     if (c.debtHistory) {
         for (var i = 0; i < c.debtHistory.length; i++) {
-            all.push({ type: 'debt', date: c.debtHistory[i].date, amount: c.debtHistory[i].amount, note: c.debtHistory[i].note, transactionId: null });
+            var debtEntry = c.debtHistory[i];
+            all.push({ type: 'debt', date: debtEntry.date, amount: debtEntry.amount, note: debtEntry.note, transactionId: null, debtIndex: i });
         }
     }
     if (c.paymentHistory) {
@@ -398,7 +417,6 @@ function toggleCustomerHistory(customerId) {
         }
     }
     
-    // Map transactionId để hiển thị items (giống showCustomerDetail)
     for (var i = 0; i < allTransactions.length; i++) {
         var tx = allTransactions[i];
         if (tx.type === 'debt_payment' && tx.customer && tx.customer.id === customerId) {
@@ -419,7 +437,7 @@ function toggleCustomerHistory(customerId) {
     var listEl = document.getElementById('customerHistoryList');
     var btnEl = document.getElementById('btnExpandHistory');
     if (listEl) {
-        listEl.innerHTML = _renderCustomerHistoryHtml(all, _customerHistoryExpanded) || '<div class="empty-state">Chưa có giao dịch</div>';
+        listEl.innerHTML = _renderCustomerHistoryHtml(all, _customerHistoryExpanded, customerId) || '<div class="empty-state">Chưa có giao dịch</div>';
     }
     if (btnEl) {
         btnEl.innerText = _customerHistoryExpanded ? '📋 Thu gọn' : '📋 Xem thêm';
@@ -554,6 +572,117 @@ function addCustomerDebt(customerId, amount, note, items) {
     return DB.update('customers', customerId, updateData).then(function() {
         // OPTIMIZE: Không cần DB.getAll('customers') - memory cache đã được cập nhật
         return { debtAmount: debtAmount, creditUsed: creditUsed };
+    });
+}
+
+// ========== THÊM NỢ CŨ (ADMIN) ==========
+// Thêm khoản nợ cũ với ngày tùy chỉnh, KHÔNG ảnh hưởng doanh thu
+function addOldDebt(customerId, amount, note, dateStr) {
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) return Promise.resolve();
+    if (amount <= 0) { showToast('⚠️ Số tiền không hợp lệ', 'warning'); return Promise.resolve(); }
+    
+    // KHÔNG tự động trừ creditBalance (vì là nợ cũ, không liên quan giao dịch hiện tại)
+    c.totalDebt = (c.totalDebt || 0) + amount;
+    c.debtHistory = c.debtHistory || [];
+    
+    var now = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
+    var debtEntry = {
+        id: 'debt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        date: now.toISOString(),
+        amount: amount,
+        note: note || 'Thêm nợ cũ',
+        status: 'unpaid'
+    };
+    var y = now.getFullYear();
+    var m = ('0' + (now.getMonth() + 1)).slice(-2);
+    var d = ('0' + now.getDate()).slice(-2);
+    debtEntry.dateKey = y + '-' + m + '-' + d;
+    c.debtHistory.unshift(debtEntry);
+    
+    return DB.update('customers', customerId, {
+        totalDebt: c.totalDebt,
+        debtHistory: c.debtHistory
+    }).then(function() {
+        showToast('✅ Đã thêm nợ cũ: ' + formatMoney(amount), 'success');
+        renderCustomerList();
+        showCustomerDetail(customerId);
+    });
+}
+
+// ========== SỬA KHOẢN NỢ (ADMIN) - DÙNG INDEX ==========
+// debtIndex là index trong c.debtHistory array, được truyền từ data-debt-index trong HTML
+function editDebtEntry(customerId, debtIndex, newAmount, newNote) {
+    if (newAmount <= 0) { showToast('⚠️ Số tiền không hợp lệ', 'warning'); return Promise.resolve(); }
+    
+    // Tìm customer trong memory cache
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) { showToast('⚠️ Không tìm thấy khách hàng', 'error'); return Promise.resolve(); }
+    
+    // Đảm bảo debtIndex là number
+    if (typeof debtIndex === 'string') debtIndex = parseInt(debtIndex, 10);
+    
+    var debtHistory = c.debtHistory || [];
+    if (isNaN(debtIndex) || debtIndex < 0 || debtIndex >= debtHistory.length) {
+        showToast('⚠️ Không tìm thấy khoản nợ', 'error');
+        return Promise.resolve();
+    }
+    
+    var entry = debtHistory[debtIndex];
+    var oldAmount = entry.amount;
+    
+    // Cập nhật totalDebt: trừ nợ cũ, cộng nợ mới
+    c.totalDebt = (c.totalDebt || 0) - oldAmount + newAmount;
+    entry.amount = newAmount;
+    if (newNote !== undefined && newNote !== null) {
+        entry.note = newNote;
+    }
+    
+    return DB.update('customers', customerId, {
+        totalDebt: c.totalDebt,
+        debtHistory: debtHistory
+    }).then(function() {
+        showToast('✅ Đã sửa khoản nợ: ' + formatMoney(oldAmount) + ' → ' + formatMoney(newAmount), 'success');
+        renderCustomerList();
+        showCustomerDetail(customerId);
+    });
+}
+
+// ========== XÓA KHOẢN NỢ (ADMIN) - DÙNG INDEX ==========
+function deleteDebtEntry(customerId, debtIndex) {
+    // Tìm customer trong memory cache
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) { showToast('⚠️ Không tìm thấy khách hàng', 'error'); return; }
+    
+    // Đảm bảo debtIndex là number
+    if (typeof debtIndex === 'string') debtIndex = parseInt(debtIndex, 10);
+    
+    var debtHistory = c.debtHistory || [];
+    if (isNaN(debtIndex) || debtIndex < 0 || debtIndex >= debtHistory.length) {
+        showToast('⚠️ Không tìm thấy khoản nợ', 'error');
+        return;
+    }
+    
+    var removedAmount = debtHistory[debtIndex].amount;
+    
+    if (!confirm('🗑️ Xóa khoản nợ ' + formatMoney(removedAmount) + '?\nHành động này không thể hoàn tác!')) {
+        return;
+    }
+    
+    debtHistory.splice(debtIndex, 1);
+    c.totalDebt = (c.totalDebt || 0) - removedAmount;
+    if (c.totalDebt < 0) c.totalDebt = 0;
+    
+    return DB.update('customers', customerId, {
+        totalDebt: c.totalDebt,
+        debtHistory: debtHistory
+    }).then(function() {
+        showToast('✅ Đã xóa khoản nợ: ' + formatMoney(removedAmount), 'success');
+        renderCustomerList();
+        showCustomerDetail(customerId);
     });
 }
 
@@ -834,6 +963,130 @@ function printCustomerDebtHistory(customerId, mode) {
     }
 }
 
+// ========== UI: FORM THÊM NỢ CŨ (ADMIN) ==========
+function showAddOldDebtForm(customerId) {
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) return;
+    
+    // Xóa modal cũ nếu có (tránh chồng modal)
+    var oldModal = document.getElementById('addOldDebtModal');
+    if (oldModal) oldModal.remove();
+    
+    // Tạo modal nhập liệu
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    modal.id = 'addOldDebtModal';
+    
+    var today = new Date();
+    var y = today.getFullYear();
+    var m = ('0' + (today.getMonth() + 1)).slice(-2);
+    var d = ('0' + today.getDate()).slice(-2);
+    var dateStr = y + '-' + m + '-' + d;
+    
+    modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">' +
+        '<h3 style="margin:0 0 16px 0;font-size:18px;">➕ Thêm nợ cũ - ' + escapeHtml(c.name) + '</h3>' +
+        '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Số tiền nợ (VNĐ)</label>' +
+        '<input type="number" id="oldDebtAmount" class="cus-pay-input" value="0" step="1000" min="1000" style="width:100%;padding:10px;font-size:16px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Ghi chú</label>' +
+        '<input type="text" id="oldDebtNote" class="cus-pay-input" value="Nợ cũ" style="width:100%;padding:10px;font-size:14px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:16px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Ngày phát sinh</label>' +
+        '<input type="date" id="oldDebtDate" class="cus-pay-input" value="' + dateStr + '" style="width:100%;padding:10px;font-size:14px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'addOldDebtModal\').remove()" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;cursor:pointer;font-size:14px;">Hủy</button>' +
+        '<button onclick="confirmAddOldDebt(\'' + customerId + '\')" style="flex:1;padding:10px;border:none;border-radius:8px;background:#f59e0b;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">✅ Xác nhận</button>' +
+        '</div>' +
+        '</div>';
+    
+    document.body.appendChild(modal);
+    // Focus vào input số tiền
+    setTimeout(function() { document.getElementById('oldDebtAmount').focus(); }, 100);
+}
+
+// Xác nhận thêm nợ cũ
+function confirmAddOldDebt(customerId) {
+    var amount = parseInt(document.getElementById('oldDebtAmount').value) || 0;
+    var note = document.getElementById('oldDebtNote').value || 'Nợ cũ';
+    var dateStr = document.getElementById('oldDebtDate').value || '';
+    
+    if (amount < 1000) {
+        showToast('⚠️ Số tiền tối thiểu 1.000đ', 'warning');
+        return;
+    }
+    
+    var modal = document.getElementById('addOldDebtModal');
+    if (modal) modal.remove();
+    
+    addOldDebt(customerId, amount, note, dateStr);
+}
+
+// ========== UI: FORM SỬA KHOẢN NỢ (ADMIN) ==========
+function editDebtEntryUI(customerId, debtIndex) {
+    // Xóa modal cũ nếu có (tránh chồng modal - fix lỗi "mở sửa khách A hiển thị khách B")
+    var oldModal = document.getElementById('editDebtModal');
+    if (oldModal) oldModal.remove();
+    
+    // Tìm customer trong memory cache
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) { showToast('⚠️ Không tìm thấy khách hàng', 'error'); return; }
+    
+    // Đảm bảo debtHistory là array
+    var debtHistory = c.debtHistory || [];
+    // Nếu debtIndex là string (từ data attribute), chuyển về number
+    if (typeof debtIndex === 'string') debtIndex = parseInt(debtIndex, 10);
+    if (isNaN(debtIndex) || debtIndex < 0 || debtIndex >= debtHistory.length) {
+        showToast('⚠️ Không tìm thấy khoản nợ', 'error');
+        return;
+    }
+    var entry = debtHistory[debtIndex];
+    
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    modal.id = 'editDebtModal';
+    
+    modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">' +
+        '<h3 style="margin:0 0 16px 0;font-size:18px;">✏️ Sửa khoản nợ - ' + escapeHtml(c.name) + '</h3>' +
+        '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Số tiền nợ (VNĐ)</label>' +
+        '<input type="number" id="editDebtAmount" class="cus-pay-input" value="' + entry.amount + '" step="1000" min="1000" style="width:100%;padding:10px;font-size:16px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:16px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Ghi chú</label>' +
+        '<input type="text" id="editDebtNote" class="cus-pay-input" value="' + escapeHtml(entry.note || '') + '" style="width:100%;padding:10px;font-size:14px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'editDebtModal\').remove()" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;cursor:pointer;font-size:14px;">Hủy</button>' +
+        '<button onclick="confirmEditDebt(\'' + customerId + '\',' + debtIndex + ')" style="flex:1;padding:10px;border:none;border-radius:8px;background:#f59e0b;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">✅ Lưu</button>' +
+        '</div>' +
+        '</div>';
+    
+    document.body.appendChild(modal);
+    setTimeout(function() { document.getElementById('editDebtAmount').focus(); }, 100);
+}
+
+// Xác nhận sửa nợ
+function confirmEditDebt(customerId, debtIndex) {
+    var newAmount = parseInt(document.getElementById('editDebtAmount').value) || 0;
+    var newNote = document.getElementById('editDebtNote').value || '';
+    
+    if (newAmount < 1000) {
+        showToast('⚠️ Số tiền tối thiểu 1.000đ', 'warning');
+        return;
+    }
+    
+    var modal = document.getElementById('editDebtModal');
+    if (modal) modal.remove();
+    
+    editDebtEntry(customerId, debtIndex, newAmount, newNote);
+}
+
 // Export global
 window.showCustomerDetail = showCustomerDetail;
 window.printCustomerDebtHistory = printCustomerDebtHistory;
@@ -846,3 +1099,10 @@ window.useCustomerCredit = useCustomerCredit;
 window.editCustomerInfo = editCustomerInfo;
 window.saveCustomerEdit = saveCustomerEdit;
 window.deleteCustomer = deleteCustomer;
+window.addOldDebt = addOldDebt;
+window.showAddOldDebtForm = showAddOldDebtForm;
+window.confirmAddOldDebt = confirmAddOldDebt;
+window.editDebtEntry = editDebtEntry;
+window.editDebtEntryUI = editDebtEntryUI;
+window.confirmEditDebt = confirmEditDebt;
+window.deleteDebtEntry = deleteDebtEntry;

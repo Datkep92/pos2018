@@ -1323,8 +1323,21 @@
     <!-- Chat nội bộ -->
     <script src="messages.js"></script>
     
-    <!-- Lunar calendar (giữ để có thông báo) -->
-    <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/dist/lunar.min.js"></script>
+    <!-- Lunar calendar -->
+    <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/lunar.min.js"></script>
+    <script>
+    // Cập nhật ngày âm lịch sau khi thư viện lunar đã load
+    try {
+        var _now = new Date();
+        var _dateEl = document.getElementById('headerDate');
+        if (_dateEl && typeof Lunar !== 'undefined') {
+            var _lunar = Lunar.fromDate(_now);
+            var _dayNames = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+            var _solar = _dayNames[_now.getDay()] + ', ' + _now.toLocaleDateString('vi-VN');
+            _dateEl.innerText = _solar + '  🏮 ' + _lunar.getDay() + '/' + _lunar.getMonth();
+        }
+    } catch(_e) {}
+    </script>
     
     <!-- Employees management - Modal quản lý nhân viên (thay thế staff logic trong auth.js, settings.js, manager-detail.js) -->
     <script src="employees.js"></script>
