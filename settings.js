@@ -398,7 +398,7 @@ function loadPosCashData(targetDate) {
             if (tx.paymentMethod === 'debt') {
                 debtCount++;
                 debtAmount += amt;
-            } else {
+            } else if (tx.paymentMethod === 'cash' || tx.paymentMethod === 'transfer' || tx.paymentMethod === 'grab') {
                 totalCount++;
                 totalRevenue += amt;
                 if (tx.paymentMethod === 'cash') {
@@ -412,6 +412,7 @@ function loadPosCashData(targetDate) {
                     grabAmount += amt;
                 }
             }
+            // Các phương thức thanh toán không xác định khác: bỏ qua, không tính vào tổng doanh thu
         }
 
         // Chi phí từ Két POS
@@ -684,11 +685,18 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
             // 💵 Doanh thu tiền mặt
             html += '    <div class="pos-cash-row"><span>💵 Doanh thu tiền mặt</span><span>' + formatMoney(data.cashRevenue) + '</span></div>';
 
+            // 💵 Số tiền tại POS hiện tại
+            var staffPosDisplay = countedTotal > 0 ? countedTotal : data.expectedClosing;
+            html += '    <div class="pos-cash-row">';
+            html += '      <span>💵 Số tiền tại POS hiện tại:</span>';
+            html += '      <span class="' + (staffPosDisplay >= 0 ? 'pos-cash-positive' : 'pos-cash-negative') + '" id="adminPosCashValue">' + formatMoney(staffPosDisplay) + '</span>';
+            html += '    </div>';
+
             // 📐 Dự kiến còn
             var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
             html += '    <div class="pos-cash-row" style="border-top:1px dashed #ddd;padding-top:6px;">';
             html += '      <span>📐 Dự kiến còn:</span>';
-            html += '      <span style="font-weight:600;color:#2c3e50;">' + formatMoney(expectedClosing) + '</span>';
+            html += '      <span style="font-weight:600;color:#2c3e50;" id="staffExpectedClosing">' + formatMoney(expectedClosing) + '</span>';
             html += '    </div>';
 
             // 📊 Chênh lệch - dùng data.difference từ Firebase (do nhân viên A đã chốt ghi lên)
@@ -781,6 +789,10 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
         } else {
             // Nút in phiếu chốt ca cho nhân viên
             html += '    <button class="cash-action-btn" style="background:#27ae60;color:#fff;" onclick="printStaffCloseReceipt()">🖨️ In chốt ca</button>';
+        }
+        // Nút in phiếu QL nhận tiền cho nhân viên (nếu có lịch sử)
+        if (hasPickupHistory) {
+            html += '    <button class="cash-action-btn" style="background:#2c3e50;color:#fff;" onclick="printManagerPickup()">🖨️ In QL nhận</button>';
         }
         html += '  </div>';
     }
@@ -903,6 +915,14 @@ function updateCashGrandTotal() {
             var parentRow = staffPosCashEl.closest('.pos-cash-row');
             if (parentRow) parentRow.style.display = 'none';
         }
+    }
+
+    // Cập nhật 💵 Số tiền tại POS hiện tại (admin) - realtime khi nhập mệnh giá
+    var adminPosCashEl = document.getElementById('adminPosCashValue');
+    if (adminPosCashEl) {
+        var adminDisplayValue = total > 0 ? total : (_posCashData ? _posCashData.expectedClosing : 0);
+        adminPosCashEl.textContent = formatMoney(adminDisplayValue);
+        adminPosCashEl.className = adminDisplayValue >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
     }
 }
 
@@ -2448,12 +2468,18 @@ function printManagerPickup() {
     var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(targetDate);
 
+    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
+    var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
+    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
+
     // Tạo nội dung in
     var lines = [];
     lines.push('================================');
-    lines.push('   PHIẾU QUẢN LÝ NHẬN TIỀN');
+    lines.push('   QUẢN LÝ NHẬN TIỀN');
     lines.push('   Ngày: ' + dateLabel);
     lines.push('================================');
+    lines.push('');
+    lines.push('  Số dư đầu kỳ: ' + formatMoney(data.openingBalance || 0));
     lines.push('');
 
     for (var i = 0; i < data.pickupHistory.length; i++) {
@@ -2465,14 +2491,12 @@ function printManagerPickup() {
         }
         lines.push('  Lần ' + (i + 1) + ' - ' + timeStr);
         lines.push('  QL nhận: ' + formatMoney(ph.amount));
-        var remaining = ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0;
-        lines.push('  POS còn: ' + formatMoney(remaining));
         lines.push('  ------------------------------');
     }
 
     lines.push('');
-    lines.push('  Tổng QL nhận: ' + formatMoney(data.managerPickupTotal));
-    lines.push('  Số tiền POS đầu ngày: ' + formatMoney(data.openingBalance || 0));
+    lines.push('  Số tiền QL nhận: ' + formatMoney(data.managerPickupTotal));
+    lines.push('  Số tiền tại POS: ' + formatMoney(currentPosCash));
     lines.push('');
     lines.push('================================');
     lines.push('  ' + new Date().toLocaleString('vi-VN'));
@@ -2516,9 +2540,15 @@ function copyPickupContent() {
     var today = data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(today);
 
+    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
+    var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
+    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
+
     var lines = [];
-    lines.push('PHIẾU QUẢN LÝ NHẬN TIỀN');
+    lines.push('QUẢN LÝ NHẬN TIỀN');
     lines.push('Ngày: ' + dateLabel);
+    lines.push('');
+    lines.push('Số dư đầu kỳ: ' + formatMoney(data.openingBalance || 0));
     lines.push('');
 
     for (var i = 0; i < data.pickupHistory.length; i++) {
@@ -2528,12 +2558,12 @@ function copyPickupContent() {
             var d = new Date(ph.createdAt);
             timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
         }
-        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr + ': ' + formatMoney(ph.amount) + ' (POS còn: ' + formatMoney(ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0) + ')');
+        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr + ': ' + formatMoney(ph.amount));
     }
 
     lines.push('');
-    lines.push('Tổng QL nhận: ' + formatMoney(data.managerPickupTotal));
-    lines.push('Số tiền POS đầu ngày: ' + formatMoney(data.openingBalance || 0));
+    lines.push('Số tiền QL nhận: ' + formatMoney(data.managerPickupTotal));
+    lines.push('Số tiền tại POS: ' + formatMoney(currentPosCash));
 
     var text = lines.join('\n');
 
@@ -2556,11 +2586,17 @@ function printPickupContent(modalId) {
     var today = data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(today);
 
+    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
+    var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
+    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
+
     var textLines = [];
     textLines.push('================================');
-    textLines.push('   PHIEU QUAN LY NHAN TIEN');
+    textLines.push('   QUAN LY NHAN TIEN');
     textLines.push('   Ngay: ' + dateLabel);
     textLines.push('================================');
+    textLines.push('');
+    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance || 0));
     textLines.push('');
 
     for (var i = 0; i < data.pickupHistory.length; i++) {
@@ -2572,14 +2608,12 @@ function printPickupContent(modalId) {
         }
         textLines.push('  Lan ' + (i + 1) + ' - ' + timeStr);
         textLines.push('  QL nhan: ' + formatMoney(ph.amount));
-        var remaining = ph.remainingPosCash !== undefined ? ph.remainingPosCash : 0;
-        textLines.push('  POS con: ' + formatMoney(remaining));
         textLines.push('  ------------------------------');
     }
 
     textLines.push('');
-    textLines.push('  Tong QL nhan: ' + formatMoney(data.managerPickupTotal));
-    textLines.push('  So tien POS dau ngay: ' + formatMoney(data.openingBalance || 0));
+    textLines.push('  So tien QL nhan: ' + formatMoney(data.managerPickupTotal));
+    textLines.push('  So tien tai POS: ' + formatMoney(currentPosCash));
     textLines.push('');
     textLines.push('================================');
     textLines.push('  ' + new Date().toLocaleString('vi-VN'));

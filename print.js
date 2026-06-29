@@ -396,7 +396,6 @@ function buildDebtHistoryReceipt(data) {
     lines.push([0x1B, 0x45, 0x00]); // bold OFF
     // Items
     if (data.history && data.history.length > 0) {
-        var runningBalance = data.initialBalance || 0;
         for (var i = 0; i < data.history.length; i++) {
             var h = data.history[i];
             var dateStr = h.dateStr || '';
@@ -407,15 +406,15 @@ function buildDebtHistoryReceipt(data) {
             else typeLabel = h.type || '';
             var amountStr = formatPrice(Math.abs(h.amount));
             if (h.type === 'debt') {
-                runningBalance += h.amount;
                 amountStr = '+' + amountStr;
             } else {
-                runningBalance -= h.amount;
                 amountStr = '-' + amountStr;
             }
+            // Dùng balance từ dữ liệu (đã tính sẵn theo đúng thứ tự)
+            var balance = (h.balance !== undefined && h.balance !== null) ? h.balance : 0;
             if (dateStr.length > 12) dateStr = dateStr.substring(0, 10);
             if (typeLabel.length > 10) typeLabel = typeLabel.substring(0, 8) + '.';
-            lines.push(padRight(dateStr, 12) + padRight(typeLabel, 10) + padLeft(amountStr, 10) + padLeft(formatPrice(runningBalance), 10));
+            lines.push(padRight(dateStr, 12) + padRight(typeLabel, 10) + padLeft(amountStr, 10) + padLeft(formatPrice(balance), 10));
             // Neu co items, in chi tiet mon
             if (h.items && h.items.length > 0) {
                 for (var j = 0; j < h.items.length; j++) {
@@ -479,7 +478,6 @@ function exportDebtHistoryPdf(data) {
     
     var rowsHtml = '';
     if (data.history && data.history.length > 0) {
-        var runningBalance = data.initialBalance || 0;
         for (var i = 0; i < data.history.length; i++) {
             var h = data.history[i];
             var dateStr = h.dateStr || '';
@@ -488,24 +486,23 @@ function exportDebtHistoryPdf(data) {
             if (h.type === 'debt') {
                 typeLabel = 'Ghi trả sau';
                 amountColor = '#ef4444';
-                runningBalance += h.amount;
             } else if (h.type === 'payment') {
                 typeLabel = 'Thanh toán';
                 amountColor = '#16a34a';
-                runningBalance -= h.amount;
             } else if (h.type === 'credit') {
                 typeLabel = 'Trả dư';
                 amountColor = '#f59e0b';
-                runningBalance -= h.amount;
             }
             var amountStr = formatPrice(Math.abs(h.amount));
             var noteStr = h.note ? escapeHtml(h.note) : '';
+            // Dùng balance từ dữ liệu (đã tính sẵn theo đúng thứ tự)
+            var balance = (h.balance !== undefined && h.balance !== null) ? h.balance : 0;
             
             rowsHtml += '<tr>';
             rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">' + dateStr + '</td>';
             rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;">' + typeLabel + '</td>';
             rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;color:' + amountColor + ';text-align:right;">' + amountStr + '</td>';
-            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right;">' + formatPrice(runningBalance) + '</td>';
+            rowsHtml += '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:right;">' + formatPrice(balance) + '</td>';
             rowsHtml += '</tr>';
             
             // Items detail

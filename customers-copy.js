@@ -349,84 +349,20 @@ function _renderCustomerDetail(c, customerId) {
 // customerId được truyền trực tiếp từ nơi gọi, không đọc từ DOM (tránh sai lệch)
 function _renderCustomerHistoryHtml(all, expanded, customerId) {
     var html = '';
+    var limit = expanded ? all.length : Math.min(5, all.length);
     var isAdmin = DB.isAdmin && DB.isAdmin();
     
-    // Lọc: chỉ hiển thị debt và payment, bỏ credit (vì credit đã được gộp vào payment)
-    var filtered = [];
-    for (var idx = 0; idx < all.length; idx++) {
-        if (all[idx].type !== 'credit') {
-            filtered.push(all[idx]);
-        }
-    }
-    
-    var limit = expanded ? filtered.length : Math.min(5, filtered.length);
-    
-    // Tính dư nợ lũy kế cho từng giao dịch (kiểu sao kê ngân hàng)
-    // filtered[0] = mới nhất, filtered[cuối] = cũ nhất
-    // balances[i] = dư nợ sau giao dịch filtered[i] (dương = còn nợ, âm = đang dư)
-    var balances = {};
-    var total = 0;
-    // Vòng 1: chạy từ cũ nhất (cuối) đến mới nhất (đầu) để tính tổng
-    for (var idx = filtered.length - 1; idx >= 0; idx--) {
-        var hh = filtered[idx];
-        if (hh.type === 'debt') {
-            total += hh.amount;
-        } else if (hh.type === 'payment') {
-            total -= hh.amount;
-        }
-    }
-    // Vòng 2: chạy từ mới nhất (đầu) đến cũ nhất (cuối)
-    var accumulated = total;
-    for (var idx = 0; idx < filtered.length; idx++) {
-        var hh = filtered[idx];
-        balances[idx] = accumulated;
-        if (hh.type === 'debt') {
-            accumulated -= hh.amount;
-        } else if (hh.type === 'payment') {
-            accumulated += hh.amount;
-        }
-    }
-    
     for (var i = 0; i < limit; i++) {
-        var h = filtered[i];
+        var h = all[i];
+        var amountClass = h.type === 'debt' ? 'var(--danger)' : (h.type === 'credit' ? 'var(--warning)' : 'var(--success)');
+        var sign = h.type === 'debt' ? '-' : (h.type === 'credit' ? '+' : '+');
+        var typeLabel = h.type === 'credit' ? '💰 Trả dư' : (h.type === 'debt' ? '📝 Trả sau' : '💵 Thanh toán');
         
-        // Định dạng ngày
-        var d = new Date(h.date);
-        var dateStr = ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth()+1)).slice(-2) + '/' + d.getFullYear();
-        
-        // Dư nợ sau giao dịch này
-        var balance = balances[i] || 0;
-        
-        // Xác định nhãn và số tiền
-        var label = '';
-        var amountColor = '';
-        if (h.type === 'debt') {
-            label = 'Ghi trả sau';
-            amountColor = '#dc2626';
-        } else if (h.type === 'payment') {
-            label = 'Thanh toán';
-            amountColor = '#16a34a';
-        }
-        
-        // Format tổng nợ
-        var balanceText = '';
-        var balanceColor = '';
-        if (balance > 0) {
-            balanceText = formatMoney(balance);
-            balanceColor = '#dc2626';
-        } else if (balance < 0) {
-            balanceText = 'Dư ' + formatMoney(Math.abs(balance));
-            balanceColor = '#16a34a';
-        } else {
-            balanceText = '0đ';
-            balanceColor = '#64748b';
-        }
-        
-        // Nếu có items
+        // Nếu có items, hiển thị trực tiếp, không cần click xem chi tiết
         var hasItems = h.items && h.items.length > 0;
         var itemsHtml = '';
         if (hasItems) {
-            itemsHtml = '<div style="font-size:11px;color:#666;margin:2px 0 4px 0;padding:4px 8px;background:#f8f9fa;border-radius:4px;">';
+            itemsHtml = '<div style="font-size:11px;color:#666;margin:0 0 8px 12px;padding:4px 8px;background:#f8f9fa;border-radius:4px;">';
             for (var j = 0; j < h.items.length; j++) {
                 var itemName = escapeHtml(h.items[j].name);
                 var itemQty = h.items[j].qty;
@@ -440,6 +376,7 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
         }
         
         // Nút Sửa/Xóa cho dòng nợ (chỉ admin)
+        // Dùng debtIndex (index trong debtHistory array) làm định danh, không phụ thuộc vào id field
         var actionBtns = '';
         if (isAdmin && h.type === 'debt' && customerId && h.debtIndex !== undefined && h.debtIndex !== null) {
             actionBtns = '<div style="display:flex;gap:4px;margin-top:2px;">' +
@@ -448,26 +385,7 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
                 '</div>';
         }
         
-        // Mỗi giao dịch là 1 dòng
-        html += '<div style="border-bottom:1px solid #e2e8f0;padding:8px 0;">';
-        
-        // Dòng 1: ngày
-        html += '<div style="font-size:12px;color:#64748b;margin-bottom:4px;">ngày ' + dateStr + '</div>';
-        
-        // Dòng 2: Loại giao dịch | Tổng nợ
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-        html += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(h.amount) + '</span>';
-        html += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
-        html += '</div>';
-        
-        // Ghi chú + items
-        if (h.note) {
-            html += '<div style="font-size:11px;color:#64748b;margin-top:4px;">📝 ' + escapeHtml(h.note) + '</div>';
-        }
-        html += itemsHtml;
-        html += actionBtns;
-        
-        html += '</div>';
+        html += '<div class="cart-item"><span>' + new Date(h.date).toLocaleString('vi-VN') + ' ' + typeLabel + '</span><span style="color:' + amountClass + '">' + sign + formatMoney(h.amount) + '</span></div><div style="font-size:11px; margin-bottom:4px;">📝 ' + escapeHtml(h.note || '') + '</div>' + itemsHtml + actionBtns;
     }
     return html;
 }
@@ -559,7 +477,7 @@ function confirmInlineDebtPayment(customerId, method) {
     var m = ('0' + (now.getMonth() + 1)).slice(-2);
     var d = ('0' + now.getDate()).slice(-2);
     var dateKey = y + '-' + m + '-' + d;
-    customer.paymentHistory.unshift({ id: Date.now(), date: now.toISOString(), dateKey: dateKey, amount: actualPayment, method: method, note: 'Thanh toán trả sau ' + formatMoney(actualPayment) + ' (' + methodLabel + ')' + (creditUsed > 0 ? ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)' : '') });
+    customer.paymentHistory.unshift({ id: Date.now(), date: now.toISOString(), dateKey: dateKey, amount: payment, method: method, note: 'Thanh toán trả sau ' + formatMoney(payment) + ' (' + methodLabel + ')' + (creditUsed > 0 ? ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)' : '') });
     
     // Nếu có tiền dư (trả hơn số cần sau khi đã trừ credit), lưu thêm vào creditBalance
     if (overpay > 0) {
@@ -996,38 +914,14 @@ function printCustomerDebtHistory(customerId, mode) {
     }
     all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
     
-    // Lọc: chỉ lấy debt và payment, bỏ credit (giống _renderCustomerHistoryHtml)
-    var filtered = [];
-    for (var idx = 0; idx < all.length; idx++) {
-        if (all[idx].type !== 'credit') {
-            filtered.push(all[idx]);
-        }
-    }
-    
-    // Tính dư nợ lũy kế (giống _renderCustomerHistoryHtml)
-    var balances = {};
-    var total = 0;
-    for (var idx = filtered.length - 1; idx >= 0; idx--) {
-        var hh = filtered[idx];
-        if (hh.type === 'debt') { total += hh.amount; }
-        else if (hh.type === 'payment') { total -= hh.amount; }
-    }
-    var accumulated = total;
-    for (var idx = 0; idx < filtered.length; idx++) {
-        var hh = filtered[idx];
-        balances[idx] = accumulated;
-        if (hh.type === 'debt') { accumulated -= hh.amount; }
-        else if (hh.type === 'payment') { accumulated += hh.amount; }
-    }
-    
     // Format history data
     var shop = (typeof shopInfo !== 'undefined' && shopInfo) ? shopInfo : null;
     var now = new Date();
     var dateStr = ('0' + now.getDate()).slice(-2) + '/' + ('0' + (now.getMonth() + 1)).slice(-2) + '/' + now.getFullYear() + ' ' + ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
     
     var historyData = [];
-    for (var i = 0; i < filtered.length; i++) {
-        var h = filtered[i];
+    for (var i = 0; i < all.length; i++) {
+        var h = all[i];
         var d = new Date(h.date);
         var ds = ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear();
         historyData.push({
@@ -1035,8 +929,7 @@ function printCustomerDebtHistory(customerId, mode) {
             dateStr: ds,
             amount: h.amount,
             note: h.note,
-            items: h.items || [],
-            balance: balances[i] || 0
+            items: h.items || []
         });
     }
     
@@ -1053,136 +946,21 @@ function printCustomerDebtHistory(customerId, mode) {
         initialBalance: 0
     };
     
-    // Tạo preview trước khi in
-    _showPrintPreview(printData, mode);
-}
-
-// ========== PREVIEW TRƯỚC KHI IN ==========
-function _showPrintPreview(printData, mode) {
-    var modeLabel = (mode === 'thermal') ? '🖨️ In nhiệt' : '📄 Xuất PDF';
-    var modeIcon = (mode === 'thermal') ? '🖨️' : '📄';
-    
-    // Tạo nội dung preview HTML
-    var previewHtml = '';
-    previewHtml += '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">';
-    
-    // Header
-    previewHtml += '<div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1e293b;">';
-    previewHtml += '<div style="font-size:16px;font-weight:700;color:#1e293b;">' + escapeHtml(printData.storeName) + '</div>';
-    previewHtml += '<div style="font-size:13px;font-weight:600;color:#475569;margin-top:4px;">LỊCH SỬ TRẢ SAU</div>';
-    previewHtml += '<div style="font-size:12px;color:#64748b;margin-top:4px;">Khách: <strong>' + escapeHtml(printData.customerName) + '</strong>';
-    if (printData.customerPhone) previewHtml += ' | SDT: ' + escapeHtml(printData.customerPhone);
-    previewHtml += '<br>Ngày in: ' + printData.printDate;
-    previewHtml += '</div></div>';
-    
-    // Danh sách giao dịch
-    if (printData.history && printData.history.length > 0) {
-        for (var i = 0; i < printData.history.length; i++) {
-            var h = printData.history[i];
-            var balance = h.balance || 0;
-            
-            var label = '';
-            var amountColor = '';
-            if (h.type === 'debt') {
-                label = 'Ghi trả sau';
-                amountColor = '#dc2626';
-            } else if (h.type === 'payment') {
-                label = 'Thanh toán';
-                amountColor = '#16a34a';
-            }
-            
-            var balanceText = '';
-            var balanceColor = '';
-            if (balance > 0) {
-                balanceText = formatMoney(balance);
-                balanceColor = '#dc2626';
-            } else if (balance < 0) {
-                balanceText = 'Dư ' + formatMoney(Math.abs(balance));
-                balanceColor = '#16a34a';
-            } else {
-                balanceText = '0đ';
-                balanceColor = '#64748b';
-            }
-            
-            previewHtml += '<div style="border-bottom:1px solid #e2e8f0;padding:8px 0;">';
-            previewHtml += '<div style="font-size:12px;color:#64748b;margin-bottom:4px;">ngày ' + h.dateStr + '</div>';
-            previewHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-            previewHtml += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(h.amount) + '</span>';
-            previewHtml += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
-            previewHtml += '</div>';
-            
-            if (h.note) {
-                previewHtml += '<div style="font-size:11px;color:#64748b;margin-top:4px;">📝 ' + escapeHtml(h.note) + '</div>';
-            }
-            if (h.items && h.items.length > 0) {
-                previewHtml += '<div style="font-size:11px;color:#666;margin:2px 0 4px 0;padding:4px 8px;background:#f8f9fa;border-radius:4px;">';
-                for (var j = 0; j < h.items.length; j++) {
-                    var it = h.items[j];
-                    var itTotal = formatMoney((it.price || 0) * (it.qty || 1));
-                    previewHtml += '<div style="display:flex;justify-content:space-between;padding:1px 0;">';
-                    previewHtml += '<span>• ' + escapeHtml(it.name || '') + ' <span style="color:#999;">x' + (it.qty || 1) + '</span></span>';
-                    previewHtml += '<span style="font-weight:500;">' + itTotal + '</span>';
-                    previewHtml += '</div>';
-                }
-                previewHtml += '</div>';
-            }
-            previewHtml += '</div>';
+    if (mode === 'thermal') {
+        // In nhiệt qua Sunmi
+        if (typeof printDebtHistoryThermal === 'function') {
+            printDebtHistoryThermal(printData);
+        } else {
+            showToast('Chức năng in nhiệt chưa sẵn sàng', 'error');
         }
-    } else {
-        previewHtml += '<div style="text-align:center;padding:24px;color:#94a3b8;">Chưa có giao dịch</div>';
+    } else if (mode === 'pdf') {
+        // Xuất PDF
+        if (typeof exportDebtHistoryPdf === 'function') {
+            exportDebtHistoryPdf(printData);
+        } else {
+            showToast('Chức năng xuất PDF chưa sẵn sàng', 'error');
+        }
     }
-    
-    previewHtml += '</div>';
-    
-    // Tạo modal preview
-    var modal = document.createElement('div');
-    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
-    
-    var modalContent = document.createElement('div');
-    modalContent.style.cssText = 'background:#fff;border-radius:12px;max-width:500px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
-    
-    modalContent.innerHTML =
-        '<div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;border-radius:12px 12px 0 0;z-index:1;">' +
-        '  <span style="font-size:16px;font-weight:700;color:#1e293b;">' + modeIcon + ' Xem trước nội dung</span>' +
-        '  <span onclick="this.closest(\'div[style]\').parentElement.remove()" style="font-size:20px;cursor:pointer;color:#94a3b8;padding:4px 8px;">&times;</span>' +
-        '</div>' +
-        '<div style="padding:16px 20px;">' + previewHtml + '</div>' +
-        '<div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:0;background:#fff;border-radius:0 0 12px 12px;">' +
-        '  <button id="previewCancelBtn" style="padding:10px 20px;font-size:14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#475569;cursor:pointer;">Hủy</button>' +
-        '  <button id="previewConfirmBtn" style="padding:10px 20px;font-size:14px;border:none;border-radius:8px;background:#1e293b;color:#fff;cursor:pointer;">' + modeLabel + '</button>' +
-        '</div>';
-    
-    modal.appendChild(modalContent);
-    document.body.appendChild(modal);
-    
-    // Xử lý nút Hủy
-    document.getElementById('previewCancelBtn').onclick = function() {
-        modal.remove();
-    };
-    
-    // Xử lý nút Xác nhận in
-    document.getElementById('previewConfirmBtn').onclick = function() {
-        modal.remove();
-        // Tiến hành in/xuất
-        if (mode === 'thermal') {
-            if (typeof printDebtHistoryThermal === 'function') {
-                printDebtHistoryThermal(printData);
-            } else {
-                showToast('Chức năng in nhiệt chưa sẵn sàng', 'error');
-            }
-        } else if (mode === 'pdf') {
-            if (typeof exportDebtHistoryPdf === 'function') {
-                exportDebtHistoryPdf(printData);
-            } else {
-                showToast('Chức năng xuất PDF chưa sẵn sàng', 'error');
-            }
-        }
-    };
-    
-    // Click outside to close
-    modal.onclick = function(e) {
-        if (e.target === modal) modal.remove();
-    };
 }
 
 // ========== UI: FORM THÊM NỢ CŨ (ADMIN) ==========
