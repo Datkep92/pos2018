@@ -80,6 +80,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }).then(function() {
         return loadDraftOrders();
     }).then(function() {
+        // Ẩn màn hình loading sau khi khởi tạo xong
+        _hideLoadingScreen();
+
         // FIX: Khởi tạo realtime subscriptions SAU KHI DB đã sẵn sàng và data đã load
         // Tránh race condition: subscribeWithPolling gọi callback khi memoryCache còn rỗng
         initRealtime();
@@ -110,6 +113,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }).catch(function(err) {
         // FIX: Catch mọi lỗi để đảm bảo UI không bị treo
         console.error('❌ Initialization error:', err);
+        // Ẩn loading ngay cả khi có lỗi để không bị treo màn hình
+        _hideLoadingScreen();
         showToast('⚠️ Lỗi khởi tạo: ' + (err.message || 'unknown'), 'error', 4000);
         // Vẫn cố gắng khởi tạo event listeners để nút bấm hoạt động
         try {
@@ -120,6 +125,20 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// Hàm ẩn màn hình loading với hiệu ứng mượt
+function _hideLoadingScreen() {
+    var el = document.getElementById('loadingScreen');
+    if (el) {
+        el.classList.add('hidden');
+        // Xóa khỏi DOM sau khi animation kết thúc để giải phóng bộ nhớ
+        setTimeout(function() {
+            if (el.parentNode) {
+                el.parentNode.removeChild(el);
+            }
+        }, 500);
+    }
+}
 
 // FIX: Kiểm tra dữ liệu local có rỗng không (do IndexedDB bị xóa)
 function _isDataEmpty() {

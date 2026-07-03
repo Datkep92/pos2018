@@ -180,7 +180,17 @@ function openStaffManager() {
         return;
     }
 
-    EMP.currentPeriod = empGetCurrentPeriod();
+    // Giữ nguyên EMP.currentPeriod nếu đã được đồng bộ từ managerApplyFilter(),
+    // nếu chưa thì lấy period mặc định
+    if (!EMP.currentPeriod) {
+        EMP.currentPeriod = empGetCurrentPeriod();
+    }
+
+    // Tính lại daily_revenue cho kỳ hiện tại để loại bỏ dữ liệu cũ chứa debt
+    var periodParts = EMP.currentPeriod.split('-');
+    var periodYear = parseInt(periodParts[0]);
+    var periodMonth = parseInt(periodParts[1]);
+    empRecalculateDailyRevenueForPeriod(periodYear, periodMonth);
 
     // Tạo modal nếu chưa có
     var modal = document.getElementById('employeeManagerModal');
@@ -257,7 +267,7 @@ function renderEmployeeManagerModal() {
                                 '<input type="checkbox" id="empNewRevenueBonus" onchange="empToggleRevenueBonus(this)">' +
                                 '🏆 Thưởng theo doanh thu' +
                             '</label>' +
-                            '<div class="emp-hint">Doanh thu ngày >2 triệu +10.000đ | >2.2 triệu +20.000đ</div>' +
+                            '<div class="emp-hint">Trích 1% doanh thu hàng ngày</div>' +
                         '</div>' +
                         '<div id="empAddStatus" class="emp-status"></div>' +
                         '<button class="btn-primary emp-submit-btn" onclick="empHandleAddStaff()">➕ Thêm nhân viên</button>' +
@@ -512,72 +522,360 @@ function empCalculateStaffSalary(staffId, period) {
 }
 
 // ============================================================
-// 10. TÍNH THƯỞNG DOANH THU
+// 10. TÍNH THƯỞNG DOANH THU (1% doanh thu hàng ngày)
 // ============================================================
+/**
+ * Tính thưởng doanh thu cho nhân viên trong tháng N.
+ * - Lịch (LLV) hiển thị tháng N (1 → hết tháng N)
+ * - Ngày công tính theo tháng N
+ * - Thưởng doanh thu tính theo tháng N (1 → hết tháng N) để đồng bộ
+ * Đọc từ cache realtime EMP._revenueCache (đã sync từ Firebase daily_revenue).
+ */
 function empCalculateRevenueBonus(staffId, period, year, month) {
-    // Đọc doanh thu từng ngày trong tháng từ cache (đã load từ DB)
     var totalBonus = 0;
-    var daysInMonth = empGetDaysInMonth(year, month);
 
     // Kiểm tra cache doanh thu
     var revenueCache = EMP._revenueCache;
     if (!revenueCache) return 0;
 
+    // Tính theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
+    var daysInMonth = empGetDaysInMonth(year, month);
+
+    // Duyệt từng ngày trong tháng N (1 → hết tháng)
     for (var d = 1; d <= daysInMonth; d++) {
         var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
         var dayRevenue = revenueCache[dateStr] || 0;
-
-        if (dayRevenue > 2200000) {
-            totalBonus += 20000;
-        } else if (dayRevenue > 2000000) {
-            totalBonus += 10000;
-        }
+        // Trích 1% doanh thu hàng ngày
+        totalBonus += Math.round(dayRevenue * 0.01);
     }
 
     return totalBonus;
 }
 
-/** Load doanh thu theo tháng vào cache */
-function empLoadRevenueData(year, month) {
-    if (!EMP._revenueCache) EMP._revenueCache = {};
-    if (!EMP._revenueLoading) EMP._revenueLoading = {};
+// ============================================================
+// 10a. HIỂN THỊ CHI TIẾT THƯỞNG DOANH THU THEO NGÀY
+// ============================================================
+/**
+ * Hiển thị popup chi tiết doanh thu từng ngày và tiền thưởng tương ứng.
+ * Đọc từ EMP._revenueCache (đã sync từ Firebase daily_revenue).
+ */
+function empShowRevenueBonusDetail() {
+    var revenueCache = EMP._revenueCache;
+    if (!revenueCache) {
+        showToast('Chưa có dữ liệu doanh thu', 'warning');
+        return;
+    }
 
-    var cacheKey = year + '-' + String(month).padStart(2, '0');
-    // Tránh load nhiều lần
-    if (EMP._revenueLoading[cacheKey]) return;
-    EMP._revenueLoading[cacheKey] = true;
+    var period = EMP.currentPeriod || empGetCurrentPeriod();
+    var parts = period.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
 
+    // Hiển thị theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
     var daysInMonth = empGetDaysInMonth(year, month);
-    var startDate = year + '-' + String(month).padStart(2, '0') + '-01';
-    var endDate = year + '-' + String(month).padStart(2, '0') + '-' + String(daysInMonth).padStart(2, '0');
+    var rows = [];
+    var totalRevenue = 0;
+    var totalBonus = 0;
 
-    // Dùng DB.getTransactionsByDateRange để lấy tất cả transactions trong tháng
-    if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDateRange === 'function') {
-        DB.getTransactionsByDateRange(startDate, endDate).then(function(transactions) {
-            if (!transactions) return;
-            // Tính tổng doanh thu theo từng ngày
-            var dailyMap = {};
+    for (var d = 1; d <= daysInMonth; d++) {
+        var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        var dayRevenue = revenueCache[dateStr] || 0;
+        var dayBonus = Math.round(dayRevenue * 0.01);
+        totalRevenue += dayRevenue;
+        totalBonus += dayBonus;
+
+        var dayLabel = String(d).padStart(2, '0') + '/' + String(month).padStart(2, '0');
+
+        rows.push({
+            date: dayLabel,
+            revenue: dayRevenue,
+            bonus: dayBonus
+        });
+    }
+
+    // Tạo HTML popup
+    var html = '<div class="emp-revenue-detail-overlay" onclick="this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;">' +
+        '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;padding:20px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.3);">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+                '<h3 style="margin:0;font-size:16px;">📊 Chi tiết thưởng doanh thu</h3>' +
+                '<button onclick="this.closest(\'.emp-revenue-detail-overlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;padding:4px 8px;">✕</button>' +
+            '</div>' +
+            '<div style="font-size:13px;color:#666;margin-bottom:12px;">Kỳ: ' + empGetPeriodLabel(period) + '</div>' +
+            '<table style="width:100%;border-collapse:collapse;font-size:13px;">' +
+                '<thead>' +
+                    '<tr style="border-bottom:2px solid #e2e8f0;">' +
+                        '<th style="text-align:left;padding:6px 8px;color:#64748b;">Ngày</th>' +
+                        '<th style="text-align:right;padding:6px 8px;color:#64748b;">Doanh thu</th>' +
+                        '<th style="text-align:right;padding:6px 8px;color:#64748b;">Thưởng (1%)</th>' +
+                    '</tr>' +
+                '</thead>' +
+                '<tbody>';
+
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var isEven = i % 2 === 0;
+        html += '<tr style="border-bottom:1px solid #f1f5f9;' + (isEven ? 'background:#f8fafc;' : '') + '">' +
+                    '<td style="padding:6px 8px;">' + r.date + '</td>' +
+                    '<td style="padding:6px 8px;text-align:right;">' + (r.revenue > 0 ? empFormatCurrency(r.revenue) : '<span style="color:#94a3b8;">-</span>') + '</td>' +
+                    '<td style="padding:6px 8px;text-align:right;font-weight:600;color:' + (r.bonus > 0 ? '#16a34a' : '#94a3b8') + ';">' + (r.bonus > 0 ? empFormatCurrency(r.bonus) : '-') + '</td>' +
+                '</tr>';
+    }
+
+    html += '</tbody>' +
+            '<tfoot>' +
+                '<tr style="border-top:2px solid #e2e8f0;font-weight:700;">' +
+                    '<td style="padding:8px;text-align:left;">Tổng</td>' +
+                    '<td style="padding:8px;text-align:right;">' + empFormatCurrency(totalRevenue) + '</td>' +
+                    '<td style="padding:8px;text-align:right;color:#16a34a;">' + empFormatCurrency(totalBonus) + '</td>' +
+                '</tr>' +
+            '</tfoot>' +
+        '</table>' +
+        '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;text-align:center;">🏆 Tổng thưởng doanh thu: <strong>' + empFormatCurrency(totalBonus) + '</strong></div>' +
+    '</div></div>';
+
+    // Thêm vào body
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    document.body.appendChild(div.firstElementChild);
+}
+
+// ============================================================
+// 10b. CẬP NHẬT DOANH THU HÀNG NGÀY LÊN FIREBASE
+// ============================================================
+/**
+ * Tính doanh thu từ transactions và ghi vào Firebase daily_revenue/{dateStr}
+ * Được gọi sau mỗi lần thanh toán thành công (qua event pos_cash_update)
+ * và khi load dữ liệu lương (để đảm bảo daily_revenue luôn có data).
+ * Chỉ ghi 1 node nhẹ - tối ưu realtime.
+ */
+function empUpdateDailyRevenue(dateStr) {
+    var shopId = empGetShopId();
+    if (!shopId || typeof firebase === 'undefined') return;
+
+    // Đọc transactions của ngày đó từ DB
+    if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDate === 'function') {
+        DB.getTransactionsByDate(dateStr).then(function(transactions) {
+            if (!transactions || transactions.length === 0) return;
+
+            var total = 0;
+            var cash = 0, transfer = 0, grab = 0;
+            var orderCount = 0;
+
             for (var i = 0; i < transactions.length; i++) {
                 var tx = transactions[i];
                 if (!tx || tx.refunded) continue;
-                var dateKey = tx.dateKey || tx.createdAt;
-                if (!dateKey) continue;
-                // dateKey có thể là YYYY-MM-DD
-                if (dateKey.length > 10) dateKey = dateKey.slice(0, 10);
-                if (!dailyMap[dateKey]) dailyMap[dateKey] = 0;
-                dailyMap[dateKey] += tx.amount || 0;
+                // Bỏ qua ghi nợ - chỉ tính doanh thu thực tế
+                if (tx.paymentMethod === 'debt') continue;
+                var amt = tx.amount || 0;
+                total += amt;
+                orderCount++;
+                if (tx.paymentMethod === 'cash') cash += amt;
+                else if (tx.paymentMethod === 'transfer') transfer += amt;
+                else if (tx.paymentMethod === 'grab') grab += amt;
             }
-            // Cập nhật cache
-            for (var d = 1; d <= daysInMonth; d++) {
-                var ds = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-                EMP._revenueCache[ds] = dailyMap[ds] || 0;
-            }
-            // Refresh UI nếu đang mở detail
-            empRecalculateSalary();
+
+            // Ghi lên Firebase - chỉ 1 node nhẹ
+            var ref = firebase.database().ref(shopId + '/daily_revenue/' + dateStr);
+            ref.update({
+                total: total,
+                cash: cash,
+                transfer: transfer,
+                grab: grab,
+                orderCount: orderCount,
+                updatedAt: Date.now()
+            }).catch(function(err) {
+                console.error('empUpdateDailyRevenue error:', err);
+            });
         }).catch(function(err) {
-            console.error('empLoadRevenueData error:', err);
+            console.error('empUpdateDailyRevenue getTransactions error:', err);
         });
     }
+}
+
+// ============================================================
+// 10c. TÍNH LẠI DOANH THU HÀNG NGÀY CHO THÁNG N
+// ============================================================
+/**
+ * Tính lại daily_revenue cho tháng N (1 → hết tháng N) từ transactions,
+ * ghi đè lên Firebase để loại bỏ dữ liệu cũ có chứa debt.
+ * Gọi khi mở modal quản lý nhân viên để đảm bảo dữ liệu sạch.
+ */
+function empRecalculateDailyRevenueForPeriod(year, month) {
+    var shopId = empGetShopId();
+    if (!shopId || typeof firebase === 'undefined') return;
+    if (typeof DB === 'undefined' || typeof DB.getTransactionsByDateRange !== 'function') return;
+
+    // Tính theo tháng N (1 → hết tháng N)
+    var startDate = year + '-' + String(month).padStart(2, '0') + '-01';
+    var daysInMonth = empGetDaysInMonth(year, month);
+    var endDate = year + '-' + String(month).padStart(2, '0') + '-' + String(daysInMonth).padStart(2, '0');
+
+    DB.getTransactionsByDateRange(startDate, endDate).then(function(transactions) {
+        if (!transactions) return;
+        var dailyMap = {};
+        for (var i = 0; i < transactions.length; i++) {
+            var tx = transactions[i];
+            if (!tx || tx.refunded) continue;
+            // Loại bỏ debt - chỉ tính doanh thu thực tế
+            if (tx.paymentMethod === 'debt') continue;
+            var dateKey = tx.dateKey || tx.createdAt;
+            if (!dateKey) continue;
+            if (dateKey.length > 10) dateKey = dateKey.slice(0, 10);
+            if (!dailyMap[dateKey]) {
+                dailyMap[dateKey] = { total: 0, cash: 0, transfer: 0, grab: 0, orderCount: 0 };
+            }
+            var amt = tx.amount || 0;
+            dailyMap[dateKey].total += amt;
+            dailyMap[dateKey].orderCount++;
+            if (tx.paymentMethod === 'cash') dailyMap[dateKey].cash += amt;
+            else if (tx.paymentMethod === 'transfer') dailyMap[dateKey].transfer += amt;
+            else if (tx.paymentMethod === 'grab') dailyMap[dateKey].grab += amt;
+        }
+        // Ghi đè lên Firebase - xóa dữ liệu cũ (kể cả debt)
+        var updates = {};
+        for (var ds in dailyMap) {
+            if (dailyMap.hasOwnProperty(ds)) {
+                updates[shopId + '/daily_revenue/' + ds] = {
+                    total: dailyMap[ds].total,
+                    cash: dailyMap[ds].cash,
+                    transfer: dailyMap[ds].transfer,
+                    grab: dailyMap[ds].grab,
+                    orderCount: dailyMap[ds].orderCount,
+                    updatedAt: Date.now()
+                };
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            firebase.database().ref().update(updates).catch(function(err) {
+                console.error('empRecalculateDailyRevenueForPeriod error:', err);
+            });
+        }
+    }).catch(function(err) {
+        console.error('empRecalculateDailyRevenueForPeriod fetch error:', err);
+    });
+}
+
+// ============================================================
+// 10d. INIT REALTIME LISTENER CHO DAILY REVENUE
+// ============================================================
+/**
+ * Khởi tạo realtime listener cho daily_revenue từ Firebase.
+ * Tự động cập nhật EMP._revenueCache khi có thay đổi.
+ * Gọi 1 lần khi mở modal quản lý nhân viên.
+ */
+function empInitDailyRevenueListener() {
+    var shopId = empGetShopId();
+    if (!shopId || typeof firebase === 'undefined') return;
+
+    // Hủy listener cũ nếu có
+    if (EMP._dailyRevenueListener) {
+        EMP._dailyRevenueListener.off();
+    }
+
+    if (!EMP._revenueCache) EMP._revenueCache = {};
+
+    var ref = firebase.database().ref(shopId + '/daily_revenue');
+    var listener = ref.on('value', function(snapshot) {
+        var data = snapshot.val() || {};
+        // Cập nhật cache: mỗi key là dateStr YYYY-MM-DD, value là total
+        for (var dateStr in data) {
+            if (data.hasOwnProperty(dateStr) && data[dateStr] && data[dateStr].total) {
+                EMP._revenueCache[dateStr] = data[dateStr].total;
+            }
+        }
+        // Refresh UI nếu đang mở detail
+        empRecalculateSalary();
+    }, function(err) {
+        console.error('empInitDailyRevenueListener error:', err);
+    });
+
+    EMP._dailyRevenueListener = {
+        ref: ref,
+        off: function() { ref.off('value', listener); }
+    };
+}
+
+/**
+ * Load doanh thu theo tháng N (1 → hết tháng N) vào cache.
+ * Chiến lược 2 lớp:
+ *   1. Đọc từ Firebase daily_revenue (nếu có) - nhanh, realtime
+ *   2. Fallback: tính từ transactions (nếu daily_revenue chưa có) và ghi lên Firebase
+ */
+function empLoadRevenueData(year, month) {
+    // Init listener nếu chưa có
+    if (!EMP._dailyRevenueListener) {
+        empInitDailyRevenueListener();
+    }
+
+    var cacheKey = year + '-' + String(month).padStart(2, '0');
+    if (!EMP._revenueLoading) EMP._revenueLoading = {};
+    if (EMP._revenueLoading[cacheKey]) return;
+    EMP._revenueLoading[cacheKey] = true;
+
+    var shopId = empGetShopId();
+    if (!shopId || typeof firebase === 'undefined') return;
+
+    // Tính theo tháng N (1 → hết tháng N)
+    var startDate = year + '-' + String(month).padStart(2, '0') + '-01';
+    var daysInMonth = empGetDaysInMonth(year, month);
+    var endDate = year + '-' + String(month).padStart(2, '0') + '-' + String(daysInMonth).padStart(2, '0');
+
+    // Bước 1: Đọc từ Firebase daily_revenue
+    var ref = firebase.database().ref(shopId + '/daily_revenue');
+    ref.orderByKey().startAt(startDate).endAt(endDate).once('value').then(function(snapshot) {
+        var data = snapshot.val() || {};
+        var hasData = false;
+        for (var dateStr in data) {
+            if (data.hasOwnProperty(dateStr) && data[dateStr] && data[dateStr].total) {
+                EMP._revenueCache[dateStr] = data[dateStr].total;
+                hasData = true;
+            }
+        }
+
+        if (hasData) {
+            // Đã có daily_revenue, refresh UI
+            empRecalculateSalary();
+        } else {
+            // Bước 2: Fallback - chưa có daily_revenue, tính từ transactions
+            console.log('[employees] daily_revenue chưa có, fallback tính từ transactions cho tháng', startDate, '→', endDate);
+            if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDateRange === 'function') {
+                DB.getTransactionsByDateRange(startDate, endDate).then(function(transactions) {
+                    if (!transactions) return;
+                    var dailyMap = {};
+                    for (var i = 0; i < transactions.length; i++) {
+                        var tx = transactions[i];
+                        if (!tx || tx.refunded) continue;
+                        if (tx.paymentMethod === 'debt') continue;
+                        var dateKey = tx.dateKey || tx.createdAt;
+                        if (!dateKey) continue;
+                        if (dateKey.length > 10) dateKey = dateKey.slice(0, 10);
+                        if (!dailyMap[dateKey]) dailyMap[dateKey] = 0;
+                        dailyMap[dateKey] += tx.amount || 0;
+                    }
+                    // Cập nhật cache local cho tất cả ngày trong tháng
+                    for (var d = 1; d <= daysInMonth; d++) {
+                        var ds = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                        EMP._revenueCache[ds] = dailyMap[ds] || 0;
+                    }
+                    // Ghi lên Firebase để lần sau nhanh hơn
+                    for (var ds in dailyMap) {
+                        if (dailyMap.hasOwnProperty(ds)) {
+                            var fbRef = firebase.database().ref(shopId + '/daily_revenue/' + ds);
+                            fbRef.update({
+                                total: dailyMap[ds],
+                                updatedAt: Date.now()
+                            }).catch(function() {});
+                        }
+                    }
+                    empRecalculateSalary();
+                }).catch(function(err) {
+                    console.error('empLoadRevenueData fallback error:', err);
+                });
+            }
+        }
+    }).catch(function(err) {
+        console.error('empLoadRevenueData fetch error:', err);
+    });
 }
 
 // ============================================================
@@ -796,9 +1094,18 @@ function empRenderStaffDetail(staff) {
     // Load attendance từ cache/Firebase
     empLoadAttendance(staff.id, period);
 
-    // Load doanh thu để tính thưởng
+    // Load doanh thu để tính thưởng (realtime qua Firebase daily_revenue)
     var parts = period.split('-');
     empLoadRevenueData(parseInt(parts[0]), parseInt(parts[1]));
+
+    // Gắn sự kiện click cho "Thưởng doanh thu" - hiển thị chi tiết doanh thu từng ngày
+    var bonusRow = document.getElementById('empTotalRevenueBonusRow');
+    if (bonusRow) {
+        bonusRow.style.cursor = 'pointer';
+        bonusRow.onclick = function() {
+            empShowRevenueBonusDetail();
+        };
+    }
 }
 
 // ============================================================
@@ -1104,12 +1411,29 @@ function empChangePeriod(delta) {
     EMP.currentPeriod = newPeriod;
     labelEl.textContent = empGetPeriodLabel(newPeriod);
 
+    // Tính lại daily_revenue cho kỳ mới để loại bỏ dữ liệu cũ chứa debt
+    empRecalculateDailyRevenueForPeriod(year, month);
+
+    // Load doanh thu cho kỳ mới
+    empLoadRevenueData(year, month);
+
     // Refresh calendar và salary
     if (EMP.currentStaffId) {
         empLoadAttendance(EMP.currentStaffId, newPeriod);
         empRefreshCalendar();
+
+        // Cập nhật giá trị input Thưởng/Phạt theo kỳ mới TRƯỚC khi tính lại lương
+        var bonusInput = document.getElementById('empDetailBonus');
+        var penaltyInput = document.getElementById('empDetailPenalty');
+        var sd = EMP.salaryCache[EMP.currentStaffId]?.[newPeriod] || {};
+        if (bonusInput) bonusInput.value = sd.manualBonus || 0;
+        if (penaltyInput) penaltyInput.value = sd.manualPenalty || 0;
+
         empRecalculateSalary();
     }
+
+    // Cập nhật nút tổng lương trên manager grid
+    empUpdateManagerButton();
 }
 
 // ============================================================
@@ -1570,16 +1894,15 @@ function refreshAllStaffViews() {
 
 /**
  * Cập nhật nút NHÂN VIÊN trong manager-grid:
- * - Realtime: dùng firebase on('value') để tự động cập nhật khi có thay đổi
- * - Đọc tổng lương thực tế từ Firebase employee_salaries/{staffId}/{period}/total
- * - Gọi khi F5, khi lưu lương, khi có data thay đổi
- * - Màu sắc mặc định như các nút khác
+ * - Tính toán realtime từ dữ liệu nhân viên + attendance + doanh thu, không cần lưu
+ * - Dùng firebase on('value') để tự động cập nhật khi attendance hoặc daily_revenue thay đổi
+ * - Gọi khi chuyển kỳ, khi có data thay đổi
  */
-function empUpdateManagerButton() {
+function empUpdateManagerButton(optPeriod) {
     var el = document.getElementById('managerTotalSalary');
     if (!el) return;
 
-    var period = EMP.currentPeriod || empGetCurrentPeriod();
+    var period = optPeriod || EMP.currentPeriod || empGetCurrentPeriod();
     var shopId = empGetShopId();
 
     if (typeof firebase === 'undefined' || !firebase.database) {
@@ -1592,32 +1915,96 @@ function empUpdateManagerButton() {
         EMP._salaryListener.off();
     }
 
-    // Realtime: dùng on('value') để tự động cập nhật khi salary thay đổi
-    var salariesRef = firebase.database().ref(shopId + '/employee_salaries');
-    var listener = salariesRef.on('value', function(snapshot) {
-        var allSalaries = snapshot.val() || {};
+    // Hàm tính tổng lương realtime cho tất cả nhân viên
+    function _calcTotalSalary() {
         var totalSalary = 0;
-
-        for (var staffId in allSalaries) {
-            if (!allSalaries.hasOwnProperty(staffId)) continue;
-            var staffPeriods = allSalaries[staffId];
-            if (!staffPeriods) continue;
-
-            var salaryData = staffPeriods[period];
-            if (salaryData && salaryData.total) {
-                totalSalary += salaryData.total;
+        // Nếu chưa có staffs, thử load từ DB
+        var staffs = EMP.staffs;
+        if (!staffs || staffs.length === 0) {
+            if (typeof DB !== 'undefined' && typeof DB.getStaffs === 'function') {
+                DB.getStaffs().then(function(loaded) {
+                    EMP.staffs = loaded || [];
+                    _calcTotalSalary();
+                }).catch(function() {});
             }
+            el.textContent = '0đ';
+            return;
+        }
+        var parts = period.split('-');
+        var year = parseInt(parts[0]);
+        var month = parseInt(parts[1]);
+        var daysInMonth = empGetDaysInMonth(year, month);
+        var revenueCache = EMP._revenueCache || {};
+
+        for (var si = 0; si < staffs.length; si++) {
+            var st = staffs[si];
+            if (!st || !st.id) continue;
+
+            // Lấy dailySalary và revenueBonusEnabled từ cache hoặc staff object
+            var dailySalary = st.dailySalary || 0;
+            var revenueBonusEnabled = st.revenueBonusEnabled || false;
+
+            // Ghi đè từ salaryCache nếu có
+            var cached = EMP.salaryCache[st.id]?.[period];
+            if (cached) {
+                if (cached.dailySalary !== undefined && cached.dailySalary !== null) dailySalary = cached.dailySalary;
+                if (cached.revenueBonusEnabled !== undefined && cached.revenueBonusEnabled !== null) revenueBonusEnabled = cached.revenueBonusEnabled;
+            }
+
+            // Tính ngày công
+            var attendance = EMP.attendanceCache[st.id]?.[period] || {};
+            var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
+            var otDays = (attendance.otDays && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
+            var workingDays = daysInMonth - offDays.length + otDays.length;
+            if (workingDays < 0) workingDays = 0;
+            if (workingDays > daysInMonth * 2) workingDays = daysInMonth * 2;
+
+            var baseSalary = dailySalary * workingDays;
+
+            // Thưởng doanh thu
+            var revenueBonus = 0;
+            if (revenueBonusEnabled) {
+                for (var d = 1; d <= daysInMonth; d++) {
+                    var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                    var dayRevenue = revenueCache[dateStr] || 0;
+                    revenueBonus += Math.round(dayRevenue * 0.01);
+                }
+            }
+
+            // Manual bonus/penalty từ salaryCache
+            var manualBonus = (cached && cached.manualBonus) || 0;
+            var manualPenalty = (cached && cached.manualPenalty) || 0;
+
+            var total = baseSalary + revenueBonus + manualBonus - manualPenalty;
+            if (total < 0) total = 0;
+            totalSalary += total;
         }
 
         el.textContent = empFormatCurrency(totalSalary);
-    }, function() {
-        el.textContent = '0đ';
-    });
+    }
+
+    // Gọi ngay lần đầu
+    _calcTotalSalary();
+
+    // Listener attendance + daily_revenue để cập nhật realtime
+    var attRef = firebase.database().ref(shopId + '/employee_attendance');
+    var revRef = firebase.database().ref(shopId + '/daily_revenue');
+
+    var attListener = attRef.on('value', function() {
+        _calcTotalSalary();
+    }, function() {});
+
+    var revListener = revRef.on('value', function() {
+        _calcTotalSalary();
+    }, function() {});
 
     // Lưu reference để hủy sau
     EMP._salaryListener = {
-        ref: salariesRef,
-        off: function() { salariesRef.off('value', listener); }
+        ref: attRef,
+        off: function() {
+            attRef.off('value', attListener);
+            revRef.off('value', revListener);
+        }
     };
 }
 
@@ -1687,8 +2074,18 @@ window.closeSalaryHistoryModal = function() {};
 // Tự động cập nhật nút NHÂN VIÊN khi load xong
 setTimeout(function() {
     if (document.getElementById('managerTotalSalary')) {
-        empUpdateManagerButton();
+        // Dùng EMP.currentPeriod nếu đã có, nếu không thì lấy period mặc định
+        var initPeriod = EMP.currentPeriod || empGetCurrentPeriod();
+        empUpdateManagerButton(initPeriod);
     }
 }, 1000);
+
+// Đăng ký event listener cho pos_cash_update (gọi sau khi thanh toán thành công)
+// để cập nhật daily_revenue lên Firebase realtime
+document.addEventListener('pos_cash_update', function() {
+    var today = new Date();
+    var dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+    empUpdateDailyRevenue(dateStr);
+});
 
 console.log('[employees.js] Loaded - Modal quản lý nhân viên');

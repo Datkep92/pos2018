@@ -266,11 +266,6 @@ function initQuickCashCounter() {
     // Khi admin hủy chốt từ thiết bị khác, nhân viên sẽ thấy ngay
     _subscribeDayClosedRealtime();
 
-    // Tự động fix dữ liệu cũ: các ngày đã chốt nhưng thiếu cashKept
-    // Chỉ chạy 1 lần khi khởi tạo, không block UI
-    setTimeout(function() {
-        fixMissingCashKept();
-    }, 2000);
 }
 
 // Lắng nghe realtime thay đổi daily_balances (chốt ngày, chênh lệch, hủy chốt...)
@@ -488,6 +483,34 @@ function loadPosCashData(targetDate) {
             dateKey: today
         };
 
+        // Tự động lưu cashRevenue, posCashExpense, managerPickupTotal xuống Firebase
+        // để các lần sau có dữ liệu tính expectedClosing (phục vụ fixOldCashKeptData)
+        // KHÔNG lưu openingBalance vì openingBalance phụ thuộc vào cashKept ngày trước
+        // (có thể bị sai nếu dữ liệu cũ chưa được sửa)
+        // Chỉ lưu nếu ngày này đã chốt (đã có dữ liệu trong daily_balances)
+        if (savedBalance && savedBalance.isClosed) {
+            var updateData = {};
+            var needUpdate = false;
+            // Chỉ lưu cashRevenue, posCashExpense, managerPickupTotal
+            // (các field này được tính độc lập, ko phụ thuộc vào dữ liệu ngày trước)
+            if (savedBalance.cashRevenue === undefined || savedBalance.cashRevenue === null) {
+                updateData.cashRevenue = cashRevenue;
+                needUpdate = true;
+            }
+            if (savedBalance.posCashExpense === undefined || savedBalance.posCashExpense === null) {
+                updateData.posCashExpense = posCashExpense;
+                needUpdate = true;
+            }
+            if (savedBalance.managerPickupTotal === undefined || savedBalance.managerPickupTotal === null) {
+                updateData.managerPickupTotal = managerPickupTotal;
+                needUpdate = true;
+            }
+            if (needUpdate) {
+                updateData.updatedAt = Date.now();
+                dbRef.child('daily_balances/' + today).update(updateData).catch(function(err) {});
+            }
+        }
+
         // Cập nhật cache isDayClosed để các module khác (refund, xóa món, xóa bàn) kiểm tra
         // CHỈ cập nhật cache nếu đang xem ngày hôm nay (không phải ngày trước đó)
         if (!targetDate) {
@@ -637,6 +660,9 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
             html += '    </div>';
         }
 
+        // ===== QUỸ THƯỞNG TRÁCH NHIỆM (admin) =====
+        html += '    <div id="fundInfoInCashCounter"></div>';
+
         html += '  </div>';
     }
 
@@ -735,6 +761,9 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
             }
             html += '    </div>'; // end closed section
         }
+
+        // ===== QUỸ THƯỞNG TRÁCH NHIỆM (staff) =====
+        html += '    <div id="fundInfoInCashCounter"></div>';
 
         html += '  </div>';
     }
@@ -1139,18 +1168,26 @@ function staffCloseDay() {
                        ('0' + (vnTime.getUTCMonth() + 1)).slice(-2) + '/' +
                        vnTime.getUTCFullYear();
 
+    // Nếu countedTotal = 0 (ko đếm tiền), dùng expectedClosing để tránh số dư đầu kỳ = 0
+    var finalCashKept = countedTotal > 0 ? countedTotal : expectedAfterPickup;
+
     // Ghi lên Firebase - các máy khác đọc realtime sẽ tự cập nhật
+    // Lưu thêm openingBalance, cashRevenue, posCashExpense, managerPickupTotal để sau này có thể tính lại cashKept
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
     var dbRef = firebase.database().ref(shopId + '/daily_balances/' + closeDate);
     dbRef.update({
-        cashKept: countedTotal,
+        cashKept: finalCashKept,
         difference: difference,
         differenceType: differenceType,
         isClosed: true,
         closedAt: Date.now(),
         closedAtTime: closedAtTime,
         closedBy: window.currentDeviceId || 'staff',
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        openingBalance: data.openingBalance || 0,
+        cashRevenue: data.cashRevenue || 0,
+        posCashExpense: data.posCashExpense || 0,
+        managerPickupTotal: managerPickupTotal
     }).then(function() {
         // Thông báo kết quả
         try {
@@ -1238,6 +1275,20 @@ function staffCloseDay() {
             }
         } catch (e) {
             _processTransactionsAndSend([]);
+        }
+
+        // Tính toán quỹ thưởng trách nhiệm sau khi chốt
+        // Dùng data.totalRevenue đã được tính từ loadPosCashData (đồng bộ, chính xác)
+        try {
+            var fundRevenue = data.totalRevenue || 0;
+            // diffPercent tính theo doanh thu (theo yêu cầu: lệch dư >1% doanh thu)
+            var diffPercentByRevenue = 0;
+            if (fundRevenue > 0) {
+                diffPercentByRevenue = Math.round(difference / fundRevenue * 10000) / 100;
+            }
+            calculateFundAfterClose(closeDate, fundRevenue, difference, diffPercentByRevenue);
+        } catch (e) {
+            // Bỏ qua lỗi quỹ, không ảnh hưởng chốt ngày
         }
 
         // Sau khi chốt, quay về ngày hôm nay
@@ -1420,16 +1471,58 @@ function unlockDayClose() {
     var closeDate = _selectedCloseDate || (_posCashData && _posCashData.dateKey) || getTodayDateKey();
     var dateLabel = formatDateDisplay(closeDate);
 
-    if (!confirm('🔓 Xác nhận hủy chốt ngày ' + dateLabel + '?\n\nSau khi hủy chốt:\n- Nhân viên có thể chốt lại\n- Hoàn tác/xóa món/xóa bàn sẽ yêu cầu mật khẩu (đã chốt)\n\nTiếp tục?')) return;
+    if (!confirm('🔓 Xác nhận hủy chốt ngày ' + dateLabel + '?\n\nSau khi hủy chốt:\n- Nhân viên có thể chốt lại\n- Hoàn tác/xóa món/xóa bàn sẽ yêu cầu mật khẩu (đã chốt)\n- Số dư quỹ sẽ được khôi phục về trước khi chốt\n\nTiếp tục?')) return;
 
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
 
     var dbRef = firebase.database().ref(shopId + '/daily_balances/' + closeDate);
-    dbRef.update({
-        isClosed: false,
-        closedAt: null,
-        closedBy: null,
-        updatedAt: Date.now()
+    var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+
+    // Đọc dailyFund để biết balanceChange (ảnh hưởng của lần chốt này lên quỹ)
+    fundRef.child('dailyFund/' + closeDate).once('value').then(function(dfSnap) {
+        var dailyFundData = dfSnap.val();
+
+        // Cập nhật daily_balances: hủy chốt
+        return dbRef.update({
+            isClosed: false,
+            closedAt: null,
+            closedBy: null,
+            updatedAt: Date.now()
+        }).then(function() {
+            if (dailyFundData) {
+                var balanceChange = dailyFundData.balanceChange || 0;
+                // Số tiền hoàn lại = deficitCompensation (số âm đã trừ), không phải balanceChange
+                var refundAmount = dailyFundData.deficitCompensation || 0;
+                if (balanceChange !== 0) {
+                    return fundRef.child('balance').once('value').then(function(balSnap) {
+                        var currentBalance = balSnap.val() || 0;
+                        var newBalance = currentBalance - balanceChange; // Đảo ngược
+
+                        var refundEntry = {
+                            type: 'refund',
+                            amount: refundAmount,
+                            balanceBefore: currentBalance,
+                            balanceAfter: newBalance,
+                            note: '🔓 Hủy chốt ngày ' + dateLabel,
+                            createdAt: Date.now(),
+                            createdBy: window.currentDeviceId || 'admin'
+                        };
+
+                        var historyRef = fundRef.child('history').push();
+                        var updates = {};
+                        updates['balance'] = newBalance;
+                        updates['history/' + historyRef.key] = refundEntry;
+                        // Đánh dấu dailyFund là đã hủy chốt (không xóa, để khi chốt lại ghi đè)
+                        updates['dailyFund/' + closeDate + '/unlocked'] = true;
+
+                        return fundRef.update(updates);
+                    });
+                } else {
+                    // balanceChange = 0, chỉ đánh dấu unlocked
+                    return fundRef.child('dailyFund/' + closeDate + '/unlocked').set(true);
+                }
+            }
+        });
     }).then(function() {
         showToast('🔓 Đã hủy chốt ngày ' + dateLabel, 'success');
 
@@ -1481,6 +1574,25 @@ function showCloseableToast(message, type) {
 }
 
 // ============================================================
+// 1b. TOGGLE COLLAPSIBLE SETTINGS SECTIONS
+// ============================================================
+
+function toggleSettingsSection(sectionId) {
+    var section = document.getElementById(sectionId);
+    if (!section) return;
+    var body = section.querySelector('.collapsible-body');
+    var icon = section.querySelector('.collapse-icon');
+    if (!body || !icon) return;
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        icon.textContent = '▼';
+    } else {
+        body.style.display = 'none';
+        icon.textContent = '▶';
+    }
+}
+
+// ============================================================
 // 2. CÀI ĐẶT ỨNG DỤNG (Settings)
 // ============================================================
 
@@ -1499,9 +1611,13 @@ function initSettingsTab() {
     var chatLockField = document.getElementById('chatLockField');
     var staffNoteSection = document.getElementById('settingsStaffNoteSection');
     var lockSection = document.getElementById('settingsLockSection');
+    var fundSection = document.getElementById('settingsResponsibilityFundSection');
+    var fundInitialField = document.getElementById('fundInitialField');
+    var fundAutoField = document.getElementById('fundAutoField');
+    var fundHideForStaffField = document.getElementById('fundHideForStaffField');
 
     // Admin: hiển thị TOÀN BỘ các section - chỉ ẩn "Ghi chú nhân viên"
-    // Nhân viên: ẩn TOÀN BỘ các section - chỉ hiển thị "Ghi chú nhân viên"
+    // Nhân viên: ẩn TOÀN BỘ các section - chỉ hiển thị "Ghi chú" và "Quỹ thưởng" (nhưng ẩn các field admin)
     if (isAdmin) {
         // Admin: hiển thị tất cả section cài đặt
         if (shopSection) shopSection.style.display = '';
@@ -1510,12 +1626,18 @@ function initSettingsTab() {
         if (chatSection) chatSection.style.display = '';
         if (chatLockField) chatLockField.style.display = '';
         if (lockSection) lockSection.style.display = '';
+        if (fundSection) fundSection.style.display = '';
+        if (fundInitialField) fundInitialField.style.display = '';
+        if (fundAutoField) fundAutoField.style.display = '';
+        if (fundHideForStaffField) fundHideForStaffField.style.display = '';
         // Staff note section: ẩn với admin
         if (staffNoteSection) staffNoteSection.style.display = 'none';
         // Permission section: luôn ẩn (đã chuyển sang modal employees.js)
         if (permSection) permSection.style.display = 'none';
+        // Đọc trạng thái hideFundForStaff từ Firebase
+        _loadFundHideForStaffSetting();
     } else {
-        // Nhân viên: ẩn tất cả section cài đặt, chỉ hiển thị "Ghi chú"
+        // Nhân viên: ẩn tất cả section cài đặt, chỉ hiển thị "Ghi chú" và "Quỹ thưởng"
         if (shopSection) shopSection.style.display = 'none';
         if (telegramSection) telegramSection.style.display = 'none';
         if (esp32Section) esp32Section.style.display = 'none';
@@ -1523,6 +1645,12 @@ function initSettingsTab() {
         if (chatLockField) chatLockField.style.display = 'none';
         if (lockSection) lockSection.style.display = 'none';
         if (permSection) permSection.style.display = 'none';
+        // Fund section: kiểm tra setting ẩn/hiện
+        _applyFundVisibilityForStaff(fundSection);
+        // Ẩn các field chỉ dành cho admin (nhập quỹ ban đầu, tự động tính quỹ, toggle ẩn)
+        if (fundInitialField) fundInitialField.style.display = 'none';
+        if (fundAutoField) fundAutoField.style.display = 'none';
+        if (fundHideForStaffField) fundHideForStaffField.style.display = 'none';
         // Staff note section: hiển thị cho nhân viên
         if (staffNoteSection) staffNoteSection.style.display = '';
     }
@@ -1621,8 +1749,58 @@ function initSettingsTab() {
         } catch(e) {}
     }
 
+    // Khởi tạo listener quỹ thưởng trách nhiệm
+    if (typeof initFundListener === 'function') {
+        initFundListener();
+    }
+
     } catch(e) {
     }
+}
+
+// ===== Admin toggle: Ẩn quỹ với nhân viên =====
+function _loadFundHideForStaffSetting() {
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    var toggle = document.getElementById('fundHideForStaffToggle');
+    var label = document.getElementById('fundHideForStaffLabel');
+    if (!toggle) return;
+    firebase.database().ref(shopId + '/settings/hideFundForStaff').once('value').then(function(snap) {
+        var val = snap.val();
+        toggle.checked = !!val;
+        if (label) {
+            label.textContent = val ? 'Nhân viên không thể xem quỹ' : 'Nhân viên có thể xem quỹ';
+        }
+    }).catch(function() {});
+}
+
+function _applyFundVisibilityForStaff(fundSection) {
+    if (!fundSection) return;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    firebase.database().ref(shopId + '/settings/hideFundForStaff').once('value').then(function(snap) {
+        fundSection.style.display = snap.val() ? 'none' : '';
+    }).catch(function() {
+        fundSection.style.display = '';
+    });
+}
+
+function toggleFundHideForStaff() {
+    var toggle = document.getElementById('fundHideForStaffToggle');
+    var label = document.getElementById('fundHideForStaffLabel');
+    if (!toggle) return;
+    var isHidden = toggle.checked;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    firebase.database().ref(shopId + '/settings/hideFundForStaff').set(isHidden).then(function() {
+        if (label) {
+            label.textContent = isHidden ? 'Nhân viên không thể xem quỹ' : 'Nhân viên có thể xem quỹ';
+        }
+        if (typeof showToast === 'function') {
+            showToast(isHidden ? '✅ Đã ẩn quỹ với nhân viên' : '✅ Nhân viên có thể xem quỹ', 'success');
+        }
+    }).catch(function() {
+        if (typeof showToast === 'function') {
+            showToast('❌ Lỗi khi lưu!', 'error');
+        }
+    });
 }
 
 // Lưu ghi chú nhân viên vào localStorage (gọi từ oninput)
@@ -2137,69 +2315,240 @@ function compareVersions(v1, v2) {
 }
 
 // ============================================================
-// 6b. TỰ ĐỘNG FIX DỮ LIỆU CŨ: cashKept CHO CÁC NGÀY ĐÃ CHỐT
+// 6b. SỬA DỮ LIỆU CŨ: cashKept CHO CÁC NGÀY ĐÃ CHỐT
 // ============================================================
-// Trước đây khi chốt ngày không lưu cashKept, khiến số dư đầu kỳ ngày hôm sau = 0.
-// Hàm này dò tìm các ngày đã chốt nhưng thiếu cashKept và tự động điền.
-// Chạy 1 lần khi khởi tạo, không ảnh hưởng hiệu năng.
+// Hàm này được admin gọi thủ công qua nút "🔧 Sửa số dư đầu kỳ" trong UI.
+// Chỉ sửa đúng 1 ngày được chọn, không tự động quét toàn bộ.
+// Công thức: cashKept = expectedClosing + difference
+// Vì cashKept là số tiền đếm được, difference = countedTotal - expectedClosing
 
-function fixMissingCashKept() {
-    try {
-        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-        var dbRef = firebase.database().ref(shopId + '/daily_balances');
+function fixOldCashKeptData(dateKey) {
+    if (!dateKey) {
+        showToast('❌ Không có ngày để sửa!', 'error');
+        return;
+    }
+    if (!confirm('🔧 Xác nhận sửa số dư đầu kỳ cho ngày ' + formatDateDisplay(dateKey) + '?\n\n' +
+                 'Số dư đầu kỳ (cashKept) sẽ được đặt = expectedClosing + difference\n' +
+                 '= số tiền đếm được thực tế khi chốt ca.\n\n' +
+                 'LƯU Ý: Hàm này sẽ đọc cashKept của ngày hôm trước để làm openingBalance\n' +
+                 'chính xác, thay vì dùng dữ liệu đã lưu (có thể bị sai).\n\n' +
+                 'Tiếp tục?')) return;
 
-        // Đọc tất cả daily_balances để tìm ngày thiếu cashKept
-        dbRef.once('value').then(function(snapshot) {
-            var allBalances = snapshot.val() || {};
-            var fixedCount = 0;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    var dbRef = firebase.database().ref(shopId + '/daily_balances');
 
-            // Chuyển object thành mảng và sắp xếp theo ngày tăng dần
-            var dates = Object.keys(allBalances).sort();
+    // Đọc dữ liệu của ngày cần sửa VÀ ngày hôm trước
+    var prevDate = new Date(Date.UTC(
+        parseInt(dateKey.split('-')[0], 10),
+        parseInt(dateKey.split('-')[1], 10) - 1,
+        parseInt(dateKey.split('-')[2], 10)
+    ));
+    prevDate.setDate(prevDate.getDate() - 1);
+    var prevDateStr = prevDate.toISOString().slice(0, 10);
 
-            for (var di = 0; di < dates.length; di++) {
-                var dateKey = dates[di];
-                var balance = allBalances[dateKey];
+    Promise.all([
+        dbRef.child(dateKey).once('value'),
+        dbRef.child(prevDateStr).once('value')
+    ]).then(function(results) {
+        var data = results[0].val() || {};
+        var prevData = results[1].val() || {};
+        
+        var difference = data.difference || 0;
+        var currentCashKept = (data.cashKept !== undefined && data.cashKept !== null) ? data.cashKept : 0;
 
-                // Chỉ fix những ngày đã chốt (isClosed === true) nhưng thiếu cashKept
-                if (balance && balance.isClosed === true) {
-                    if (balance.cashKept === undefined || balance.cashKept === null) {
-                        // Tính cashKept = expectedClosing (đã lưu) hoặc actualClosing hoặc difference
-                        // expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal
-                        // Nhưng nếu không có expectedClosing, thử dùng actualClosing
-                        var cashKeptValue = null;
+        // openingBalance CHÍNH XÁC = cashKept của ngày hôm trước (đọc từ Firebase)
+        // Không dùng data.openingBalance đã lưu vì có thể bị sai do fixMissingCashKept cũ
+        var openingBalance = (prevData.cashKept !== undefined && prevData.cashKept !== null) ? prevData.cashKept : 0;
+        
+        // Lấy cashRevenue, posCashExpense, managerPickupTotal từ dữ liệu đã lưu
+        var cashRevenue = data.cashRevenue || 0;
+        var posCashExpense = data.posCashExpense || 0;
+        var managerPickupTotal = data.managerPickupTotal || 0;
+        var expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal;
 
-                        if (balance.expectedClosing !== undefined && balance.expectedClosing !== null) {
-                            // expectedClosing đã là số tiền dự kiến còn trong két
-                            // Nếu difference = 0 (cân bằng) thì cashKept = expectedClosing
-                            // Nếu difference != 0 thì cashKept = expectedClosing + difference
-                            var diff = (balance.difference !== undefined && balance.difference !== null) ? balance.difference : 0;
-                            cashKeptValue = balance.expectedClosing + diff;
-                        } else if (balance.actualClosing !== undefined && balance.actualClosing !== null) {
-                            cashKeptValue = balance.actualClosing;
-                        } else if (balance.difference !== undefined && balance.difference !== null) {
-                            // Nếu chỉ có difference, không đủ để tính, bỏ qua
-                            continue;
-                        }
+        // Nếu ko có dữ liệu chi tiết (các field = 0), thử dùng _posCashData
+        if (cashRevenue === 0 && posCashExpense === 0 && managerPickupTotal === 0 && _posCashData && _posCashData.dateKey === dateKey) {
+            expectedClosing = _posCashData.expectedClosing || 0;
+        }
 
-                        if (cashKeptValue !== null && cashKeptValue >= 0) {
-                            // Ghi cashKept lên Firebase
-                            var dateRef = dbRef.child(dateKey);
-                            dateRef.update({ cashKept: cashKeptValue });
+        // countedTotal = expectedClosing + difference
+        var correctCashKept = expectedClosing + difference;
+        if (correctCashKept < 0) correctCashKept = 0;
+
+        // Nếu ko thay đổi thì bỏ qua
+        if (correctCashKept === currentCashKept) {
+            showToast('✅ Dữ liệu ngày ' + formatDateDisplay(dateKey) + ' đã đúng: ' + formatMoney(correctCashKept), 'success');
+            return;
+        }
+
+        // Cập nhật cashKept
+        dbRef.child(dateKey).update({
+            cashKept: correctCashKept,
+            updatedAt: Date.now()
+        }).then(function() {
+            showToast('✅ Đã sửa số dư đầu kỳ ngày ' + formatDateDisplay(dateKey) + ': ' + formatMoney(correctCashKept) + ' (trước: ' + formatMoney(currentCashKept) + ')', 'success');
+            // Tải lại dữ liệu
+            loadPosCashData();
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi sửa dữ liệu!', 'error');
+        });
+    }).catch(function(err) {
+        showToast('❌ Lỗi đọc dữ liệu từ Firebase!', 'error');
+    });
+}
+
+// ============================================================
+// 6c. QUÉT & SỬA TẤT CẢ DỮ LIỆU CŨ: cashKept
+// ============================================================
+// Hàm này duyệt qua tất cả các ngày đã chốt trong daily_balances,
+// tính toán tuần tự: cashKept của ngày trước là openingBalance của ngày sau.
+// cashKept đúng = expectedClosing + difference
+// expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal
+//
+// QUAN TRỌNG: Ngày đầu tiên trong chuỗi, nếu cashKept đã tồn tại và hợp lý,
+// dùng luôn cashKept đó làm prevCashKept (ko gán mặc định = 0).
+// Chỉ sửa khi có đủ dữ liệu chi tiết (cashRevenue, posCashExpense, managerPickupTotal).
+
+function fixAllOldCashKeptData() {
+    if (!confirm('🔧 Xác nhận quét & sửa tất cả dữ liệu cũ?\n\n' +
+                 'Hàm này sẽ duyệt qua tất cả các ngày đã chốt,\n' +
+                 'tính toán tuần tự từ ngày đầu tiên:\n' +
+                 '- cashKept ngày trước = openingBalance ngày sau\n' +
+                 '- cashKept đúng = expectedClosing + difference\n' +
+                 '- expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal\n\n' +
+                 'Các ngày thiếu dữ liệu (cashRevenue, posCashExpense...)\n' +
+                 'sẽ giữ nguyên cashKept hiện tại và dùng làm điểm bắt đầu cho ngày tiếp theo.\n' +
+                 'Hãy mở từng ngày đó trước để tự động lưu dữ liệu, sau đó chạy lại.\n\n' +
+                 'Tiếp tục?')) return;
+
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    var dbRef = firebase.database().ref(shopId + '/daily_balances');
+
+    dbRef.once('value').then(function(snapshot) {
+        var allData = snapshot.val() || {};
+        var dateKeys = Object.keys(allData).sort();
+        var fixedCount = 0;
+        var skipCount = 0;
+        var noDataCount = 0;
+        var promises = [];
+        var prevCashKept = 0;
+        var isFirstDay = true; // Đánh dấu ngày đầu tiên trong chuỗi
+
+        dateKeys.forEach(function(dateKey) {
+            var data = allData[dateKey];
+            if (!data.isClosed) return; // Bỏ qua ngày chưa chốt
+
+            var difference = data.difference || 0;
+            var currentCashKept = (data.cashKept !== undefined && data.cashKept !== null) ? data.cashKept : null;
+
+            // Lấy các field từ daily_balances (nếu có)
+            var cashRevenue = data.cashRevenue || 0;
+            var posCashExpense = data.posCashExpense || 0;
+            var managerPickupTotal = data.managerPickupTotal || 0;
+
+            // Kiểm tra xem có đủ dữ liệu chi tiết để tính toán ko
+            var hasDetailData = (cashRevenue !== 0 || posCashExpense !== 0 || managerPickupTotal !== 0 || difference !== 0);
+
+            // ===== XỬ LÝ NGÀY ĐẦU TIÊN =====
+            if (isFirstDay) {
+                isFirstDay = false;
+                
+                // Nếu ngày đầu có cashKept hợp lệ, dùng nó làm prevCashKept
+                if (currentCashKept !== null && currentCashKept > 0) {
+                    prevCashKept = currentCashKept;
+                    
+                    // Nếu có đủ dữ liệu, kiểm tra xem cashKept có đúng ko
+                    if (hasDetailData) {
+                        // openingBalance cho ngày đầu = 0 (ko có ngày trước)
+                        var expectedClosing = 0 + cashRevenue - posCashExpense - managerPickupTotal;
+                        var correctCashKept = expectedClosing + difference;
+                        if (correctCashKept < 0) correctCashKept = 0;
+                        
+                        if (currentCashKept !== correctCashKept) {
                             fixedCount++;
+                            promises.push(dbRef.child(dateKey).update({
+                                cashKept: correctCashKept,
+                                updatedAt: Date.now()
+                            }));
+                            prevCashKept = correctCashKept;
+                        } else {
+                            skipCount++;
                         }
+                    } else {
+                        // Ko có dữ liệu chi tiết, giữ nguyên cashKept hiện tại
+                        noDataCount++;
                     }
+                    return;
+                }
+                
+                // Nếu ngày đầu ko có cashKept, bắt đầu từ 0
+                prevCashKept = 0;
+            }
+
+            // ===== XỬ LÝ CÁC NGÀY TIẾP THEO =====
+            // openingBalance = cashKept của ngày hôm trước (tính tuần tự)
+            var openingBalance = prevCashKept;
+
+            // expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal
+            var expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal;
+
+            // countedTotal = expectedClosing + difference
+            var correctCashKept = expectedClosing + difference;
+            if (correctCashKept < 0) correctCashKept = 0;
+
+            // Nếu ko có dữ liệu chi tiết, giữ nguyên cashKept hiện tại
+            if (!hasDetailData) {
+                noDataCount++;
+                if (currentCashKept !== null) {
+                    prevCashKept = currentCashKept;
+                } else {
+                    prevCashKept = correctCashKept;
+                }
+                return;
+            }
+
+            // Nếu cashKept hiện tại khác với giá trị đúng thì sửa
+            if (currentCashKept !== null && currentCashKept !== correctCashKept) {
+                fixedCount++;
+                promises.push(dbRef.child(dateKey).update({
+                    cashKept: correctCashKept,
+                    updatedAt: Date.now()
+                }));
+                prevCashKept = correctCashKept;
+            } else {
+                skipCount++;
+                if (currentCashKept !== null) {
+                    prevCashKept = currentCashKept;
+                } else {
+                    prevCashKept = correctCashKept;
                 }
             }
-
-            if (fixedCount > 0) {
-                // Reload lại dữ liệu để UI cập nhật
-                loadPosCashData();
-            } else {
-            }
-        }).catch(function(err) {
         });
-    } catch(e) {
-    }
+
+        if (fixedCount === 0 && noDataCount === 0) {
+            showToast('✅ Tất cả dữ liệu đã đúng. Không cần sửa.', 'success');
+            return;
+        }
+
+        var msg = '✅ Đã sửa ' + fixedCount + ' ngày, bỏ qua ' + skipCount + ' ngày (đã đúng)';
+        if (noDataCount > 0) {
+            msg += ', ' + noDataCount + ' ngày (thiếu dữ liệu - giữ nguyên cashKept hiện tại)';
+        }
+
+        if (fixedCount === 0) {
+            showToast(msg, 'warning');
+            return;
+        }
+
+        Promise.all(promises).then(function() {
+            showToast(msg, 'success');
+            loadPosCashData();
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi sửa dữ liệu!', 'error');
+        });
+    }).catch(function(err) {
+        showToast('❌ Lỗi đọc dữ liệu từ Firebase!', 'error');
+    });
 }
 
 // ============================================================
@@ -2882,5 +3231,980 @@ function copyStaffCloseContent() {
         });
     } else {
         fallbackCopy(text);
+    }
+}
+
+// ============================================================
+// QUỸ THƯỞNG TRÁCH NHIỆM (Responsibility Bonus Fund)
+// ============================================================
+// Logic:
+// - Mỗi ngày: trích 1% doanh thu (cash+transfer+grab) vào quỹ
+// - Nếu chốt ngày lệch âm (thiếu) → dùng quỹ bù, cho phép âm quỹ
+// - Admin: xem tổng quỹ, lịch sử, nhập quỹ ban đầu, rút quỹ
+// - Staff: xem tổng quỹ, lịch sử, rút quỹ
+
+// Cache quỹ
+var _fundData = null;
+var _fundListener = null;
+
+// Khởi tạo listener quỹ
+function initFundListener() {
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        if (_fundListener) {
+            fundRef.off('value', _fundListener);
+        }
+        
+        _fundListener = fundRef.on('value', function(snapshot) {
+            var data = snapshot.val() || {};
+            _fundData = data;
+            
+            // Cập nhật UI nếu đang hiển thị
+            updateFundUI();
+        });
+    } catch (e) {
+        // Firebase chưa sẵn sàng
+    }
+}
+
+// Cập nhật UI quỹ
+function updateFundUI() {
+    if (!_fundData) return;
+    
+    var balance = _fundData.balance || 0;
+    var balanceDisplay = document.getElementById('fundBalanceDisplay');
+    if (balanceDisplay) {
+        balanceDisplay.textContent = formatMoney(balance);
+        // Màu sắc: dương = vàng, âm = đỏ
+        balanceDisplay.style.color = balance >= 0 ? '#fbbf24' : '#ef4444';
+    }
+    
+    // Cập nhật lịch sử quỹ
+    renderFundHistory();
+    
+    // Cập nhật UI trong cash counter nếu đang hiển thị
+    updateFundInCashCounter();
+}
+
+// Cập nhật hiển thị quỹ trong cash counter
+function updateFundInCashCounter() {
+    var fundContainer = document.getElementById('fundInfoInCashCounter');
+    if (!fundContainer || !_fundData) return;
+    
+    var balance = _fundData.balance || 0;
+    var todayKey = getTodayDateKey();
+    var todayFund = _fundData.dailyFund || {};
+    var todayEntry = todayFund[todayKey] || {};
+    
+    var html = '';
+    html += '<div style="margin-top:8px;border-top:2px solid #fbbf24;padding-top:8px;">';
+    html += '  <div style="font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:4px;">🏆 Quỹ thưởng trách nhiệm</div>';
+    html += '  <div class="pos-cash-row"><span>Tổng quỹ</span><span style="color:' + (balance >= 0 ? '#fbbf24' : '#ef4444') + ';font-weight:700;">' + formatMoney(balance) + '</span></div>';
+    
+    if (todayEntry.contribution && todayEntry.contribution > 0) {
+        html += '  <div class="pos-cash-row" style="padding-left:8px;"><span>➕ Tích quỹ hôm nay</span><span style="color:#22c55e;">' + formatMoney(todayEntry.contribution) + '</span></div>';
+    }
+    if (todayEntry.deficitCompensation && todayEntry.deficitCompensation > 0) {
+        html += '  <div class="pos-cash-row" style="padding-left:8px;"><span>🔴 Bù thiếu hụt</span><span style="color:#ef4444;">-' + formatMoney(todayEntry.deficitCompensation) + '</span></div>';
+    }
+    
+    html += '</div>';
+    fundContainer.innerHTML = html;
+}
+
+// Lưu quỹ ban đầu (admin)
+function saveFundInitial() {
+    try {
+        var input = document.getElementById('fundInitialInput');
+        if (!input) return;
+        
+        var amount = parseInt(input.value, 10);
+        if (isNaN(amount) || amount <= 0) {
+            showToast('❌ Vui lòng nhập số tiền hợp lệ', 'error');
+            return;
+        }
+        
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        // Lấy số dư hiện tại
+        fundRef.child('balance').once('value').then(function(snapshot) {
+            var currentBalance = snapshot.val() || 0;
+            var newBalance = currentBalance + amount;
+            
+            // Tạo lịch sử giao dịch
+            var historyEntry = {
+                type: 'initial_deposit',
+                amount: amount,
+                balanceBefore: currentBalance,
+                balanceAfter: newBalance,
+                note: 'Nhập quỹ ban đầu',
+                createdAt: Date.now(),
+                createdBy: window.currentDeviceId || 'admin'
+            };
+            
+            var historyRef = fundRef.child('history').push();
+            var updates = {};
+            updates['balance'] = newBalance;
+            updates['history/' + historyRef.key] = historyEntry;
+            
+            return fundRef.update(updates);
+        }).then(function() {
+            showToast('✅ Đã cập nhật quỹ: +' + formatMoney(amount), 'success');
+            input.value = '';
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi cập nhật quỹ', 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
+    }
+}
+
+// Nhân viên rút quỹ
+// Khi rút: tạo chi phí két POS, số tiền rút không vượt quá tổng quỹ
+function staffWithdrawFund() {
+    try {
+        var input = document.getElementById('fundWithdrawInput');
+        if (!input) return;
+        
+        var amount = parseInt(input.value, 10);
+        if (isNaN(amount) || amount <= 0) {
+            showToast('❌ Vui lòng nhập số tiền hợp lệ', 'error');
+            return;
+        }
+        
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        fundRef.child('balance').once('value').then(function(snapshot) {
+            var currentBalance = snapshot.val() || 0;
+            
+            // Kiểm tra số dư quỹ: không được rút vượt quá tổng quỹ
+            if (amount > currentBalance) {
+                showToast('❌ Số dư quỹ không đủ! Hiện tại: ' + formatMoney(currentBalance), 'error');
+                return;
+            }
+            
+            var newBalance = currentBalance - amount;
+            
+            // Tạo lịch sử giao dịch
+            var historyEntry = {
+                type: 'withdrawal',
+                amount: -amount,
+                balanceBefore: currentBalance,
+                balanceAfter: newBalance,
+                note: 'Rút quỹ',
+                createdAt: Date.now(),
+                createdBy: window.currentDeviceId || 'staff'
+            };
+            
+            var historyRef = fundRef.child('history').push();
+            var historyKey = historyRef.key;
+            var updates = {};
+            updates['balance'] = newBalance;
+            updates['history/' + historyKey] = historyEntry;
+            
+            return fundRef.update(updates).then(function() {
+                // Tạo chi phí két POS, lưu kèm fundHistoryKey để sau này xóa
+                try {
+                    if (typeof saveWasteExpense === 'function') {
+                        saveWasteExpense('Rút quỹ thưởng trách nhiệm', amount, 'pos_cash', historyKey);
+                    }
+                } catch (e) {
+                    // Bỏ qua lỗi tạo chi phí
+                }
+            });
+        }).then(function() {
+            showToast('✅ Đã rút quỹ: ' + formatMoney(amount), 'success');
+            input.value = '';
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi rút quỹ', 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
+    }
+}
+
+// Admin rút quỹ
+// Khi rút: tạo chi phí két POS, số tiền rút không vượt quá tổng quỹ
+function adminWithdrawFund() {
+    try {
+        var amount = prompt('Nhập số tiền cần rút khỏi quỹ:');
+        if (!amount) return;
+        
+        amount = parseInt(amount, 10);
+        if (isNaN(amount) || amount <= 0) {
+            showToast('❌ Số tiền không hợp lệ', 'error');
+            return;
+        }
+        
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        fundRef.child('balance').once('value').then(function(snapshot) {
+            var currentBalance = snapshot.val() || 0;
+            
+            // Kiểm tra số dư quỹ: không được rút vượt quá tổng quỹ
+            if (amount > currentBalance) {
+                showToast('❌ Số dư quỹ không đủ! Hiện tại: ' + formatMoney(currentBalance), 'error');
+                return;
+            }
+            
+            var newBalance = currentBalance - amount;
+            
+            // Tạo chi phí két POS
+            try {
+                if (typeof saveWasteExpense === 'function') {
+                    saveWasteExpense('Rút quỹ thưởng trách nhiệm', amount, 'pos_cash');
+                }
+            } catch (e) {
+                // Bỏ qua lỗi tạo chi phí
+            }
+            
+            var historyEntry = {
+                type: 'withdrawal',
+                amount: -amount,
+                balanceBefore: currentBalance,
+                balanceAfter: newBalance,
+                note: 'Admin rút quỹ',
+                createdAt: Date.now(),
+                createdBy: window.currentDeviceId || 'admin'
+            };
+            
+            var historyRef = fundRef.child('history').push();
+            var updates = {};
+            updates['balance'] = newBalance;
+            updates['history/' + historyRef.key] = historyEntry;
+            
+            return fundRef.update(updates);
+        }).then(function() {
+            showToast('✅ Đã rút quỹ: ' + formatMoney(amount), 'success');
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi rút quỹ', 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
+    }
+}
+
+// Tính toán quỹ sau khi chốt ngày
+// Được gọi từ staffCloseDay() sau khi chốt thành công
+// Logic:
+// - 1% doanh thu hàng ngày → cộng vào quỹ
+// - Nếu thiếu tiền (difference < 0): trừ quỹ để bù, cho phép âm quỹ
+// - Nếu dư tiền (difference > 0): không trừ quỹ, vẫn tích 1% doanh thu
+function calculateFundAfterClose(closeDate, totalRevenue, difference, diffPercent) {
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        // Đọc dữ liệu quỹ hiện tại
+        fundRef.once('value').then(function(snapshot) {
+            var fundData = snapshot.val() || {};
+            var currentBalance = fundData.balance || 0;
+            
+            // Doanh thu tính quỹ = cash + transfer + grab (giống doanh thu settings.js)
+            var fundRevenue = totalRevenue || 0;
+            
+            // 1% doanh thu hàng ngày - luôn tích quỹ (kể cả khi dư tiền)
+            var contribution = Math.round(fundRevenue * 0.01);
+            
+            // Kiểm tra chênh lệch âm (thiếu tiền)
+            var deficitCompensation = 0;
+            if (difference < 0) {
+                // Thiếu tiền → dùng quỹ bù, cho phép âm quỹ
+                deficitCompensation = Math.abs(difference);
+            }
+            // Nếu dư tiền (difference > 0): không bù, vẫn tích quỹ 1%
+            
+            // Cập nhật quỹ
+            var balanceChange = contribution - deficitCompensation;
+            var newBalance = currentBalance + balanceChange;
+            
+            // Tạo lịch sử
+            var historyEntry = {
+                type: 'daily_close',
+                date: closeDate,
+                revenue: fundRevenue,
+                contribution: contribution,
+                deficitCompensation: deficitCompensation,
+                balanceChange: balanceChange,
+                balanceBefore: currentBalance,
+                balanceAfter: newBalance,
+                createdAt: Date.now()
+            };
+            
+            var historyRef = fundRef.child('history').push();
+            var updates = {};
+            updates['balance'] = newBalance;
+            updates['dailyFund/' + closeDate] = {
+                contribution: contribution,
+                deficitCompensation: deficitCompensation,
+                balanceChange: balanceChange,
+                revenue: fundRevenue
+            };
+            updates['history/' + historyRef.key] = historyEntry;
+            
+            return fundRef.update(updates);
+        }).catch(function(err) {
+            // Lỗi khi đọc quỹ - bỏ qua, không ảnh hưởng chốt ngày
+        });
+    } catch (e) {
+        // Bỏ qua lỗi
+    }
+}
+
+// Biến lưu số lượng hiển thị cho lịch sử quỹ
+var _fundHistoryDisplayCount = 5;
+
+// Hàm format ngày tháng đầy đủ (thứ, ngày/tháng/năm)
+function _formatFullDate(timestamp) {
+    if (!timestamp) return '';
+    var d = new Date(timestamp);
+    var dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    var day = dayNames[d.getDay()];
+    var date = ('0' + d.getDate()).slice(-2);
+    var month = ('0' + (d.getMonth() + 1)).slice(-2);
+    var year = d.getFullYear();
+    return day + ', ' + date + '/' + month + '/' + year;
+}
+
+// Hàm format giờ:phút
+function _formatTime(timestamp) {
+    if (!timestamp) return '';
+    var d = new Date(timestamp);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+
+// Lấy key ngày (YYYY-MM-DD) từ timestamp
+function _getDateKeyFromTimestamp(timestamp) {
+    if (!timestamp) return '';
+    var d = new Date(timestamp);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
+// Lấy key ngày từ entry (ưu tiên entry.date, fallback createdAt)
+function _getEntryDateKey(entry) {
+    if (entry.date) return entry.date;
+    if (entry.createdAt) return _getDateKeyFromTimestamp(entry.createdAt);
+    return '';
+}
+
+// Format ngày từ dateKey (YYYY-MM-DD) thành dd/mm/YYYY
+function _formatDateKeyDisplay(dateKey) {
+    if (!dateKey) return '';
+    var parts = dateKey.split('-');
+    if (parts.length !== 3) return dateKey;
+    return parts[2] + '/' + parts[1] + '/' + parts[0];
+}
+
+// Hàm format input ngày theo định dạng dd/mm/yyyy (tự động thêm dấu / khi gõ)
+function formatDateInput(input) {
+    if (!input) return;
+    var val = input.value.replace(/[^0-9]/g, '');
+    if (val.length > 2 && val.length <= 4) {
+        val = val.slice(0, 2) + '/' + val.slice(2);
+    } else if (val.length > 4) {
+        val = val.slice(0, 2) + '/' + val.slice(2, 4) + '/' + val.slice(4, 8);
+    }
+    input.value = val;
+}
+
+// Chuyển đổi chuỗi dd/mm/yyyy thành Date object
+function _parseVNDate(str) {
+    if (!str) return null;
+    var parts = str.split('/');
+    if (parts.length !== 3) return null;
+    var d = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10) - 1;
+    var y = parseInt(parts[2], 10);
+    if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+    return new Date(y, m, d);
+}
+
+// Chuyển đổi chuỗi dd/mm/yyyy thành YYYY-MM-DD
+function _vnDateToISO(str) {
+    if (!str) return '';
+    var parts = str.split('/');
+    if (parts.length !== 3) return str;
+    return parts[2] + '-' + parts[1] + '-' + parts[0];
+}
+
+// Hiển thị lịch sử quỹ (5 giao dịch gần nhất, có nút Xem thêm)
+// HIỂN THỊ THEO NGÀY: gom nhóm các giao dịch cùng ngày, có tiêu đề ngày rõ ràng
+// Bao gồm cả dailyFund (tích quỹ tự động theo ngày) và history (giao dịch thủ công)
+function renderFundHistory() {
+    var container = document.getElementById('fundHistoryList');
+    if (!container || !_fundData) return;
+    
+    var history = _fundData.history || {};
+    var dailyFund = _fundData.dailyFund || {};
+    var historyKeys = Object.keys(history);
+    var dailyFundKeys = Object.keys(dailyFund);
+    
+    // Tạo các entry ảo từ dailyFund để hiển thị như giao dịch
+    var allEntries = [];
+    
+    // Thêm history entries
+    // Bỏ qua history entry 'daily_close' có note 'Tự động tính' vì đã được thay thế bằng dailyFund entries riêng
+    // Bỏ qua history entry 'refund' (hoàn tiền) vì không cần hiển thị trong lịch sử quỹ
+    for (var hi = 0; hi < historyKeys.length; hi++) {
+        var hk = historyKeys[hi];
+        var he = history[hk];
+        if (!he) continue;
+        // Bỏ qua tất cả daily_close entries (đã có dailyFund entries riêng cho từng ngày)
+        if (he.type === 'daily_close') continue;
+        allEntries.push({
+            key: hk,
+            entry: he,
+            dateKey: _getEntryDateKey(he),
+            createdAt: he.createdAt || 0
+        });
+    }
+    
+    // Thêm dailyFund entries (tích quỹ tự động theo ngày)
+    for (var di = 0; di < dailyFundKeys.length; di++) {
+        var dk = dailyFundKeys[di];
+        var df = dailyFund[dk];
+        if (!df || !df.contribution) continue;
+        // Tạo createdAt từ dateKey (giữa trưa để sắp xếp đúng thứ tự)
+        var dParts = dk.split('-');
+        var dDate = new Date(parseInt(dParts[0], 10), parseInt(dParts[1], 10) - 1, parseInt(dParts[2], 10), 12, 0, 0);
+        // Entry 1: Thưởng trách nhiệm (contribution)
+        allEntries.push({
+            key: 'daily_fund_' + dk,
+            entry: {
+                type: 'daily_fund',
+                contribution: df.contribution,
+                deficitCompensation: 0,
+                balanceChange: df.contribution,
+                revenue: df.revenue || 0,
+                cashRevenue: df.cashRevenue,
+                transferAmount: df.transferAmount,
+                grabAmount: df.grabAmount,
+                createdAt: dDate.getTime()
+            },
+            dateKey: dk,
+            createdAt: dDate.getTime()
+        });
+        // Entry 2: Âm tiền chốt ngày (deficitCompensation) - nếu có
+        if (df.deficitCompensation > 0) {
+            allEntries.push({
+                key: 'daily_deficit_' + dk,
+                entry: {
+                    type: 'deficit',
+                    amount: -df.deficitCompensation,
+                    deficitCompensation: df.deficitCompensation,
+                    createdAt: dDate.getTime() + 1 // +1ms để hiển thị sau contribution
+                },
+                dateKey: dk,
+                createdAt: dDate.getTime() + 1
+            });
+        }
+    }
+    
+    if (allEntries.length === 0) {
+        container.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:12px;">Chưa có giao dịch</div>';
+        var showMoreBtn = document.getElementById('fundHistoryShowMore');
+        if (showMoreBtn) showMoreBtn.style.display = 'none';
+        return;
+    }
+    
+    // Sắp xếp theo thời gian giảm dần (mới nhất lên đầu)
+    allEntries.sort(function(a, b) {
+        return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+    
+    // Số lượng hiển thị
+    var displayCount = Math.min(_fundHistoryDisplayCount, allEntries.length);
+    
+    // Gom nhóm theo ngày
+    var grouped = {};
+    var dateOrder = [];
+    
+    for (var i = 0; i < displayCount; i++) {
+        var item = allEntries[i];
+        var dateKey = item.dateKey;
+        if (!dateKey) {
+            dateKey = 'unknown';
+        }
+        
+        if (!grouped[dateKey]) {
+            grouped[dateKey] = [];
+            dateOrder.push(dateKey);
+        }
+        grouped[dateKey].push({ key: item.key, entry: item.entry });
+    }
+    
+    var html = '';
+    
+    // Duyệt từng ngày (đã sắp xếp mới nhất trước)
+    for (var g = 0; g < dateOrder.length; g++) {
+        var groupDateKey = dateOrder[g];
+        var items = grouped[groupDateKey];
+        
+        // Tiêu đề ngày
+        var dateLabel = '';
+        var isToday = false;
+        var todayKey = getTodayDateKey();
+        
+        if (groupDateKey === 'unknown') {
+            dateLabel = '📅 Không xác định';
+        } else {
+            dateLabel = '📅 ' + _formatDateKeyDisplay(groupDateKey);
+            if (groupDateKey === todayKey) {
+                dateLabel += ' <span style="color:#fbbf24;font-size:10px;background:#1e293b;padding:1px 6px;border-radius:8px;">Hôm nay</span>';
+            }
+        }
+        
+        html += '<div style="margin-bottom:6px;">';
+        html += '  <div style="display:flex;align-items:center;padding:6px 8px;background:#1e293b;border-radius:6px;border-left:3px solid #fbbf24;margin-bottom:4px;">';
+        html += '    <div style="font-weight:600;font-size:13px;color:#fbbf24;">' + dateLabel + '</div>';
+        html += '  </div>';
+        
+        // Các giao dịch trong ngày
+        for (var d = 0; d < items.length; d++) {
+            var item = items[d];
+            var entry = item.entry;
+            var key = item.key;
+            
+            var timeStr = _formatTime(entry.createdAt);
+            
+            var icon = '';
+            var color = '';
+            var label = '';
+            
+            if (entry.type === 'initial_deposit') {
+                icon = '💰';
+                color = '#22c55e';
+                label = 'Nhập quỹ';
+                var amt = entry.amount || entry.balanceChange || 0;
+                var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
+                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(34,197,94,0.08);border-radius:4px;">';
+                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+                html += '  <span>' + icon + '</span>';
+                html += '  <div style="flex:1;min-width:0;color:#4ade80;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
+                html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
+                html += '</div>';
+                continue;
+            } else if (entry.type === 'withdrawal') {
+                icon = '💸';
+                color = '#ef4444';
+                label = 'Rút quỹ';
+                var amt = entry.amount || entry.balanceChange || 0;
+                var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
+                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(239,68,68,0.08);border-radius:4px;">';
+                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+                html += '  <span>' + icon + '</span>';
+                html += '  <div style="flex:1;min-width:0;color:#f87171;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
+                html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
+                html += '</div>';
+                continue;
+            } else if (entry.type === 'refund') {
+                // Phân biệt refund do hủy chốt ngày (có note chứa 🔓) vs hoàn tiền thông thường
+                if (entry.note && entry.note.indexOf('🔓') !== -1) {
+                    icon = '🔓';
+                    color = '#f59e0b';
+                    label = 'Hủy chốt ngày';
+                } else {
+                    icon = '↩️';
+                    color = '#22c55e';
+                    label = 'Hoàn tiền';
+                }
+                var amt = entry.amount || 0;
+                var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
+                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(251,191,36,0.08);border-radius:4px;">';
+                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+                html += '  <span>' + icon + '</span>';
+                html += '  <div style="flex:1;min-width:0;color:#fbbf24;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
+                html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
+                html += '</div>';
+                continue;
+            } else if (entry.type === 'daily_close') {
+                if (entry.contribution > 0 && entry.deficitCompensation > 0) {
+                    icon = '🔄';
+                    color = '#f59e0b';
+                    label = 'Chốt ngày (tích + bù)';
+                } else if (entry.contribution > 0) {
+                    icon = '➕';
+                    color = '#22c55e';
+                    label = 'Tích quỹ';
+                } else if (entry.deficitCompensation > 0) {
+                    icon = '🔴';
+                    color = '#ef4444';
+                    label = 'Bù thiếu hụt';
+                } else {
+                    icon = '📋';
+                    color = '#64748b';
+                    label = 'Chốt ngày';
+                }
+            } else if (entry.type === 'daily_fund') {
+                icon = '🎯';
+                color = '#22c55e';
+                label = 'Thưởng trách nhiệm';
+                var amt = entry.contribution || 0;
+                var amtStr = '+' + formatMoney(amt);
+                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(34,197,94,0.08);border-radius:4px;">';
+                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+                html += '  <span>' + icon + '</span>';
+                html += '  <div style="flex:1;min-width:0;color:#4ade80;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
+                html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
+                html += '</div>';
+                continue;
+            } else if (entry.type === 'deficit') {
+                icon = '🔴';
+                color = '#ef4444';
+                label = 'Âm tiền chốt ngày';
+                var amt = entry.amount || 0;
+                var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
+                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(239,68,68,0.08);border-radius:4px;">';
+                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+                html += '  <span>' + icon + '</span>';
+                html += '  <div style="flex:1;min-width:0;color:#f87171;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
+                html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
+                html += '</div>';
+                continue;
+            } else {
+                icon = '📝';
+                color = '#64748b';
+                label = 'Khác';
+            }
+            
+            var amountStr = '';
+            if (entry.balanceChange !== undefined) {
+                var change = entry.balanceChange;
+                amountStr = (change >= 0 ? '+' : '') + formatMoney(change);
+            } else if (entry.amount !== undefined) {
+                amountStr = (entry.amount >= 0 ? '+' : '') + formatMoney(entry.amount);
+            }
+            
+            // Hiển thị doanh thu và ghi chú nếu là daily_close hoặc daily_fund
+            var detailStr = '';
+            if (entry.type === 'daily_close') {
+                if (entry.revenue) {
+                    detailStr = ' <span style="color:#64748b;font-size:10px;">(' + formatMoney(entry.revenue) + ' doanh thu)</span>';
+                }
+                if (entry.note) {
+                    detailStr += ' <span style="color:#64748b;font-size:10px;">- ' + entry.note + '</span>';
+                }
+            } else if (entry.type === 'daily_fund') {
+                if (entry.revenue) {
+                    detailStr = ' <span style="color:#64748b;font-size:10px;">(1% tổng doanh thu: ' + formatMoney(entry.revenue) + ')</span>';
+                }
+            }
+            
+            // Kiểm tra có thể xóa giao dịch rút quỹ hôm nay không
+            var canDelete = false;
+            var todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            if (entry.type === 'withdrawal' && entry.createdAt && entry.createdAt >= todayStart.getTime()) {
+                canDelete = true;
+            }
+            
+            html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;">';
+            html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
+            html += '  <span>' + icon + '</span>';
+            html += '  <div style="flex:1;min-width:0;">';
+            html += '    <div style="color:#e2e8f0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + detailStr + '</div>';
+            html += '  </div>';
+            html += '  <div style="text-align:right;white-space:nowrap;">';
+            html += '    <div style="color:' + color + ';font-weight:600;">' + amountStr + '</div>';
+            html += '  </div>';
+            // Nút xóa cho giao dịch rút quỹ hôm nay
+            if (canDelete) {
+                html += '  <button onclick="deleteFundHistoryEntry(\'' + key + '\')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:2px;" title="Xóa giao dịch này">🗑️</button>';
+            }
+            html += '</div>';
+        }
+        
+        html += '</div>';
+    }
+    
+    container.innerHTML = html;
+    
+    // Hiển thị nút "Xem thêm" nếu còn giao dịch
+    var showMoreBtn = document.getElementById('fundHistoryShowMore');
+    if (showMoreBtn) {
+        if (keys.length > _fundHistoryDisplayCount) {
+            showMoreBtn.style.display = 'block';
+            var remaining = keys.length - _fundHistoryDisplayCount;
+            showMoreBtn.querySelector('button').textContent = '📋 Xem thêm (' + remaining + ' giao dịch)';
+        } else {
+            showMoreBtn.style.display = 'none';
+        }
+    }
+}
+
+// Xem thêm lịch sử quỹ (tăng số lượng hiển thị thêm 10)
+function loadMoreFundHistory() {
+    _fundHistoryDisplayCount += 10;
+    renderFundHistory();
+}
+
+// Xóa giao dịch rút quỹ (chỉ cho phép xóa giao dịch hôm nay)
+// Khi xóa: hoàn tiền lại quỹ, xóa chi phí POS tương ứng
+function deleteFundHistoryEntry(historyKey) {
+    if (!historyKey) return;
+    
+    if (!confirm('🗑️ Xóa giao dịch rút quỹ này?\nSố tiền sẽ được hoàn lại vào quỹ.')) return;
+    
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+        
+        // Đọc dữ liệu hiện tại
+        fundRef.once('value').then(function(snapshot) {
+            var fundData = snapshot.val() || {};
+            var history = fundData.history || {};
+            var entry = history[historyKey];
+            
+            if (!entry) {
+                showToast('❌ Không tìm thấy giao dịch', 'error');
+                return;
+            }
+            
+            if (entry.type !== 'withdrawal') {
+                showToast('❌ Chỉ có thể xóa giao dịch rút quỹ', 'error');
+                return;
+            }
+            
+            // Kiểm tra giao dịch hôm nay
+            var todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            if (!entry.createdAt || entry.createdAt < todayStart.getTime()) {
+                showToast('❌ Chỉ có thể xóa giao dịch trong hôm nay', 'error');
+                return;
+            }
+            
+            var currentBalance = fundData.balance || 0;
+            // Số tiền đã rút (entry.amount là số âm, VD: -50000)
+            var withdrawnAmount = Math.abs(entry.amount || 0);
+            var newBalance = currentBalance + withdrawnAmount;
+            
+            // Tạo lịch sử hoàn tiền
+            var refundEntry = {
+                type: 'refund',
+                amount: withdrawnAmount,
+                balanceBefore: currentBalance,
+                balanceAfter: newBalance,
+                note: 'Hoàn tiền xóa rút quỹ',
+                originalHistoryKey: historyKey,
+                createdAt: Date.now(),
+                createdBy: window.currentDeviceId || 'admin'
+            };
+            
+            var historyRef = fundRef.child('history').push();
+            var updates = {};
+            updates['balance'] = newBalance;
+            updates['history/' + historyRef.key] = refundEntry;
+            // Xóa entry cũ
+            updates['history/' + historyKey] = null;
+            
+            return fundRef.update(updates);
+        }).then(function() {
+            // Xóa chi phí tương ứng trong cost_transactions
+            try {
+                if (typeof DB !== 'undefined' && DB.getAll) {
+                    DB.getAll('cost_transactions').then(function(costs) {
+                        if (!costs) return;
+                        for (var ci = 0; ci < costs.length; ci++) {
+                            var c = costs[ci];
+                            if (c && c.fundHistoryKey === historyKey && !c.deleted) {
+                                DB.update('cost_transactions', c.id, { deleted: true });
+                                break;
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                // Bỏ qua lỗi xóa chi phí
+            }
+            showToast('✅ Đã xóa giao dịch rút quỹ và hoàn tiền', 'success');
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi xóa giao dịch', 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
+    }
+}
+
+// Tự động tính quỹ cho khoảng thời gian từ UI
+function autoCalculateFundForPeriodFromUI() {
+    var fromInput = document.getElementById('fundAutoFromDate');
+    var toInput = document.getElementById('fundAutoToDate');
+    if (!fromInput || !toInput) return;
+    
+    var fromDateStr = fromInput.value;
+    var toDateStr = toInput.value;
+    
+    // Tự động điền ngày nếu chưa có
+    if (!fromDateStr) {
+        fromDateStr = '01/07/2026';
+        fromInput.value = fromDateStr;
+    }
+    if (!toDateStr) {
+        var today = new Date();
+        var dd = ('0' + today.getDate()).slice(-2);
+        var mm = ('0' + (today.getMonth() + 1)).slice(-2);
+        var yyyy = today.getFullYear();
+        toDateStr = dd + '/' + mm + '/' + yyyy;
+        toInput.value = toDateStr;
+    }
+    
+    // Chuyển từ dd/mm/yyyy sang yyyy-mm-dd để so sánh và xử lý
+    var fromDateISO = _vnDateToISO(fromDateStr);
+    var toDateISO = _vnDateToISO(toDateStr);
+    
+    if (!fromDateISO || !toDateISO) {
+        showToast('❌ Định dạng ngày không hợp lệ (dd/mm/yyyy)', 'error');
+        return;
+    }
+    
+    if (fromDateISO > toDateISO) {
+        showToast('❌ Ngày bắt đầu phải trước ngày kết thúc', 'error');
+        return;
+    }
+    
+    autoCalculateFundForPeriod(fromDateISO, toDateISO);
+}
+
+// Tự động tính 1% doanh thu và bổ sung vào quỹ cho khoảng thời gian
+// Các ngày đã tính (có dailyFund) sẽ bỏ qua
+// Sử dụng DB.getTransactionsByDateRange() để tính doanh thu từ giao dịch thực tế (giống manager-detail.js)
+function autoCalculateFundForPeriod(fromDate, toDate) {
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var dbRef = firebase.database().ref(shopId);
+        
+        showToast('🔄 Đang tính quỹ...', 'info');
+        
+        // Đọc fund data (không cần daily_balances nữa)
+        return dbRef.child('responsibility_fund').once('value').then(function(fundSnap) {
+            var fundData = fundSnap.val() || {};
+            var currentBalance = fundData.balance || 0;
+            var dailyFund = fundData.dailyFund || {};
+            
+            var totalContribution = 0;
+            var processedDays = 0;
+            var skippedDays = 0;
+            var updates = {};
+            
+            // Duyệt từng ngày trong khoảng
+            var current = new Date(fromDate);
+            var end = new Date(toDate);
+            
+            // Tạo mảng promises để fetch transactions cho từng ngày
+            var dayPromises = [];
+            var dayKeys = [];
+            
+            while (current <= end) {
+                var dateKey = current.toISOString().slice(0, 10);
+                
+                // Bỏ qua nếu đã tính
+                if (dailyFund[dateKey]) {
+                    skippedDays++;
+                    current.setDate(current.getDate() + 1);
+                    continue;
+                }
+                
+                dayKeys.push(dateKey);
+                dayPromises.push(DB.getTransactionsByDateRange(dateKey, dateKey));
+                
+                current.setDate(current.getDate() + 1);
+            }
+            
+            if (dayKeys.length === 0) {
+                showToast('ℹ️ Không có ngày nào cần tính quỹ', 'info');
+                return;
+            }
+            
+            // Fetch transactions cho tất cả các ngày cùng lúc
+            return Promise.all(dayPromises).then(function(results) {
+                // Xử lý kết quả từng ngày
+                for (var i = 0; i < results.length; i++) {
+                    var dateKey = dayKeys[i];
+                    var transactions = results[i] || [];
+                    
+                    // Lọc giao dịch tính doanh thu (giống manager-detail.js)
+                    // - Bỏ qua giao dịch đã refund
+                    // - Bỏ qua ghi nợ (paymentMethod === 'debt')
+                    // - Chỉ tính cash, transfer, grab
+                    var revenue = 0;
+                    var cashRev = 0;
+                    var transferAmt = 0;
+                    var grabAmt = 0;
+                    
+                    for (var j = 0; j < transactions.length; j++) {
+                        var tx = transactions[j];
+                        if (tx.refunded) continue;
+                        if (tx.paymentMethod === 'debt') continue;
+                        if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab') continue;
+                        
+                        var amt = tx.amount || 0;
+                        revenue += amt;
+                        
+                        if (tx.paymentMethod === 'cash') cashRev += amt;
+                        else if (tx.paymentMethod === 'transfer') transferAmt += amt;
+                        else if (tx.paymentMethod === 'grab') grabAmt += amt;
+                    }
+                    
+                    if (revenue <= 0) continue;
+                    
+                    var contribution = Math.round(revenue * 0.01);
+                    if (contribution <= 0) continue;
+                    
+                    totalContribution += contribution;
+                    processedDays++;
+                    
+                    // Tạo dailyFund entry
+                    updates['dailyFund/' + dateKey] = {
+                        contribution: contribution,
+                        deficitCompensation: 0,
+                        balanceChange: contribution,
+                        revenue: revenue,
+                        cashRevenue: cashRev,
+                        transferAmount: transferAmt,
+                        grabAmount: grabAmt
+                    };
+                }
+                
+                if (processedDays === 0) {
+                    showToast('ℹ️ Không có ngày nào cần tính quỹ', 'info');
+                    return;
+                }
+                
+                // Cập nhật balance
+                var newBalance = currentBalance + totalContribution;
+                updates['balance'] = newBalance;
+                
+                // Lưu kết quả để dùng trong .then() tiếp theo
+                var resultData = {
+                    totalContribution: totalContribution,
+                    processedDays: processedDays
+                };
+                
+                return dbRef.child('responsibility_fund').update(updates).then(function() {
+                    showToast('✅ Đã tính quỹ xong! +' + formatMoney(resultData.totalContribution) + ' (' + resultData.processedDays + ' ngày)', 'success');
+                    // Cập nhật lại _fundData và render lại lịch sử
+                    if (typeof _fundData !== 'undefined') {
+                        _fundData.balance = newBalance;
+                        if (!_fundData.dailyFund) _fundData.dailyFund = {};
+                        for (var k in updates) {
+                            if (k.indexOf('dailyFund/') === 0) {
+                                var dk = k.replace('dailyFund/', '');
+                                _fundData.dailyFund[dk] = updates[k];
+                            }
+                        }
+                        renderFundHistory();
+                    }
+                });
+            });
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi tính quỹ: ' + (err.message || 'unknown'), 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
     }
 }
