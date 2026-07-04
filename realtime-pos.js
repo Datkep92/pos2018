@@ -576,15 +576,11 @@ function initRealtime() {
     // ============================================================
     // TABLES
     // ============================================================
-    // Subscribe cũ: cập nhật cachedTables + doanh thu
+    // Subscribe cũ: cập nhật cachedTables (KHÔNG gọi loadPosCashData để tránh double execution với event bus)
     DB.subscribe('tables', function(newTables) {
         if (!newTables) return;
         cachedTables = newTables;
         tablesCacheTime = Date.now();
-        // Cập nhật doanh thu pos-cash-info khi bàn thay đổi (clear bàn, gộp bàn...)
-        if (typeof loadPosCashData === 'function') {
-            loadPosCashData();
-        }
         // Fallback: nếu đang ở tab tables, re-render toàn bộ (dự phòng)
         if (currentTab !== 'tables') return;
         _renderNow('tables_render', function() {
@@ -626,12 +622,16 @@ function initRealtime() {
         }
     });
     
-    // NÂNG CẤP: Khi fullSync hoàn thành, re-render toàn bộ tables
+    // NÂNG CẤP: Khi fullSync hoàn thành, re-render toàn bộ tables + cập nhật pos-cash-info
     DB.on('tables:synced', function() {
-        if (currentTab !== 'tables') return;
         DB.getAll('tables').then(function(allTables) {
             cachedTables = allTables;
             tablesCacheTime = Date.now();
+            // Cập nhật pos-cash-info khi tables thay đổi (clear bàn, gộp bàn...)
+            if (typeof loadPosCashData === 'function') {
+                loadPosCashData();
+            }
+            if (currentTab !== 'tables') return;
             updateTablesDiff(allTables);
             if (typeof startTableTimer === 'function') startTableTimer();
         });
@@ -855,12 +855,10 @@ function initRealtime() {
     // ============================================================
     // DAILY BALANCES
     // ============================================================
-    // Subscribe cũ: cập nhật daily_balances
+    // Subscribe cũ: cập nhật daily_balances (KHÔNG gọi loadPosCashData để tránh double execution với event bus)
     DB.subscribe('daily_balances', function() {
         _debounceRealtime('daily_balances', function() {
-            if (typeof loadPosCashData === 'function') {
-                loadPosCashData();
-            }
+            // daily_balances đã được xử lý bởi event bus bên dưới
         }, 200);
     });
     // NÂNG CẤP: Event Bus handler cho daily_balances
@@ -906,13 +904,10 @@ function initRealtime() {
     // ============================================================
     // TRANSACTIONS
     // ============================================================
-    // Subscribe cũ: cập nhật transactions cache
+    // Subscribe cũ: cập nhật transactions cache (CHỈ updateRecentToast, không gọi loadPosCashData để tránh double execution)
     DB.subscribe('transactions', function() {
         _debounceRealtime('transactions', function() {
             updateRecentToast();
-            if (typeof loadPosCashData === 'function') {
-                loadPosCashData();
-            }
             if (currentTab === 'history') {
                 renderHistoryByDate(currentHistoryDate);
             }

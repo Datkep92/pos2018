@@ -538,12 +538,18 @@ function empCalculateRevenueBonus(staffId, period, year, month) {
     var revenueCache = EMP._revenueCache;
     if (!revenueCache) return 0;
 
+    // Lấy danh sách ngày off của nhân viên trong kỳ này
+    var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+    var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
+
     // Tính theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
     var daysInMonth = empGetDaysInMonth(year, month);
 
     // Duyệt từng ngày trong tháng N (1 → hết tháng)
     for (var d = 1; d <= daysInMonth; d++) {
         var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        // Bỏ qua ngày off - không tính thưởng doanh thu
+        if (offDays.indexOf(dateStr) !== -1) continue;
         var dayRevenue = revenueCache[dateStr] || 0;
         // Trích 1% doanh thu hàng ngày
         totalBonus += Math.round(dayRevenue * 0.01);
@@ -558,6 +564,7 @@ function empCalculateRevenueBonus(staffId, period, year, month) {
 /**
  * Hiển thị popup chi tiết doanh thu từng ngày và tiền thưởng tương ứng.
  * Đọc từ EMP._revenueCache (đã sync từ Firebase daily_revenue).
+ * Ngày OFF được hiển thị với nền đỏ nhạt + gạch ngang để biết không được thưởng.
  */
 function empShowRevenueBonusDetail() {
     var revenueCache = EMP._revenueCache;
@@ -571,6 +578,14 @@ function empShowRevenueBonusDetail() {
     var year = parseInt(parts[0]);
     var month = parseInt(parts[1]);
 
+    // Lấy danh sách ngày off của nhân viên đang xem
+    var staffId = EMP.currentStaffId;
+    var offDays = [];
+    if (staffId) {
+        var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+        offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
+    }
+
     // Hiển thị theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
     var daysInMonth = empGetDaysInMonth(year, month);
     var rows = [];
@@ -579,8 +594,10 @@ function empShowRevenueBonusDetail() {
 
     for (var d = 1; d <= daysInMonth; d++) {
         var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        var isOff = offDays.indexOf(dateStr) !== -1;
         var dayRevenue = revenueCache[dateStr] || 0;
-        var dayBonus = Math.round(dayRevenue * 0.01);
+        // Ngày off: bonus = 0 (không được thưởng)
+        var dayBonus = isOff ? 0 : Math.round(dayRevenue * 0.01);
         totalRevenue += dayRevenue;
         totalBonus += dayBonus;
 
@@ -589,7 +606,8 @@ function empShowRevenueBonusDetail() {
         rows.push({
             date: dayLabel,
             revenue: dayRevenue,
-            bonus: dayBonus
+            bonus: dayBonus,
+            isOff: isOff
         });
     }
 
@@ -614,10 +632,25 @@ function empShowRevenueBonusDetail() {
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         var isEven = i % 2 === 0;
-        html += '<tr style="border-bottom:1px solid #f1f5f9;' + (isEven ? 'background:#f8fafc;' : '') + '">' +
-                    '<td style="padding:6px 8px;">' + r.date + '</td>' +
-                    '<td style="padding:6px 8px;text-align:right;">' + (r.revenue > 0 ? empFormatCurrency(r.revenue) : '<span style="color:#94a3b8;">-</span>') + '</td>' +
-                    '<td style="padding:6px 8px;text-align:right;font-weight:600;color:' + (r.bonus > 0 ? '#16a34a' : '#94a3b8') + ';">' + (r.bonus > 0 ? empFormatCurrency(r.bonus) : '-') + '</td>' +
+        var rowStyle = 'border-bottom:1px solid #f1f5f9;' + (isEven ? 'background:#f8fafc;' : '');
+        if (r.isOff) {
+            rowStyle += 'background:#fef2f2!important;'; // nền đỏ nhạt cho ngày off
+        }
+        html += '<tr style="' + rowStyle + '">' +
+                    '<td style="padding:6px 8px;">' +
+                        (r.isOff ? '<span style="color:#dc2626;font-weight:600;">😴 ' + r.date + '</span>' : r.date) +
+                    '</td>' +
+                    '<td style="padding:6px 8px;text-align:right;">' +
+                        (r.revenue > 0 ? empFormatCurrency(r.revenue) : '<span style="color:#94a3b8;">-</span>') +
+                    '</td>' +
+                    '<td style="padding:6px 8px;text-align:right;font-weight:600;">' +
+                        (r.isOff
+                            ? '<span style="color:#dc2626;text-decoration:line-through;">OFF</span>'
+                            : (r.bonus > 0
+                                ? '<span style="color:#16a34a;">' + empFormatCurrency(r.bonus) + '</span>'
+                                : '<span style="color:#94a3b8;">-</span>')
+                        ) +
+                    '</td>' +
                 '</tr>';
     }
 
@@ -631,6 +664,7 @@ function empShowRevenueBonusDetail() {
             '</tfoot>' +
         '</table>' +
         '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;text-align:center;">🏆 Tổng thưởng doanh thu: <strong>' + empFormatCurrency(totalBonus) + '</strong></div>' +
+        '<div style="margin-top:8px;padding:6px 10px;background:#fef2f2;border-radius:6px;font-size:11px;color:#dc2626;text-align:center;">😴 Ngày <strong>OFF</strong> (nền đỏ) không được tính thưởng doanh thu</div>' +
     '</div></div>';
 
     // Thêm vào body
@@ -1526,6 +1560,9 @@ function empSaveStaffSalary(staffId) {
         // Refresh danh sách và cập nhật nút tổng lương
         empLoadStaffList();
         empUpdateManagerButton();
+
+        // Đóng modal sau khi lưu thành công
+        closeEmployeeManager();
     }).catch(function(err) {
         console.error('empSaveStaffSalary error:', err);
         if (statusEl) statusEl.textContent = '❌ Lỗi: ' + (err.message || 'Không thể lưu');
@@ -1961,11 +1998,13 @@ function empUpdateManagerButton(optPeriod) {
 
             var baseSalary = dailySalary * workingDays;
 
-            // Thưởng doanh thu
+            // Thưởng doanh thu - chỉ tính cho ngày đi làm (không off)
             var revenueBonus = 0;
             if (revenueBonusEnabled) {
                 for (var d = 1; d <= daysInMonth; d++) {
                     var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                    // Bỏ qua ngày off - không tính thưởng doanh thu
+                    if (offDays.indexOf(dateStr) !== -1) continue;
                     var dayRevenue = revenueCache[dateStr] || 0;
                     revenueBonus += Math.round(dayRevenue * 0.01);
                 }

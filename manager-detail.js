@@ -935,75 +935,9 @@ function _loadPosFundData(modal, range) {
     fundRef.once('value', function(snapshot) {
         var fundData = snapshot.val() || {};
         var balance = fundData.balance || 0;
-        var history = fundData.history || {};
-        var dailyFund = fundData.dailyFund || {};
 
-        // Gom tất cả entries từ history và dailyFund
-        var allEntries = [];
-
-        // History entries
-        var historyKeys = Object.keys(history);
-        for (var hi = 0; hi < historyKeys.length; hi++) {
-            var hk = historyKeys[hi];
-            var he = history[hk];
-            if (!he) continue;
-            // Bỏ qua tất cả daily_close entries (đã có dailyFund entries riêng cho từng ngày)
-            if (he.type === 'daily_close') continue;
-
-            var dateKey = '';
-            if (he.dateKey) {
-                dateKey = he.dateKey;
-            } else if (he.createdAt) {
-                var d = new Date(he.createdAt);
-                dateKey = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-            }
-
-            allEntries.push({
-                key: hk,
-                entry: he,
-                dateKey: dateKey,
-                createdAt: he.createdAt || 0
-            });
-        }
-
-        // DailyFund entries
-        var dailyFundKeys = Object.keys(dailyFund);
-        for (var di = 0; di < dailyFundKeys.length; di++) {
-            var dk = dailyFundKeys[di];
-            var df = dailyFund[dk];
-            if (!df || !df.contribution) continue;
-            // Tạo createdAt từ dateKey (giữa trưa để sắp xếp đúng thứ tự)
-            var dParts = dk.split('-');
-            var dDate = new Date(parseInt(dParts[0], 10), parseInt(dParts[1], 10) - 1, parseInt(dParts[2], 10), 12, 0, 0);
-            // Entry 1: Thưởng trách nhiệm (contribution)
-            allEntries.push({
-                key: 'daily_fund_' + dk,
-                entry: {
-                    type: 'daily_fund',
-                    contribution: df.contribution,
-                    deficitCompensation: 0,
-                    balanceChange: df.contribution,
-                    revenue: df.revenue || 0,
-                    createdAt: dDate.getTime()
-                },
-                dateKey: dk,
-                createdAt: dDate.getTime()
-            });
-            // Entry 2: Âm tiền chốt ngày (deficitCompensation) - nếu có
-            if (df.deficitCompensation > 0) {
-                allEntries.push({
-                    key: 'daily_deficit_' + dk,
-                    entry: {
-                        type: 'deficit',
-                        amount: -df.deficitCompensation,
-                        deficitCompensation: df.deficitCompensation,
-                        createdAt: dDate.getTime() + 1
-                    },
-                    dateKey: dk,
-                    createdAt: dDate.getTime() + 1
-                });
-            }
-        }
+        // Sử dụng hàm dùng chung _buildFundEntries() để xây dựng entries
+        var allEntries = _buildFundEntries(fundData);
 
         // Lọc theo date range
         var filtered = [];
@@ -1013,11 +947,6 @@ function _loadPosFundData(modal, range) {
                 filtered.push(item);
             }
         }
-
-        // Sắp xếp theo thời gian giảm dần (mới nhất lên đầu)
-        filtered.sort(function(a, b) {
-            return (b.createdAt || 0) - (a.createdAt || 0);
-        });
 
         if (filtered.length === 0) {
             body.innerHTML = '<div class="manager-detail-empty">\uD83D\uDCED Kh\u00F4ng c\u00F3 giao d\u1ECBch qu\u1EF9 trong k\u1EF3</div>';
@@ -1032,167 +961,14 @@ function _loadPosFundData(modal, range) {
             summary.innerHTML = sumHtml;
         }
 
-        // Gom nhóm theo ngày
-        var grouped = {};
-        var dateOrder = [];
-
-        for (var gi = 0; gi < filtered.length; gi++) {
-            var it = filtered[gi];
-            var dk2 = it.dateKey || 'unknown';
-            if (!grouped[dk2]) {
-                grouped[dk2] = [];
-                dateOrder.push(dk2);
-            }
-            grouped[dk2].push({ key: it.key, entry: it.entry });
-        }
-
-        // Render HTML
-        var html = '';
-        var todayKey = (typeof getTodayDateKey === 'function') ? getTodayDateKey() : '';
-
-        for (var g = 0; g < dateOrder.length; g++) {
-            var groupDateKey = dateOrder[g];
-            var items = grouped[groupDateKey];
-
-            // Tiêu đề ngày
-            var dateLabel = '';
-            if (groupDateKey === 'unknown') {
-                dateLabel = '\uD83D\uDCC5 Kh\u00F4ng x\u00E1c \u0111\u1ECBnh';
-            } else {
-                var parts = groupDateKey.split('-');
-                dateLabel = '\uD83D\uDCC5 ' + (parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : groupDateKey);
-                if (groupDateKey === todayKey) {
-                    dateLabel += ' <span style="color:#fbbf24;font-size:10px;background:#1e293b;padding:1px 6px;border-radius:8px;">H\u00F4m nay</span>';
-                }
-            }
-
-            html += '<div style="margin-bottom:6px;">';
-            html += '  <div style="display:flex;align-items:center;padding:6px 8px;background:#1e293b;border-radius:6px;border-left:3px solid #fbbf24;margin-bottom:4px;">';
-            html += '    <div style="font-weight:600;font-size:13px;color:#fbbf24;">' + dateLabel + '</div>';
-            html += '  </div>';
-
-            // Các giao dịch trong ngày
-            for (var d = 0; d < items.length; d++) {
-                var item = items[d];
-                var entry = item.entry;
-                var key = item.key;
-
-                var timeStr = '';
-                if (entry.createdAt) {
-                    try {
-                        var td = new Date(entry.createdAt);
-                        var hh = td.getHours();
-                        var mm = td.getMinutes();
-                        timeStr = (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
-                    } catch(e) {}
-                }
-
-                var icon = '';
-                var color = '';
-                var label = '';
-
-                if (entry.type === 'initial_deposit') {
-                    icon = '\uD83D\uDCB0';
-                    color = '#22c55e';
-                    label = 'Nh\u1EADp qu\u1EF9';
-                    var amt = entry.amount || entry.balanceChange || 0;
-                    var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
-                    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(34,197,94,0.08);border-radius:4px;">';
-                    html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                    html += '  <span>' + icon + '</span>';
-                    html += '  <div style="flex:1;min-width:0;color:#4ade80;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                    html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
-                    html += '</div>';
-                    continue;
-                } else if (entry.type === 'withdrawal') {
-                    icon = '\uD83D\uDCB8';
-                    color = '#ef4444';
-                    label = 'R\u00FAt qu\u1EF9';
-                    var amt = entry.amount || entry.balanceChange || 0;
-                    var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
-                    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(239,68,68,0.08);border-radius:4px;">';
-                    html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                    html += '  <span>' + icon + '</span>';
-                    html += '  <div style="flex:1;min-width:0;color:#f87171;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                    html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
-                    html += '</div>';
-                    continue;
-                } else if (entry.type === 'refund') {
-                    // Phân biệt refund do hủy chốt ngày (có note chứa 🔓) vs hoàn tiền thông thường
-                    if (entry.note && entry.note.indexOf('\uD83D\uDD13') !== -1) {
-                        icon = '\uD83D\uDD13';
-                        color = '#f59e0b';
-                        label = 'H\u1EE7y ch\u1ED1t ng\u00E0y';
-                    } else {
-                        icon = '\u21A9\uFE0F';
-                        color = '#22c55e';
-                        label = 'Ho\u00E0n ti\u1EC1n';
-                    }
-                    var amt = entry.amount || 0;
-                    var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
-                    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(251,191,36,0.08);border-radius:4px;">';
-                    html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                    html += '  <span>' + icon + '</span>';
-                    html += '  <div style="flex:1;min-width:0;color:#fbbf24;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                    html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
-                    html += '</div>';
-                    continue;
-                } else if (entry.type === 'daily_fund') {
-                    icon = '\uD83C\uDFAF';
-                    color = '#22c55e';
-                    label = 'Th\u01B0\u1EDFng tr\u00E1ch nhi\u1EC7m';
-                    var amt = entry.contribution || 0;
-                    var amtStr = '+' + formatMoney(amt);
-                    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(34,197,94,0.08);border-radius:4px;">';
-                    html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                    html += '  <span>' + icon + '</span>';
-                    html += '  <div style="flex:1;min-width:0;color:#4ade80;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                    html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
-                    html += '</div>';
-                    continue;
-                } else if (entry.type === 'deficit') {
-                    icon = '\uD83D\uDD34';
-                    color = '#ef4444';
-                    label = '\u00C2m ti\u1EC1n ch\u1ED1t ng\u00E0y';
-                    var amt = entry.amount || 0;
-                    var amtStr = (amt >= 0 ? '+' : '') + formatMoney(amt);
-                    html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;background:rgba(239,68,68,0.08);border-radius:4px;">';
-                    html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                    html += '  <span>' + icon + '</span>';
-                    html += '  <div style="flex:1;min-width:0;color:#f87171;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                    html += '  <div style="text-align:right;white-space:nowrap;color:' + color + ';font-weight:600;">' + amtStr + '</div>';
-                    html += '</div>';
-                    continue;
-                } else {
-                    icon = '\uD83D\uDCDD';
-                    color = '#64748b';
-                    label = 'Kh\u00E1c';
-                }
-
-                var amountStr = '';
-                if (entry.balanceChange !== undefined) {
-                    var change = entry.balanceChange;
-                    amountStr = (change >= 0 ? '+' : '') + formatMoney(change);
-                } else if (entry.amount !== undefined) {
-                    amountStr = (entry.amount >= 0 ? '+' : '') + formatMoney(entry.amount);
-                }
-
-                html += '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:12px;">';
-                html += '  <span style="font-size:11px;color:#64748b;min-width:36px;">' + timeStr + '</span>';
-                html += '  <span>' + icon + '</span>';
-                html += '  <div style="flex:1;min-width:0;">';
-                html += '    <div style="color:#e2e8f0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>';
-                html += '  </div>';
-                html += '  <div style="text-align:right;white-space:nowrap;">';
-                html += '    <div style="color:' + color + ';font-weight:600;">' + amountStr + '</div>';
-                html += '  </div>';
-                html += '</div>';
-            }
-
-            html += '</div>';
-        }
-
-        body.innerHTML = html;
+        // Sử dụng hàm dùng chung _renderFundEntriesHTML() để render HTML
+        _renderFundEntriesHTML(filtered, {
+            showDeleteBtn: false,
+            showDetail: true,
+            maxDisplay: 0,
+            containerId: 'mdBody',
+            showMoreBtnId: ''
+        });
     }).catch(function(err) {
         console.error('_loadPosFundData error:', err);
         body.innerHTML = '<div class="manager-detail-empty">\u274C L\u1ED7i t\u1EA3i d\u1EEF li\u1EC7u qu\u1EF9</div>';
