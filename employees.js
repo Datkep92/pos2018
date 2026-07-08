@@ -588,31 +588,72 @@ function empShowRevenueBonusDetail() {
 
     // Hiển thị theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
     var daysInMonth = empGetDaysInMonth(year, month);
-    var rows = [];
-    var totalRevenue = 0;
-    var totalBonus = 0;
 
-    for (var d = 1; d <= daysInMonth; d++) {
-        var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-        var isOff = offDays.indexOf(dateStr) !== -1;
-        var dayRevenue = revenueCache[dateStr] || 0;
-        // Ngày off: bonus = 0 (không được thưởng)
-        var dayBonus = isOff ? 0 : Math.round(dayRevenue * 0.01);
-        totalRevenue += dayRevenue;
-        totalBonus += dayBonus;
+    // Hàm render nội dung popup (dùng lại khi realtime update)
+    function _renderRevenuePopup() {
+        var cache = EMP._revenueCache || {};
+        var rows = [];
+        var totalRevenue = 0;
+        var totalBonus = 0;
 
-        var dayLabel = String(d).padStart(2, '0') + '/' + String(month).padStart(2, '0');
+        for (var d = 1; d <= daysInMonth; d++) {
+            var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            var isOff = offDays.indexOf(dateStr) !== -1;
+            var dayRevenue = cache[dateStr] || 0;
+            // Ngày off: bonus = 0 (không được thưởng)
+            var dayBonus = isOff ? 0 : Math.round(dayRevenue * 0.01);
+            totalRevenue += dayRevenue;
+            totalBonus += dayBonus;
 
-        rows.push({
-            date: dayLabel,
-            revenue: dayRevenue,
-            bonus: dayBonus,
-            isOff: isOff
-        });
+            var dayLabel = String(d).padStart(2, '0') + '/' + String(month).padStart(2, '0');
+
+            rows.push({
+                date: dayLabel,
+                revenue: dayRevenue,
+                bonus: dayBonus,
+                isOff: isOff
+            });
+        }
+
+        var html = '';
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            var isEven = i % 2 === 0;
+            var rowStyle = 'border-bottom:1px solid #f1f5f9;' + (isEven ? 'background:#f8fafc;' : '');
+            if (r.isOff) {
+                rowStyle += 'background:#fef2f2!important;';
+            }
+            html += '<tr style="' + rowStyle + '">' +
+                        '<td style="padding:6px 8px;">' +
+                            (r.isOff ? '<span style="color:#dc2626;font-weight:600;">😴 ' + r.date + '</span>' : r.date) +
+                        '</td>' +
+                        '<td style="padding:6px 8px;text-align:right;">' +
+                            (r.revenue > 0 ? empFormatCurrency(r.revenue) : '<span style="color:#94a3b8;">-</span>') +
+                        '</td>' +
+                        '<td style="padding:6px 8px;text-align:right;font-weight:600;">' +
+                            (r.isOff
+                                ? '<span style="color:#dc2626;text-decoration:line-through;">OFF</span>'
+                                : (r.bonus > 0
+                                    ? '<span style="color:#16a34a;">' + empFormatCurrency(r.bonus) + '</span>'
+                                    : '<span style="color:#94a3b8;">-</span>')
+                            ) +
+                        '</td>' +
+                    '</tr>';
+        }
+
+        return {
+            tbody: html,
+            totalRevenue: totalRevenue,
+            totalBonus: totalBonus
+        };
     }
 
+    // Render lần đầu
+    var result = _renderRevenuePopup();
+
     // Tạo HTML popup
-    var html = '<div class="emp-revenue-detail-overlay" onclick="this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;">' +
+    var popupId = 'empRevenuePopup_' + Date.now();
+    var html = '<div class="emp-revenue-detail-overlay" id="' + popupId + '" onclick="this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;">' +
         '<div onclick="event.stopPropagation()" style="background:#fff;border-radius:12px;padding:20px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.3);">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
                 '<h3 style="margin:0;font-size:16px;">📊 Chi tiết thưởng doanh thu</h3>' +
@@ -627,50 +668,43 @@ function empShowRevenueBonusDetail() {
                         '<th style="text-align:right;padding:6px 8px;color:#64748b;">Thưởng (1%)</th>' +
                     '</tr>' +
                 '</thead>' +
-                '<tbody>';
-
-    for (var i = 0; i < rows.length; i++) {
-        var r = rows[i];
-        var isEven = i % 2 === 0;
-        var rowStyle = 'border-bottom:1px solid #f1f5f9;' + (isEven ? 'background:#f8fafc;' : '');
-        if (r.isOff) {
-            rowStyle += 'background:#fef2f2!important;'; // nền đỏ nhạt cho ngày off
-        }
-        html += '<tr style="' + rowStyle + '">' +
-                    '<td style="padding:6px 8px;">' +
-                        (r.isOff ? '<span style="color:#dc2626;font-weight:600;">😴 ' + r.date + '</span>' : r.date) +
-                    '</td>' +
-                    '<td style="padding:6px 8px;text-align:right;">' +
-                        (r.revenue > 0 ? empFormatCurrency(r.revenue) : '<span style="color:#94a3b8;">-</span>') +
-                    '</td>' +
-                    '<td style="padding:6px 8px;text-align:right;font-weight:600;">' +
-                        (r.isOff
-                            ? '<span style="color:#dc2626;text-decoration:line-through;">OFF</span>'
-                            : (r.bonus > 0
-                                ? '<span style="color:#16a34a;">' + empFormatCurrency(r.bonus) + '</span>'
-                                : '<span style="color:#94a3b8;">-</span>')
-                        ) +
-                    '</td>' +
-                '</tr>';
-    }
-
-    html += '</tbody>' +
-            '<tfoot>' +
-                '<tr style="border-top:2px solid #e2e8f0;font-weight:700;">' +
-                    '<td style="padding:8px;text-align:left;">Tổng</td>' +
-                    '<td style="padding:8px;text-align:right;">' + empFormatCurrency(totalRevenue) + '</td>' +
-                    '<td style="padding:8px;text-align:right;color:#16a34a;">' + empFormatCurrency(totalBonus) + '</td>' +
-                '</tr>' +
-            '</tfoot>' +
-        '</table>' +
-        '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;text-align:center;">🏆 Tổng thưởng doanh thu: <strong>' + empFormatCurrency(totalBonus) + '</strong></div>' +
-        '<div style="margin-top:8px;padding:6px 10px;background:#fef2f2;border-radius:6px;font-size:11px;color:#dc2626;text-align:center;">😴 Ngày <strong>OFF</strong> (nền đỏ) không được tính thưởng doanh thu</div>' +
-    '</div></div>';
+                '<tbody id="' + popupId + '_tbody">' + result.tbody + '</tbody>' +
+                '<tfoot>' +
+                    '<tr style="border-top:2px solid #e2e8f0;font-weight:700;">' +
+                        '<td style="padding:8px;text-align:left;">Tổng</td>' +
+                        '<td id="' + popupId + '_totalRev" style="padding:8px;text-align:right;">' + empFormatCurrency(result.totalRevenue) + '</td>' +
+                        '<td id="' + popupId + '_totalBonus" style="padding:8px;text-align:right;color:#16a34a;">' + empFormatCurrency(result.totalBonus) + '</td>' +
+                    '</tr>' +
+                '</tfoot>' +
+            '</table>' +
+            '<div id="' + popupId + '_summary" style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;text-align:center;">🏆 Tổng thưởng doanh thu: <strong>' + empFormatCurrency(result.totalBonus) + '</strong></div>' +
+            '<div style="margin-top:8px;padding:6px 10px;background:#fef2f2;border-radius:6px;font-size:11px;color:#dc2626;text-align:center;">😴 Ngày <strong>OFF</strong> (nền đỏ) không được tính thưởng doanh thu</div>' +
+        '</div></div>';
 
     // Thêm vào body
     var div = document.createElement('div');
     div.innerHTML = html;
     document.body.appendChild(div.firstElementChild);
+
+    // Realtime update: lắng nghe sự thay đổi của EMP._revenueCache
+    // Dùng interval kiểm tra mỗi 2 giây (không cần listener Firebase riêng)
+    var checkInterval = setInterval(function() {
+        var popupEl = document.getElementById(popupId);
+        if (!popupEl) {
+            // Popup đã đóng, dừng interval
+            clearInterval(checkInterval);
+            return;
+        }
+        var newResult = _renderRevenuePopup();
+        var tbodyEl = document.getElementById(popupId + '_tbody');
+        var totalRevEl = document.getElementById(popupId + '_totalRev');
+        var totalBonusEl = document.getElementById(popupId + '_totalBonus');
+        var summaryEl = document.getElementById(popupId + '_summary');
+        if (tbodyEl) tbodyEl.innerHTML = newResult.tbody;
+        if (totalRevEl) totalRevEl.textContent = empFormatCurrency(newResult.totalRevenue);
+        if (totalBonusEl) totalBonusEl.textContent = empFormatCurrency(newResult.totalBonus);
+        if (summaryEl) summaryEl.innerHTML = '🏆 Tổng thưởng doanh thu: <strong>' + empFormatCurrency(newResult.totalBonus) + '</strong>';
+    }, 2000);
 }
 
 // ============================================================
@@ -811,10 +845,21 @@ function empInitDailyRevenueListener() {
     var ref = firebase.database().ref(shopId + '/daily_revenue');
     var listener = ref.on('value', function(snapshot) {
         var data = snapshot.val() || {};
-        // Cập nhật cache: mỗi key là dateStr YYYY-MM-DD, value là total
+        // Cập nhật cache: mỗi key là dateStr YYYY-MM-DD
+        // Ưu tiên tính từ cash+transfer+grab (chính xác hơn total, vì total có thể bị sai)
         for (var dateStr in data) {
-            if (data.hasOwnProperty(dateStr) && data[dateStr] && data[dateStr].total) {
-                EMP._revenueCache[dateStr] = data[dateStr].total;
+            if (data.hasOwnProperty(dateStr) && data[dateStr]) {
+                var dayData = data[dateStr];
+                if (typeof dayData === 'number') {
+                    EMP._revenueCache[dateStr] = dayData;
+                } else if (typeof dayData === 'object') {
+                    // Ưu tiên cash+transfer+grab nếu có
+                    if (dayData.cash !== undefined || dayData.transfer !== undefined || dayData.grab !== undefined) {
+                        EMP._revenueCache[dateStr] = (dayData.cash || 0) + (dayData.transfer || 0) + (dayData.grab || 0);
+                    } else if (dayData.total) {
+                        EMP._revenueCache[dateStr] = dayData.total;
+                    }
+                }
             }
         }
         // Refresh UI nếu đang mở detail
@@ -860,9 +905,21 @@ function empLoadRevenueData(year, month) {
         var data = snapshot.val() || {};
         var hasData = false;
         for (var dateStr in data) {
-            if (data.hasOwnProperty(dateStr) && data[dateStr] && data[dateStr].total) {
-                EMP._revenueCache[dateStr] = data[dateStr].total;
-                hasData = true;
+            if (data.hasOwnProperty(dateStr) && data[dateStr]) {
+                var dayData = data[dateStr];
+                if (typeof dayData === 'number') {
+                    EMP._revenueCache[dateStr] = dayData;
+                    hasData = true;
+                } else if (typeof dayData === 'object') {
+                    // Uu tien cash+transfer+grab neu co
+                    if (dayData.cash !== undefined || dayData.transfer !== undefined || dayData.grab !== undefined) {
+                        EMP._revenueCache[dateStr] = (dayData.cash || 0) + (dayData.transfer || 0) + (dayData.grab || 0);
+                        hasData = true;
+                    } else if (dayData.total) {
+                        EMP._revenueCache[dateStr] = dayData.total;
+                        hasData = true;
+                    }
+                }
             }
         }
 

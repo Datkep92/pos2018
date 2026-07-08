@@ -112,6 +112,7 @@
             <div class="tab-btn" data-tab="inventory" style="display:none;">📋 Menu - Tồn kho</div>
             <div class="tab-btn" data-tab="cost">💰 Chi phí</div>
             <div class="tab-btn" data-tab="manager" style="display:none;">⚙️ Quản lý</div>
+            <div class="tab-btn" data-tab="admin" id="adminTabBtn" style="display:none;">👑 Admin</div>
             <div class="tab-btn" data-tab="settings">⚙️</div>
         </div>
 
@@ -514,6 +515,21 @@
                 </div>
             </div>
 
+            <!-- TAB ADMIN MASTER (chỉ hiện khi đăng nhập với shopCode='master') -->
+            <div id="adminView" class="tab-content" style="display:none;">
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3 class="settings-title">👑 Admin Master - Quản lý POS</h3>
+                        <div style="font-size:12px;color:#888;margin-bottom:10px;">
+                            Quản lý tất cả POS đã đăng ký. Nhấn "Đăng nhập" để truy cập POS với tài khoản admin.
+                        </div>
+                        <div id="adminShopList">
+                            <div class="permission-loading">Đang tải danh sách POS...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- TAB CÀI ĐẶT -->
             <div id="settingsView" class="tab-content">
                 <div class="settings-container">
@@ -529,26 +545,33 @@
                             <span class="collapse-icon">▼</span>
                         </h3>
                         <div class="collapsible-body" style="display:block;">
+                        <!-- Số dư quỹ -->
                         <div class="settings-field">
                             <label class="settings-label">Số dư quỹ hiện tại</label>
                             <div style="font-size:24px;font-weight:700;color:#fbbf24;padding:8px 0;" id="fundBalanceDisplay">0đ</div>
                         </div>
-                        <div class="settings-field">
-                            <label class="settings-label">Rút tiền từ quỹ</label>
-                            <div class="settings-input-group">
-                                <input type="number" id="fundWithdrawInput" class="form-input" placeholder="0" min="0" style="flex:1;">
-                                <button class="settings-btn settings-btn-primary" onclick="staffWithdrawFund()" style="white-space:nowrap;">💸 Rút</button>
+
+                        <!-- Hành động: Rút quỹ + Nhập quỹ ban đầu (Admin) -->
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                            <div style="flex:1;min-width:200px;">
+                                <label class="settings-label">Rút tiền từ quỹ</label>
+                                <div class="settings-input-group">
+                                    <input type="number" id="fundWithdrawInput" class="form-input" placeholder="0" min="0" style="flex:1;">
+                                    <button class="settings-btn settings-btn-primary" onclick="staffWithdrawFund()" style="white-space:nowrap;">💸 Rút</button>
+                                </div>
+                                <div class="settings-hint">Rút tiền từ quỹ thưởng trách nhiệm. Tự động tạo phiếu chi tại két POS.</div>
                             </div>
-                            <div class="settings-hint">Rút tiền từ quỹ thưởng trách nhiệm. Số tiền rút sẽ tự động tạo phiếu chi tại két POS.</div>
-                        </div>
-                        <div class="settings-field" id="fundInitialField">
-                            <label class="settings-label">Nhập quỹ ban đầu</label>
-                            <div class="settings-input-group">
-                                <input type="number" id="fundInitialInput" class="form-input" placeholder="0" min="0" style="flex:1;">
-                                <button class="settings-btn settings-btn-primary" onclick="saveFundInitial()" style="white-space:nowrap;">💾 Cập nhật</button>
+                            <div style="flex:1;min-width:200px;" id="fundInitialField">
+                                <label class="settings-label">Nhập quỹ ban đầu</label>
+                                <div class="settings-input-group">
+                                    <input type="number" id="fundInitialInput" class="form-input" placeholder="0" min="0" style="flex:1;">
+                                    <button class="settings-btn settings-btn-primary" onclick="saveFundInitial()" style="white-space:nowrap;">💾 Cập nhật</button>
+                                </div>
+                                <div class="settings-hint">Số tiền quỹ ban đầu (cộng dồn vào số dư hiện tại)</div>
                             </div>
-                            <div class="settings-hint">Số tiền quỹ ban đầu (cộng dồn vào số dư hiện tại)</div>
                         </div>
+
+                        <!-- Ẩn quỹ với nhân viên (Admin) -->
                         <div class="settings-field" id="fundHideForStaffField">
                             <label class="settings-label">Ẩn quỹ với nhân viên</label>
                             <div class="settings-input-group">
@@ -560,23 +583,13 @@
                             </div>
                             <div class="settings-hint">Bật để ẩn toàn bộ phần quỹ thưởng trách nhiệm khỏi giao diện nhân viên</div>
                         </div>
-                        <div class="settings-field" id="fundAutoField">
-                            <label class="settings-label">Tự động tính quỹ</label>
-                            <div class="settings-input-group" style="margin-bottom:6px;">
-                                <input type="text" id="fundAutoFromDate" class="form-input" placeholder="dd/mm/yyyy" style="flex:1;min-width:0;" maxlength="10" oninput="formatDateInput(this)" onblur="formatDateInput(this)">
-                                <span style="color:#64748b;padding:0 4px;">→</span>
-                                <input type="text" id="fundAutoToDate" class="form-input" placeholder="dd/mm/yyyy" style="flex:1;min-width:0;" maxlength="10" oninput="formatDateInput(this)" onblur="formatDateInput(this)">
-                                <button class="settings-btn settings-btn-primary" onclick="autoCalculateFundForPeriodFromUI()" style="white-space:nowrap;">🔢 Tính</button>
-                            </div>
-                            <div class="settings-hint">Tự động tính 1% doanh thu và bổ sung vào quỹ cho khoảng thời gian. Các ngày đã tính sẽ bỏ qua.</div>
-                        </div>
+
+                        <!-- Bảng log lịch sử quỹ -->
                         <div class="settings-field">
-                            <label class="settings-label">Lịch sử quỹ</label>
-                            <div id="fundHistoryList" style="max-height:300px;overflow-y:auto;background:#1e293b;border-radius:8px;padding:8px;border:1px solid #334155;">
-                                <div style="color:#64748b;font-size:12px;text-align:center;padding:12px;">Đang tải...</div>
-                            </div>
-                            <div id="fundHistoryShowMore" style="display:none;text-align:center;margin-top:4px;">
-                                <button class="settings-btn" onclick="loadMoreFundHistory()" style="font-size:12px;padding:4px 12px;">📋 Xem thêm</button>
+                            <label class="settings-label">Lịch sử giao dịch quỹ</label>
+                            <div class="settings-hint" style="margin-bottom:8px;">📌 Tự động trích 1% doanh thu (tiền mặt + chuyển khoản + grab) mỗi ngày. Admin có thể xóa giao dịch thưởng.</div>
+                            <div id="fundLogList" class="fund-log-container">
+                                <div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">Đang tải...</div>
                             </div>
                         </div>
                         </div>
@@ -848,6 +861,54 @@
                             <button class="settings-btn settings-btn-secondary" onclick="clearEsp32Config()">🗑️ Xóa</button>
                         </div>
                         <div id="esp32ConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
+                    </div>
+
+                    <!-- PHẦN CẤU HÌNH FIREBASE RIÊNG (chỉ hiện khi admin) -->
+                    <div class="settings-section collapsible-section" id="settingsFirebaseSection" style="display:none;">
+                        <h3 class="settings-title collapsible-header" onclick="toggleSettingsSection('settingsFirebaseSection')">
+                            🔥 Cấu hình Firebase riêng
+                            <span class="collapse-icon">▶</span>
+                        </h3>
+                        <div class="collapsible-body" style="display:block;">
+                        <div style="font-size:12px;color:#888;margin-bottom:10px;">
+                            ⚠️ Chỉ admin POS có config Firebase riêng mới thấy section này.
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">API Key</label>
+                            <input type="text" id="fbApiKey" class="form-input" placeholder="AIzaSy...">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Auth Domain</label>
+                            <input type="text" id="fbAuthDomain" class="form-input" placeholder="project.firebaseapp.com">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Database URL</label>
+                            <input type="text" id="fbDatabaseURL" class="form-input" placeholder="https://project-default-rtdb.firebaseio.com">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Project ID</label>
+                            <input type="text" id="fbProjectId" class="form-input" placeholder="project-id">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Storage Bucket</label>
+                            <input type="text" id="fbStorageBucket" class="form-input" placeholder="project.appspot.com">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">Messaging Sender ID</label>
+                            <input type="text" id="fbMessagingSenderId" class="form-input" placeholder="123456789">
+                        </div>
+                        <div class="settings-field">
+                            <label class="settings-label">App ID</label>
+                            <input type="text" id="fbAppId" class="form-input" placeholder="1:123456789:web:abc123">
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="testFirebaseConfig()" style="background:#22c55e;">🔌 Kiểm tra kết nối</button>
+                            <button class="settings-btn settings-btn-primary" onclick="saveFirebaseConfig()">💾 Lưu cấu hình</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="clearFirebaseConfig()">🗑️ Xóa (dùng Firebase mặc định)</button>
+                            <button class="settings-btn settings-btn-secondary" onclick="syncDataToNewFirebase()" style="background:#f97316;">🔄 Đồng bộ dữ liệu sang Firebase mới</button>
+                        </div>
+                        <div id="firebaseConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
                         </div>
                     </div>
 
@@ -1442,7 +1503,30 @@
     <!-- Employees management - Modal quản lý nhân viên (thay thế staff logic trong auth.js, settings.js, manager-detail.js) -->
     <script src="employees.js"></script>
     
-    <!-- Settings + Đếm tiền nhanh -->
+    <!-- Settings modules (tách từ settings.js) -->
+    <script src="settings-core.js"></script>
+    <script src="settings-escape.js"></script>
+    <script src="settings-cash-counter.js"></script>
+    <script src="settings-manager-pickup.js"></script>
+    <script src="settings-date.js"></script>
+    <script src="settings-alert.js"></script>
+    <script src="settings-close-day.js"></script>
+    <script src="settings-toast.js"></script>
+    <script src="settings-init.js"></script>
+    <script src="settings-staff.js"></script>
+    <script src="settings-shop-info.js"></script>
+    <script src="settings-telegram.js"></script>
+    <script src="settings-lock-config.js"></script>
+    <script src="settings-permissions.js"></script>
+    <script src="settings-data-fix.js"></script>
+    <script src="settings-esp32.js"></script>
+    <script src="settings-modals.js"></script>
+    <script src="settings-print.js"></script>
+    <script src="settings-fund.js"></script>
+    <script src="settings-firebase-config.js"></script>
+    <script src="settings-visibility.js"></script>
+    
+    <!-- Settings + Đếm tiền nhanh (thin loader) -->
     <script src="settings.js"></script>
     
     <!-- HEADER DƯỚI ĐÁY -->
