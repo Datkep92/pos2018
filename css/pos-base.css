@@ -1141,6 +1141,52 @@ body {
 .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-secondary); }
 .auth-switch span { color: var(--primary); font-weight: 600; cursor: pointer; }
 
+/* Ghi nhớ đăng nhập */
+.auth-remember {
+    margin-bottom: 12px;
+    text-align: left;
+}
+.remember-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.remember-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+/* Nút liên hệ support Zalo */
+.auth-support {
+    text-align: center;
+    margin-top: 12px;
+}
+.support-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #94a3b8;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid #334155;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+.support-btn:hover {
+    color: #f97316;
+    border-color: #f97316;
+    background: rgba(249, 115, 22, 0.1);
+}
+
 /* ========== LUNAR NOTIFICATION BANNER ========== */
 .lunar-notification-banner {
     background: linear-gradient(135deg, #fef3c7, #fde68a);
