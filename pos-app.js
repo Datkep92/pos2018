@@ -448,6 +448,10 @@ function switchTab(tabId) {
             if (typeof applyExpenseRoleRestrictions === 'function') applyExpenseRoleRestrictions();
         } else if (tabId === 'manager') {
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
+        } else if (tabId === 'admin') {
+            if (typeof loadAdminDashboard === 'function') {
+                setTimeout(loadAdminDashboard, 50);
+            }
         } else if (tabId === 'settings') {
             if (typeof initSettingsTab === 'function') {
                 initSettingsTab();

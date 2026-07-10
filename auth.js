@@ -45,8 +45,20 @@ function showLoginScreen() {
     if (loginForm) loginForm.style.display = 'block';
     if (registerForm) registerForm.style.display = 'none';
     
-    // Focus vào ô nhập mã POS
+    // Khôi phục thông tin đăng nhập đã lưu
+    var savedShopCode = localStorage.getItem('pos_saved_shopCode');
+    var savedUsername = localStorage.getItem('pos_saved_username');
+    var savedRemember = localStorage.getItem('pos_remember_login');
+    
     var shopCodeInput = document.getElementById('loginShopCode');
+    var usernameInput = document.getElementById('loginUsername');
+    var rememberCheck = document.getElementById('rememberLogin');
+    
+    if (shopCodeInput && savedShopCode) shopCodeInput.value = savedShopCode;
+    if (usernameInput && savedUsername) usernameInput.value = savedUsername;
+    if (rememberCheck) rememberCheck.checked = (savedRemember === 'true');
+    
+    // Focus vào ô nhập mã POS
     if (shopCodeInput) setTimeout(function() { shopCodeInput.focus(); }, 300);
 }
 
@@ -96,12 +108,31 @@ function handleLogin() {
     DB.login(code, user, pass).then(function(userData) {
         // Đăng nhập thành công
         if (errorEl) errorEl.innerText = '';
-        hideLoginScreen();
-        applyRoleBasedUI(userData);
-        showToast('Đăng nhập thành công! Chào ' + userData.displayName, 'success');
         
-        // Reload lại dữ liệu cho shop mới
-        reloadAppData();
+        // Lưu thông tin đăng nhập nếu checkbox "Ghi nhớ" được chọn
+        var rememberCheck = document.getElementById('rememberLogin');
+        if (rememberCheck && rememberCheck.checked) {
+            localStorage.setItem('pos_saved_shopCode', code);
+            localStorage.setItem('pos_saved_username', user);
+            localStorage.setItem('pos_remember_login', 'true');
+        } else {
+            localStorage.removeItem('pos_saved_shopCode');
+            localStorage.removeItem('pos_saved_username');
+            localStorage.removeItem('pos_remember_login');
+        }
+        
+        // FIX: Đợi reload dữ liệu xong mới hiển thị UI
+        // Tránh hiển thị dữ liệu mặc định/rỗng trước khi load xong
+        reloadAppData().then(function() {
+            hideLoginScreen();
+            applyRoleBasedUI(userData);
+            showToast('Đăng nhập thành công! Chào ' + userData.displayName, 'success');
+        }).catch(function() {
+            // Nếu reload lỗi vẫn hiển thị UI để user có thể thao tác
+            hideLoginScreen();
+            applyRoleBasedUI(userData);
+            showToast('Đăng nhập thành công!', 'success');
+        });
     }).catch(function(err) {
         if (errorEl) errorEl.innerText = err.message || 'Đăng nhập thất bại';
         if (btn) { btn.disabled = false; btn.innerText = 'Đăng nhập'; }
@@ -170,10 +201,17 @@ function handleLogout() {
 function applyRoleBasedUI(user) {
     if (!user) return;
     
+    // Xác định role thực tế: admin của POS mặc định (shopId === 'shop_default') cũng là master admin
+    var effectiveRole = user.role;
+    var isMasterAdmin = (user.role === 'master_admin') || (user.role === 'admin' && user.shopId === 'shop_default');
+    if (isMasterAdmin) {
+        effectiveRole = 'master_admin';
+    }
+    
     // Cập nhật tên nhân viên trên header
     var staffNameEl = document.querySelector('.staff-name');
     if (staffNameEl) {
-        var roleIcon = user.role === 'admin' ? '🛡️' : (user.role === 'master_admin' ? '👑' : '👤');
+        var roleIcon = effectiveRole === 'master_admin' ? '👑' : (user.role === 'admin' ? '🛡️' : '👤');
         staffNameEl.innerHTML = roleIcon + ' ' + escapeHtml(user.displayName);
         staffNameEl.style.cursor = 'pointer';
         staffNameEl.title = 'Đăng xuất';
@@ -191,14 +229,24 @@ function applyRoleBasedUI(user) {
     var adminTab = document.querySelector('.tab-btn[data-tab="admin"]');
     
     if (user.role === 'master_admin') {
-        // Master Admin: chỉ thấy tab Admin Dashboard + Settings
+        // Master Admin thực sự: chỉ thấy tab Admin + Settings
         if (managerTab) managerTab.style.display = 'none';
         if (staffTab) staffTab.style.display = 'none';
         if (inventoryTab) inventoryTab.style.display = 'none';
         if (reportTab) reportTab.style.display = 'none';
         if (costTab) costTab.style.display = 'none';
         if (adminTab) adminTab.style.display = '';
-        // Load danh sách POS
+        if (typeof loadAdminDashboard === 'function') {
+            setTimeout(loadAdminDashboard, 100);
+        }
+    } else if (isMasterAdmin) {
+        // Admin của POS mặc định: thấy cả tab quản lý + tab Admin
+        if (managerTab) managerTab.style.display = '';
+        if (staffTab) staffTab.style.display = '';
+        if (inventoryTab) inventoryTab.style.display = '';
+        if (reportTab) reportTab.style.display = '';
+        if (costTab) costTab.style.display = '';
+        if (adminTab) adminTab.style.display = '';
         if (typeof loadAdminDashboard === 'function') {
             setTimeout(loadAdminDashboard, 100);
         }
@@ -254,15 +302,87 @@ function reloadAppData() {
     
     // Kiểm tra online và force sync nếu cần
     if (DB.isOnline() && typeof DB.forceSyncFromFirebase === 'function') {
-        DB.forceSyncFromFirebase().then(function() {
+        return DB.forceSyncFromFirebase().then(function() {
             return doLoad();
         }).catch(function(err) {
             console.warn('⚠️ Force sync after login failed:', err);
             return doLoad();
         });
     } else {
-        doLoad();
+        return doLoad();
     }
+}
+
+// ========== ĐỔI MẬT KHẨU ==========
+
+function handleChangePassword() {
+    var currentPassEl = document.getElementById('changePassCurrent');
+    var newPassEl = document.getElementById('changePassNew');
+    var confirmPassEl = document.getElementById('changePassConfirm');
+    var statusEl = document.getElementById('changePasswordStatus');
+    
+    if (!currentPassEl || !newPassEl || !confirmPassEl || !statusEl) return;
+    
+    var currentPass = currentPassEl.value;
+    var newPass = newPassEl.value;
+    var confirmPass = confirmPassEl.value;
+    
+    // Kiểm tra đầu vào
+    if (!currentPass) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Vui lòng nhập mật khẩu hiện tại</span>';
+        currentPassEl.focus();
+        return;
+    }
+    if (!newPass) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Vui lòng nhập mật khẩu mới</span>';
+        newPassEl.focus();
+        return;
+    }
+    if (newPass.length < 4) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Mật khẩu mới phải có ít nhất 4 ký tự</span>';
+        newPassEl.focus();
+        return;
+    }
+    if (newPass !== confirmPass) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Mật khẩu xác nhận không khớp</span>';
+        confirmPassEl.focus();
+        return;
+    }
+    
+    // Kiểm tra mật khẩu hiện tại
+    var user = DB.getCurrentUser();
+    if (!user) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Bạn chưa đăng nhập</span>';
+        return;
+    }
+    
+    // Chỉ admin mới được đổi mật khẩu
+    if (user.role !== 'admin' && user.role !== 'master_admin') {
+        statusEl.innerHTML = '<span style="color:#ef4444;">Chỉ admin mới có thể đổi mật khẩu</span>';
+        return;
+    }
+    
+    // Xác thực mật khẩu hiện tại (so sánh với session đã lưu)
+    // Lưu ý: password được lưu trong session nhưng không hiển thị trong currentUser
+    // Nên cần kiểm tra qua DB.login() để xác thực
+    statusEl.innerHTML = '<span style="color:#fbbf24;">⏳ Đang xác thực...</span>';
+    
+    // Dùng DB.login để xác thực mật khẩu hiện tại
+    DB.login(user.shopCode, user.username, currentPass).then(function() {
+        // Xác thực thành công, tiến hành đổi mật khẩu
+        statusEl.innerHTML = '<span style="color:#fbbf24;">⏳ Đang đổi mật khẩu...</span>';
+        
+        return DB.changePassword(user.shopId, user.id, newPass);
+    }).then(function() {
+        statusEl.innerHTML = '<span style="color:#22c55e;">✅ Đổi mật khẩu thành công!</span>';
+        // Xóa các trường nhập
+        if (currentPassEl) currentPassEl.value = '';
+        if (newPassEl) newPassEl.value = '';
+        if (confirmPassEl) confirmPassEl.value = '';
+        showToast('🔑 Đã đổi mật khẩu thành công', 'success');
+    }).catch(function(err) {
+        statusEl.innerHTML = '<span style="color:#ef4444;">❌ ' + (err.message || 'Đổi mật khẩu thất bại') + '</span>';
+    });
 }
 
 // ========== QUẢN LÝ NHÂN VIÊN (ADMIN) ==========
@@ -286,173 +406,3 @@ function renderStaffList(staffs) {
 function showAddStaffForm() {}
 function hideAddStaffForm() {}
 function handleAddStaff() {}
-
-// ========== MASTER ADMIN: QUẢN LÝ DANH SÁCH POS ==========
-
-function loadAdminDashboard() {
-    var listEl = document.getElementById('adminShopList');
-    if (!listEl) return;
-    
-    listEl.innerHTML = '<div class="permission-loading">Đang tải danh sách POS...</div>';
-    
-    DB.getAllShops().then(function(shops) {
-        if (!shops || shops.length === 0) {
-            listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#888;">Chưa có POS nào được đăng ký.</div>';
-            return;
-        }
-        
-        var html = '<div style="overflow-x:auto;">';
-        html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-        html += '<thead><tr style="background:#f1f5f9;">';
-        html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #e2e8f0;">Mã POS</th>';
-        html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #e2e8f0;">Tên quán</th>';
-        html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #e2e8f0;">Tài khoản</th>';
-        html += '<th style="padding:8px;text-align:left;border-bottom:2px solid #e2e8f0;">Mật khẩu</th>';
-        html += '<th style="padding:8px;text-align:center;border-bottom:2px solid #e2e8f0;">Trạng thái</th>';
-        html += '<th style="padding:8px;text-align:center;border-bottom:2px solid #e2e8f0;">Firebase</th>';
-        html += '<th style="padding:8px;text-align:center;border-bottom:2px solid #e2e8f0;">Thao tác</th>';
-        html += '</tr></thead><tbody>';
-        
-        shops.forEach(function(shop) {
-            var statusColor = shop.status === 'active' ? '#22c55e' : (shop.status === 'locked' ? '#ef4444' : '#888');
-            var statusText = shop.status === 'active' ? '✅ Hoạt động' : (shop.status === 'locked' ? '🔒 Đã khóa' : '🗑️ Đã xóa');
-            var fbText = shop.hasCustomConfig ? '🔥 Riêng' : '☁️ Mặc định';
-            
-            html += '<tr style="border-bottom:1px solid #f1f5f9;">';
-            html += '<td style="padding:8px;font-weight:bold;">' + escapeHtml(shop.shopCode) + '</td>';
-            html += '<td style="padding:8px;">' + escapeHtml(shop.shopName) + '</td>';
-            html += '<td style="padding:8px;">' + escapeHtml(shop.adminUsername) + '</td>';
-            html += '<td style="padding:8px;">';
-            html += '<span id="pass_' + shop.shopCode + '" style="display:none;">' + escapeHtml(shop.adminPassword) + '</span>';
-            html += '<span id="passMask_' + shop.shopCode + '">••••••</span>';
-            html += ' <button onclick="togglePass(\'' + shop.shopCode + '\')" style="background:none;border:none;cursor:pointer;font-size:12px;">👁️</button>';
-            html += '</td>';
-            html += '<td style="padding:8px;text-align:center;"><span style="color:' + statusColor + ';">' + statusText + '</span></td>';
-            html += '<td style="padding:8px;text-align:center;">' + fbText + '</td>';
-            html += '<td style="padding:8px;text-align:center;white-space:nowrap;">';
-            
-            // Nút đăng nhập vào POS này
-            html += '<button onclick="masterLoginToShop(\'' + shop.shopCode + '\',\'' + escapeHtml(shop.adminUsername) + '\',\'' + escapeHtml(shop.adminPassword) + '\')" style="background:#3b82f6;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px;">🔑 Đăng nhập</button>';
-            
-            // Nếu đang active -> hiện nút Khóa
-            if (shop.status === 'active') {
-                html += '<button onclick="masterToggleShopStatus(\'' + shop.shopCode + '\',\'locked\')" style="background:#f59e0b;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px;">🔒 Khóa</button>';
-            }
-            // Nếu đang locked -> hiện nút Mở khóa
-            if (shop.status === 'locked') {
-                html += '<button onclick="masterToggleShopStatus(\'' + shop.shopCode + '\',\'active\')" style="background:#22c55e;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px;">🔓 Mở khóa</button>';
-            }
-            // Nút Xóa (chỉ khi không phải active)
-            if (shop.status !== 'deleted') {
-                html += '<button onclick="masterDeleteShop(\'' + shop.shopCode + '\')" style="background:#ef4444;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px;">🗑️ Xóa</button>';
-            }
-            
-            // Nút sửa thông tin admin
-            html += '<br><button onclick="masterEditAdmin(\'' + shop.shopCode + '\',\'' + shop.shopId + '\',\'' + escapeHtml(shop.adminUsername) + '\')" style="background:#64748b;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin:2px;">✏️ Sửa TK</button>';
-            
-            html += '</td>';
-            html += '</tr>';
-        });
-        
-        html += '</tbody></table>';
-        html += '<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Tổng số: ' + shops.length + ' POS</div>';
-        html += '</div>';
-        
-        listEl.innerHTML = html;
-    }).catch(function(err) {
-        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;">❌ Lỗi tải danh sách: ' + (err.message || 'Unknown error') + '</div>';
-    });
-}
-
-// Hiện/ẩn mật khẩu
-function togglePass(shopCode) {
-    var passEl = document.getElementById('pass_' + shopCode);
-    var maskEl = document.getElementById('passMask_' + shopCode);
-    if (!passEl || !maskEl) return;
-    if (passEl.style.display === 'none') {
-        passEl.style.display = 'inline';
-        maskEl.style.display = 'none';
-    } else {
-        passEl.style.display = 'none';
-        maskEl.style.display = 'inline';
-    }
-}
-
-// Master Admin đăng nhập vào POS cụ thể
-function masterLoginToShop(shopCode, username, password) {
-    if (!confirm('Đăng nhập vào POS "' + shopCode + '" với tài khoản admin?\nSau đó có thể đăng xuất để quay lại Master Admin.')) return;
-    
-    DB.login(shopCode, username, password).then(function(userData) {
-        hideLoginScreen();
-        applyRoleBasedUI(userData);
-        showToast('✅ Đã đăng nhập vào POS ' + shopCode, 'success');
-        reloadAppData();
-    }).catch(function(err) {
-        showToast('❌ ' + (err.message || 'Đăng nhập thất bại'), 'error');
-    });
-}
-
-// Master Admin khóa/mở khóa POS
-function masterToggleShopStatus(shopCode, newStatus) {
-    var actionText = newStatus === 'locked' ? 'khóa' : 'mở khóa';
-    if (!confirm('Bạn có chắc muốn ' + actionText + ' POS "' + shopCode + '"?')) return;
-    
-    DB.updateShopStatus(shopCode, newStatus).then(function() {
-        showToast('✅ Đã ' + actionText + ' POS ' + shopCode, 'success');
-        loadAdminDashboard(); // Reload danh sách
-    }).catch(function(err) {
-        showToast('❌ Lỗi: ' + (err.message || 'Thất bại'), 'error');
-    });
-}
-
-// Master Admin xóa POS
-function masterDeleteShop(shopCode) {
-    if (!confirm('⚠️ Bạn có chắc muốn xóa POS "' + shopCode + '"?\nPOS sẽ không thể đăng nhập được nữa.')) return;
-    if (!confirm('Xác nhận lần cuối: Xóa POS "' + shopCode + '"?')) return;
-    
-    DB.updateShopStatus(shopCode, 'deleted').then(function() {
-        showToast('✅ Đã xóa POS ' + shopCode, 'success');
-        loadAdminDashboard();
-    }).catch(function(err) {
-        showToast('❌ Lỗi: ' + (err.message || 'Thất bại'), 'error');
-    });
-}
-
-// Master Admin sửa thông tin đăng nhập admin của POS
-function masterEditAdmin(shopCode, shopId, currentUsername) {
-    var newUsername = prompt('Nhập tên đăng nhập mới cho POS "' + shopCode + '":', currentUsername);
-    if (newUsername === null) return; // Hủy
-    
-    var newPassword = prompt('Nhập mật khẩu mới cho POS "' + shopCode + '":');
-    if (newPassword === null) return; // Hủy
-    
-    if (!newUsername && !newPassword) {
-        showToast('⚠️ Vui lòng nhập ít nhất tên đăng nhập hoặc mật khẩu mới', 'warning');
-        return;
-    }
-    
-    DB.updateShopAdmin(shopCode, shopId, newUsername || null, newPassword || null).then(function() {
-        showToast('✅ Đã cập nhật thông tin admin cho POS ' + shopCode, 'success');
-        loadAdminDashboard();
-    }).catch(function(err) {
-        showToast('❌ Lỗi: ' + (err.message || 'Thất bại'), 'error');
-    });
-}
-
-// Export global
-window.initAuth = initAuth;
-window.handleLogin = handleLogin;
-window.handleRegister = handleRegister;
-window.handleLogout = handleLogout;
-window.showRegisterForm = showRegisterForm;
-window.showLoginForm = showLoginForm;
-window.openStaffManager = openStaffManager;
-window.showAddStaffForm = showAddStaffForm;
-window.hideAddStaffForm = hideAddStaffForm;
-window.handleAddStaff = handleAddStaff;
-window.loadAdminDashboard = loadAdminDashboard;
-window.togglePass = togglePass;
-window.masterLoginToShop = masterLoginToShop;
-window.masterToggleShopStatus = masterToggleShopStatus;
-window.masterDeleteShop = masterDeleteShop;
-window.masterEditAdmin = masterEditAdmin;

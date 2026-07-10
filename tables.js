@@ -35,6 +35,16 @@ function _getLockEndMinute() {
 // Biến global lưu ID toast thanh toán để có thể ẩn sau khi xử lý xong
 var _paymentToastId = null;
 
+// Helper: hủy toast cũ (nếu có) trước khi tạo toast mới, tránh treo toast
+function _safeShowPaymentToast(msg, type, duration) {
+    if (_paymentToastId) {
+        hideToast(_paymentToastId);
+        _paymentToastId = null;
+    }
+    _paymentToastId = showToast(msg, type || 'info', duration || 0);
+    return _paymentToastId;
+}
+
 // FIX: Flag để tránh kiểm tra credit 2 lần khi qua _changeToastPay
 // _changeToastPay lưu tiền dư vào credit, sau đó gọi paymentAtTableWithCredit
 // và _processPaymentDirect - cả 2 đều kiểm tra credit, gây trừ credit 2 lần
@@ -602,7 +612,7 @@ function _processPaymentDirect(tableId, method) {
         
         // OPTIMIZE: Đóng modal ngay lập tức để UI không bị đơ
         if (currentTableDetailId === tableId) closeModal('tableDetailModal');
-        _paymentToastId = showToast('⏳ Đang xử lý thanh toán...', 'info', 0);
+        _safeShowPaymentToast('⏳ Đang xử lý thanh toán...', 'info', 0);
         
         // OPTIMIZE: Suppress realtime notifications trong quá trình batch operations
         DB.suppressRealtime();
@@ -660,8 +670,7 @@ function _processPaymentDirect(tableId, method) {
         
         stockAndDeductPromise.then(function(stockOk) {
             if (!stockOk) {
-                hideToast(_paymentToastId);
-                DB.flushRealtime();
+                _cleanupPaymentToast();
                 return;
             }
             
@@ -716,7 +725,7 @@ function _processPaymentDirect(tableId, method) {
                         });
                     }
                     
-                    hideToast(_paymentToastId);
+                    _cleanupPaymentToast();
                     var msg = '✅ Thanh toán ' + formatMoney(finalAmount) + ' thành công';
                     if (creditUsed > 0) msg += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)';
                     showToast(msg, 'success');
@@ -724,8 +733,7 @@ function _processPaymentDirect(tableId, method) {
                     _dispatchPosCashUpdate();
                 });
             }).catch(function(err) {
-                hideToast(_paymentToastId);
-                DB.flushRealtime();
+                _cleanupPaymentToast();
                 showToast('❌ Lỗi thanh toán: ' + (err.message || err), 'error');
             });
         });
@@ -755,12 +763,6 @@ function cashPayWithDenom(tableId, givenAmount) {
         _changeToastTableId = tableId;
         _changeToastGivenAmount = givenAmount;
         
-        // Kiểm tra nếu bàn có gán khách hàng và có tiền dư
-        var creditNote = '';
-        if (change > 0 && table.customerId) {
-            creditNote = '<div style="font-size:12px;color:#d97706;margin-top:6px;">💡 Khách có ' + formatMoney(change) + ' tiền dư sẽ được lưu làm tiền trả trước</div>';
-        }
-        
         // Tạo toast đặc biệt to, nổi bật
         var toast = document.createElement('div');
         toast.className = 'change-toast';
@@ -769,7 +771,6 @@ function cashPayWithDenom(tableId, givenAmount) {
             '<div class="change-label">💵 TIỀN DƯ</div>' +
             '<div class="change-given">Khách đưa: ' + formatMoney(givenAmount) + '</div>' +
             '<div class="change-amount">' + formatMoney(change) + '</div>' +
-            creditNote +
             '<div style="display:flex;gap:8px;margin-top:10px;">' +
                 '<button onclick="_changeToastPay()" style="flex:1;padding:10px;border-radius:40px;border:none;background:#f97316;color:#fff;font-weight:700;font-size:14px;cursor:pointer;-webkit-appearance:none;">✅ Thanh toán</button>' +
                 '<button onclick="_hideChangeToast()" style="padding:10px 16px;border-radius:40px;border:none;background:#475569;color:#fff;font-size:13px;cursor:pointer;-webkit-appearance:none;">✕</button>' +
@@ -860,35 +861,8 @@ function _changeToastPay() {
     var givenAmount = _changeToastGivenAmount;
     _hideChangeToast();
     if (tid) {
-        // Lưu tiền dư vào credit của khách nếu bàn có gán khách
-        _getTableFromCache(tid).then(function(table) {
-            if (!table) {
-                paymentAtTableWithCredit(tid, 'cash');
-                return;
-            }
-            var change = givenAmount - (table.total || 0);
-            if (change > 0 && table.customerId) {
-                // Có tiền dư và bàn có gán khách -> lưu credit trước
-                var customer = null;
-                for (var i = 0; i < customers.length; i++) {
-                    if (customers[i].id === table.customerId) {
-                        customer = customers[i];
-                        break;
-                    }
-                }
-                if (customer) {
-                    addCustomerCredit(customer.id, change, 'Trả dư khi thanh toán bàn ' + table.name).then(function() {
-                        showToast('💰 Đã lưu ' + formatMoney(change) + ' tiền dư cho ' + customer.name, 'success');
-                        // FIX: Đánh dấu đã qua _changeToastPay để paymentAtTableWithCredit
-                        // và _processPaymentDirect không kiểm tra credit thêm lần nữa
-                        _skipCreditCheck = true;
-                        paymentAtTableWithCredit(tid, 'cash');
-                    });
-                    return;
-                }
-            }
-            paymentAtTableWithCredit(tid, 'cash');
-        });
+        // Chỉ thanh toán, không lưu tiền dư vào credit
+        paymentAtTableWithCredit(tid, 'cash');
     }
 }
 
@@ -905,21 +879,33 @@ function _hideChangeToast() {
 function debtAtTable(tableId) {
     // OPTIMIZE: Đóng modal ngay lập tức
     if (currentTableDetailId === tableId) closeModal('tableDetailModal');
-    _paymentToastId = showToast('⏳ Đang xử lý ghi nợ...', 'info', 0);
+    _safeShowPaymentToast('⏳ Đang xử lý ghi nợ...', 'info', 0);
     
     // OPTIMIZE: Suppress realtime notifications trong quá trình batch operations
     DB.suppressRealtime();
     
+    // FIX: Auto-cleanup toast nếu customer selector bị đóng mà không chọn
+    // Tránh toast "Đang xử lý..." treo vô thời hạn
+    var _debtCleanupTimer = setTimeout(function() {
+        if (pendingCustomerCallback) {
+            pendingCustomerCallback = null;
+            _cleanupPaymentToast();
+        }
+    }, 30000); // 30 giây timeout
+    
     _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length || !table.total || table.total <= 0) {
-            hideToast(_paymentToastId);
-            DB.flushRealtime();
+            clearTimeout(_debtCleanupTimer);
+            _cleanupPaymentToast();
             if (table && (!table.total || table.total <= 0)) {
                 showToast('❌ Bàn chưa có món hoặc tổng tiền = 0, không thể ghi nợ!', 'warning');
             }
             return;
         }
+        
         showCustomerSelector(function(customer) {
+            clearTimeout(_debtCleanupTimer);
+            
             var now = new Date();
             var endTime = now.toISOString();
             
@@ -972,8 +958,7 @@ function debtAtTable(tableId) {
             
             stockAndDeductPromise.then(function(result) {
                 if (!result) {
-                    hideToast(_paymentToastId);
-                    DB.flushRealtime();
+                    _cleanupPaymentToast();
                     return;
                 }
                 
@@ -1021,7 +1006,7 @@ function debtAtTable(tableId) {
                             });
                         }
                         
-                        hideToast(_paymentToastId);
+                        _cleanupPaymentToast();
                         var msg = '💰 Đã ghi nợ ' + formatMoney(debtAmount) + ' cho ' + customer.name;
                         if (creditUsed > 0) msg += ' (đã trừ ' + formatMoney(creditUsed) + ' tiền dư)';
                         showToast(msg, 'success');
@@ -1044,17 +1029,24 @@ function debtAtTable(tableId) {
                         }
                     });
                 }).catch(function(err) {
-                    hideToast(_paymentToastId);
-                    DB.flushRealtime();
+                    _cleanupPaymentToast();
                     showToast('❌ Lỗi ghi nợ: ' + (err.message || err), 'error');
                 });
             }).catch(function(err) {
-                hideToast(_paymentToastId);
-                DB.flushRealtime();
+                _cleanupPaymentToast();
                 showToast('❌ Lỗi xử lý nguyên liệu: ' + (err.message || err), 'error');
             });
         });
     });
+}
+
+// Helper: cleanup toast + flush realtime (dùng chung cho debtAtTable và _processPaymentDirect)
+function _cleanupPaymentToast() {
+    if (_paymentToastId) {
+        hideToast(_paymentToastId);
+        _paymentToastId = null;
+    }
+    DB.flushRealtime();
 }
 
 function showCustomerSelectorForTable(tableId) {

@@ -331,6 +331,9 @@ function _renderCustomerDetail(c, customerId) {
             '</div>' +
             '<div class="cus-admin-actions" style="margin-top:6px;">' +
             '<button class="cus-add-debt-btn" onclick="showAddOldDebtForm(\'' + c.id + '\')" style="padding:8px 12px;font-size:13px;border:none;border-radius:6px;background:#f59e0b;color:#fff;cursor:pointer;width:100%;">➕ Thêm nợ cũ</button>' +
+            '</div>' +
+            '<div class="cus-admin-actions" style="margin-top:6px;">' +
+            '<button class="cus-add-debt-btn" onclick="showAddPrepaidForm(\'' + c.id + '\')" style="padding:8px 12px;font-size:13px;border:none;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;width:100%;">💰 Thêm tiền đưa trước</button>' +
             '</div>';
     }
     
@@ -809,10 +812,18 @@ function showCustomerSelector(callback) {
 }
 
 function renderCustomerSelectorList(searchTerm) {
-    var filtered = customers;
+    // Sắp xếp customers theo tên A-Z (không dấu) để dễ tìm kiếm
+    var sorted = customers.slice().sort(function(a, b) {
+        var nameA = (a.name || '').toLowerCase();
+        var nameB = (b.name || '').toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+    });
+    var filtered = sorted;
     if (searchTerm) {
         var lower = searchTerm.toLowerCase();
-        filtered = customers.filter(function(c) { return c.name.toLowerCase().indexOf(lower) !== -1 || (c.phone && c.phone.indexOf(searchTerm) !== -1); });
+        filtered = sorted.filter(function(c) { return c.name.toLowerCase().indexOf(lower) !== -1 || (c.phone && c.phone.indexOf(searchTerm) !== -1); });
     }
     var container = document.getElementById('customerSelectorList');
     if (!container) return;
@@ -1041,7 +1052,7 @@ function printCustomerDebtHistory(customerId, mode) {
     }
     
     var printData = {
-        storeName: shop ? shop.name : 'MILANO COFFEE 259',
+        storeName: shop ? shop.name : 'Hệ Thống Bán Hàng',
         storeAddress: shop ? shop.address : null,
         storePhone: shop ? shop.phone : null,
         customerName: c.name,
@@ -1248,6 +1259,132 @@ function confirmAddOldDebt(customerId) {
     addOldDebt(customerId, amount, note, dateStr);
 }
 
+// ========== THÊM TIỀN KHÁCH ĐƯA TRƯỚC (ADMIN) ==========
+// Khách đưa tiền trước (gối đầu) - ghi nhận như thanh toán, cộng vào doanh thu
+// method: 'cash' hoặc 'transfer'
+function showAddPrepaidForm(customerId) {
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) return;
+    
+    // Xóa modal cũ nếu có
+    var oldModal = document.getElementById('addPrepaidModal');
+    if (oldModal) oldModal.remove();
+    
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    modal.id = 'addPrepaidModal';
+    
+    modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">' +
+        '<h3 style="margin:0 0 16px 0;font-size:18px;">💰 Thêm tiền đưa trước - ' + escapeHtml(c.name) + '</h3>' +
+        '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Số tiền (VNĐ)</label>' +
+        '<input type="number" id="prepaidAmount" class="cus-pay-input" value="0" step="1000" min="1000" style="width:100%;padding:10px;font-size:16px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:12px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Ghi chú</label>' +
+        '<input type="text" id="prepaidNote" class="cus-pay-input" value="Khách đưa trước" style="width:100%;padding:10px;font-size:14px;border:2px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">' +
+        '</div>' +
+        '<div style="margin-bottom:16px;">' +
+        '<label style="display:block;font-size:13px;color:#64748b;margin-bottom:4px;">Phương thức</label>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button id="prepaidMethodCash" onclick="document.getElementById(\'prepaidMethodCash\').classList.add(\'selected\');document.getElementById(\'prepaidMethodCash\').style.borderColor=\'#16a34a\';document.getElementById(\'prepaidMethodCash\').style.background=\'#f0fdf4\';document.getElementById(\'prepaidMethodTransfer\').classList.remove(\'selected\');document.getElementById(\'prepaidMethodTransfer\').style.borderColor=\'#e2e8f0\';document.getElementById(\'prepaidMethodTransfer\').style.background=\'#fff\';" style="flex:1;padding:10px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;color:#333;cursor:pointer;font-size:14px;font-weight:600;">💰 Tiền mặt</button>' +
+        '<button id="prepaidMethodTransfer" onclick="document.getElementById(\'prepaidMethodTransfer\').classList.add(\'selected\');document.getElementById(\'prepaidMethodTransfer\').style.borderColor=\'#16a34a\';document.getElementById(\'prepaidMethodTransfer\').style.background=\'#f0fdf4\';document.getElementById(\'prepaidMethodCash\').classList.remove(\'selected\');document.getElementById(\'prepaidMethodCash\').style.borderColor=\'#e2e8f0\';document.getElementById(\'prepaidMethodCash\').style.background=\'#fff\';" style="flex:1;padding:10px;border:2px solid #e2e8f0;border-radius:8px;background:#fff;color:#333;cursor:pointer;font-size:14px;font-weight:600;">💳 Chuyển khoản</button>' +
+        '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="document.getElementById(\'addPrepaidModal\').remove()" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;cursor:pointer;font-size:14px;">Hủy</button>' +
+        '<button onclick="confirmAddPrepaid(\'' + customerId + '\')" style="flex:1;padding:10px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">✅ Xác nhận</button>' +
+        '</div>' +
+        '</div>';
+    
+    document.body.appendChild(modal);
+    // Mặc định chọn Tiền mặt
+    setTimeout(function() {
+        var cashBtn = document.getElementById('prepaidMethodCash');
+        if (cashBtn) { cashBtn.classList.add('selected'); cashBtn.style.borderColor = '#16a34a'; cashBtn.style.background = '#f0fdf4'; }
+        document.getElementById('prepaidAmount').focus();
+    }, 100);
+}
+
+function confirmAddPrepaid(customerId) {
+    var amount = parseInt(document.getElementById('prepaidAmount').value) || 0;
+    var note = document.getElementById('prepaidNote').value || 'Khách đưa trước';
+    
+    // Xác định phương thức từ nút đang selected
+    var cashBtn = document.getElementById('prepaidMethodCash');
+    var isCash = cashBtn && cashBtn.classList.contains('selected');
+    var method = isCash ? 'cash' : 'transfer';
+    var methodLabel = isCash ? 'Tiền mặt' : 'Chuyển khoản';
+    
+    if (amount < 1000) {
+        showToast('⚠️ Số tiền tối thiểu 1.000đ', 'warning');
+        return;
+    }
+    
+    var modal = document.getElementById('addPrepaidModal');
+    if (modal) modal.remove();
+    
+    // Tìm customer trong memory cache
+    var c = null;
+    for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
+    if (!c) { showToast('⚠️ Không tìm thấy khách hàng', 'error'); return; }
+    
+    // Ghi nhận tiền đưa trước:
+    // 1. Cộng vào creditBalance (tiền dư/tiền trả trước) của khách
+    // 2. Ghi vào creditHistory
+    // 3. Ghi addHistory với type='debt_payment' để tính doanh thu
+    // 4. Nếu là TM, gọi handleCashPayment để ghi vào két
+    
+    c.creditBalance = (c.creditBalance || 0) + amount;
+    c.creditHistory = c.creditHistory || [];
+    var now = new Date();
+    c.creditHistory.unshift({ id: Date.now(), date: now.toISOString(), amount: amount, note: 'Khách đưa trước: ' + note + ' (' + methodLabel + ')' });
+    
+    DB.update('customers', customerId, {
+        creditBalance: c.creditBalance,
+        creditHistory: c.creditHistory
+    }).then(function() {
+        // Ghi vào lịch sử giao dịch (doanh thu) với type debt_payment
+        return addHistory({
+            type: 'debt_payment',
+            amount: amount,
+            paymentMethod: method,
+            items: [],
+            customer: { id: c.id, name: c.name },
+            note: 'Khách đưa trước: ' + note + ' (' + methodLabel + ')'
+        });
+    }).then(function() {
+        // Nếu là tiền mặt, ghi vào két
+        if (method === 'cash') {
+            if (typeof handleCashPayment === 'function') {
+                handleCashPayment(amount, null, {type: 'debt_payment', tableName: null, customer: {id: c.id, name: c.name}}).catch(function(err) {
+                    console.error('[AUDIT] handleCashPayment lỗi:', err);
+                });
+            }
+        }
+        
+        // Gửi thông báo Telegram
+        if (typeof notifyPaymentToTelegram === 'function') {
+            notifyPaymentToTelegram({
+                type: 'debt_payment',
+                amount: amount,
+                paymentMethod: method,
+                items: [],
+                tableName: null,
+                customer: { id: c.id, name: c.name },
+                createdAt: now.toISOString()
+            });
+        }
+        
+        showToast('✅ Đã ghi nhận ' + formatMoney(amount) + ' tiền đưa trước (' + methodLabel + ')', 'success');
+        renderCustomerList();
+        showCustomerDetail(customerId);
+    }).catch(function(err) {
+        showToast('❌ Lỗi: ' + (err.message || err), 'error');
+    });
+}
+
 // ========== UI: FORM SỬA KHOẢN NỢ (ADMIN) ==========
 function editDebtEntryUI(customerId, debtIndex) {
     // Xóa modal cũ nếu có (tránh chồng modal - fix lỗi "mở sửa khách A hiển thị khách B")
@@ -1328,3 +1465,5 @@ window.editDebtEntry = editDebtEntry;
 window.editDebtEntryUI = editDebtEntryUI;
 window.confirmEditDebt = confirmEditDebt;
 window.deleteDebtEntry = deleteDebtEntry;
+window.showAddPrepaidForm = showAddPrepaidForm;
+window.confirmAddPrepaid = confirmAddPrepaid;

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Khôi phục Staff Admin</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 500px; margin: auto; }
+        input, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .error { color: red; }
+        .success { color: green; }
+        pre { background: #f4f4f4; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h2>Khôi phục Staff Admin cho POS</h2>
+    <p>Công cụ này sẽ tạo lại tài khoản admin trong <b>Master Firebase (posmilano)</b> tại path <code>{shopId}/staffs/{staffId}</code></p>
+    
+    <label>Shop Code (VD: 111111):</label>
+    <input type="text" id="shopCode" value="111111" placeholder="111111">
+    
+    <label>Tên đăng nhập:</label>
+    <input type="text" id="username" value="admin" placeholder="admin">
+    
+    <label>Mật khẩu:</label>
+    <input type="text" id="password" value="123456" placeholder="123456">
+    
+    <button onclick="restoreStaff()">Khôi phục Staff Admin</button>
+    
+    <div id="result"></div>
+
+    <script>
+        // Cấu hình Master Firebase (posmilano)
+        var MASTER_CONFIG = {
+            apiKey: "AIzaSyCQFIzj8m3kpsE_x354xxJ8MTAuRG9eCx4",
+            authDomain: "posmilano.firebaseapp.com",
+            projectId: "posmilano",
+            databaseURL: "https://posmilano-default-rtdb.firebaseio.com",
+            storageBucket: "posmilano.firebasestorage.app",
+            messagingSenderId: "34185947554",
+            appId: "1:34185947554:web:925f29864d3b17b8d46afb"
+        };
+
+        var app, db;
+
+        try {
+            app = firebase.initializeApp(MASTER_CONFIG, 'restore_app');
+            db = app.database();
+        } catch(e) {
+            try {
+                app = firebase.app('restore_app');
+                db = app.database();
+            } catch(e2) {
+                console.error('Loi khoi tao Firebase:', e2);
+            }
+        }
+
+        function restoreStaff() {
+            var resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Đang xử lý...';
+            
+            var shopCode = document.getElementById('shopCode').value.trim();
+            var username = document.getElementById('username').value.trim();
+            var password = document.getElementById('password').value.trim();
+            
+            if (!shopCode || !username || !password) {
+                resultDiv.innerHTML = '<div class="error">Vui lòng nhập đầy đủ thông tin</div>';
+                return;
+            }
+            
+            var shopId = 'shop_' + shopCode.toLowerCase();
+            var staffId = 'staff_restored_' + Date.now().toString(36);
+            var staffData = {
+                id: staffId,
+                username: username,
+                password: password,
+                displayName: username,
+                role: 'admin',
+                createdAt: Date.now(),
+                createdBy: 'restore_tool'
+            };
+            
+            // Ghi staff vào Master Firebase
+            db.ref(shopId + '/staffs/' + staffId).set(staffData).then(function() {
+                resultDiv.innerHTML = '<div class="success">✅ Đã khôi phục staff admin thành công!</div>' +
+                    '<pre>' + JSON.stringify({
+                        path: shopId + '/staffs/' + staffId,
+                        username: username,
+                        password: password,
+                        role: 'admin'
+                    }, null, 2) + '</pre>' +
+                    '<p>👉 <b>Quay lại Admin Dashboard và F5 (refresh)</b> để thấy user/pass</p>';
+            }).catch(function(err) {
+                resultDiv.innerHTML = '<div class="error">❌ Lỗi: ' + err.message + '</div>';
+            });
+        }
+    </script>
+</body>
+</html>
