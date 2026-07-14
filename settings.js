@@ -1499,6 +1499,7 @@ function initSettingsTab() {
     var chatLockField = document.getElementById('chatLockField');
     var staffNoteSection = document.getElementById('settingsStaffNoteSection');
     var lockSection = document.getElementById('settingsLockSection');
+    var bonusFundSection = document.getElementById('settingsBonusFundSection');
 
     // Admin: hiển thị TOÀN BỘ các section - chỉ ẩn "Ghi chú nhân viên"
     // Nhân viên: ẩn TOÀN BỘ các section - chỉ hiển thị "Ghi chú nhân viên"
@@ -1510,6 +1511,7 @@ function initSettingsTab() {
         if (chatSection) chatSection.style.display = '';
         if (chatLockField) chatLockField.style.display = '';
         if (lockSection) lockSection.style.display = '';
+        if (bonusFundSection) bonusFundSection.style.display = '';
         // Staff note section: ẩn với admin
         if (staffNoteSection) staffNoteSection.style.display = 'none';
         // Permission section: luôn ẩn (đã chuyển sang modal employees.js)
@@ -1522,9 +1524,22 @@ function initSettingsTab() {
         if (chatSection) chatSection.style.display = 'none';
         if (chatLockField) chatLockField.style.display = 'none';
         if (lockSection) lockSection.style.display = 'none';
+        if (bonusFundSection) bonusFundSection.style.display = 'none';
         if (permSection) permSection.style.display = 'none';
         // Staff note section: hiển thị cho nhân viên
         if (staffNoteSection) staffNoteSection.style.display = '';
+    }
+
+    // Mặc định thu gọn tất cả collapsible section
+    var allCollapsible = document.querySelectorAll('.collapsible-section');
+    for (var ci = 0; ci < allCollapsible.length; ci++) {
+        allCollapsible[ci].classList.remove('expanded');
+        var body = allCollapsible[ci].querySelector('.settings-section-body');
+        if (body) body.style.display = 'none';
+        var icon = allCollapsible[ci].querySelector('.settings-toggle-icon');
+        if (icon) {
+            icon.textContent = '▶';
+        }
     }
 
     // Load Telegram config từ localStorage
@@ -1619,6 +1634,11 @@ function initSettingsTab() {
                 staffNoteInput.value = savedNote;
             }
         } catch(e) {}
+    }
+
+    // Khởi tạo Quỹ thưởng trách nhiệm (chỉ admin mới thấy)
+    if (isAdmin && typeof initBonusFund === 'function') {
+        initBonusFund();
     }
 
     } catch(e) {
@@ -2882,5 +2902,28 @@ function copyStaffCloseContent() {
         });
     } else {
         fallbackCopy(text);
+    }
+}
+
+/**
+ * Toggle collapse/expand for settings sections
+ * Called by onclick on .settings-title elements
+ */
+function toggleSettingsSection(titleEl) {
+    var section = titleEl.parentNode;
+    if (!section) return;
+    var body = section.querySelector('.settings-section-body');
+    var icon = titleEl.querySelector('.settings-toggle-icon');
+    var isExpanded = section.classList.contains('expanded');
+    if (isExpanded) {
+        // Thu gọn
+        section.classList.remove('expanded');
+        if (body) body.style.display = 'none';
+        if (icon) icon.textContent = '▶';
+    } else {
+        // Mở rộng
+        section.classList.add('expanded');
+        if (body) body.style.display = '';
+        if (icon) icon.textContent = '▼';
     }
 }

@@ -95,7 +95,6 @@
 
         <!-- POS TABS -->
         <div class="main-tabs">
-            <div class="tab-btn" data-tab="takeaway">🛵 Mang đi</div>
             <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
             <div class="tab-btn" data-tab="customers">👥 Khách</div>
             <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
@@ -106,43 +105,6 @@
         </div>
 
         <div class="main-content">
-            <!-- TAB MANG ĐI -->
-            <div id="takeawayView" class="tab-content">
-                <div class="takeaway-layout">
-                    <!-- CỘT TRÁI: DANH MỤC -->
-                    <div class="takeaway-categories" id="takeawayCategories"></div>
-                    
-                    <!-- CỘT GIỮA: MENU -->
-                    <div class="takeaway-menu">
-                        <div class="takeaway-menu-header">
-                            <input class="takeaway-search" id="takeawaySearch" type="text" placeholder="🔍 Tìm món..." oninput="_takeawayOnSearch(this.value)">
-                        </div>
-                        <div class="takeaway-menu-grid" id="takeawayMenuGrid"></div>
-                    </div>
-                    
-                    <!-- CỘT PHẢI: GIỎ HÀNG -->
-                    <div class="takeaway-cart" id="takeawayCartPanel">
-                        <div class="takeaway-cart-header">
-                            <span>🛒 Giỏ hàng</span>
-                            <button class="takeaway-cart-clear" onclick="_takeawayClearCart()">🗑️</button>
-                        </div>
-                        <div class="takeaway-cart-list" id="takeawayCartList"></div>
-                        <div class="takeaway-cart-footer">
-                            <div class="takeaway-cart-total">
-                                <span id="takeawayCartCount">0 món</span>
-                                <span id="takeawayCartTotal">0đ</span>
-                            </div>
-                            <div class="takeaway-cart-actions">
-                                <button class="takeaway-pay-btn cash" onclick="_takeawayPay('cash')">💵 Tiền mặt</button>
-                                <button class="takeaway-pay-btn transfer" onclick="_takeawayPay('transfer')">💳 Chuyển khoản</button>
-                                <button class="takeaway-pay-btn grab" onclick="_takeawayGrab()">🚕 Grab</button>
-                                <button class="takeaway-pay-btn table" onclick="_takeawayCreateNewTable()">🆕 Tạo bàn mới</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- TAB BÀN -->
             <div id="tablesView" class="tab-content active">
                 <!-- Banner thông báo lịch âm -->
@@ -514,9 +476,34 @@
                         <div id="quickCashContainer"></div>
                     </div>
 
+                    <!-- PHẦN QUỸ THƯỞNG TRÁCH NHIỆM -->
+                    <div class="settings-section collapsible-section" id="settingsBonusFundSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🎯 Quỹ thưởng trách nhiệm
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
+                        <div class="settings-field">
+                            <div class="bonus-fund-summary">
+                                <span class="bonus-fund-label">💰 Quỹ thưởng trách nhiệm:</span>
+                                <span class="bonus-fund-total" id="bonusFundTotal" onclick="openBonusFundModal()">0đ</span>
+                            </div>
+                        </div>
+                        <div class="settings-actions" style="margin-top:8px;">
+                            <button class="settings-btn settings-btn-primary" onclick="withdrawBonusFund()">🏧 Rút quỹ</button>
+                            <button class="settings-btn settings-btn-primary" onclick="addBonusFund()" style="background:#22c55e;">🎁 Thưởng thêm</button>
+                        </div>
+                        <div id="bonusFundStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
+                    </div>
+
                     <!-- PHẦN GHI CHÚ NHÂN VIÊN -->
-                    <div class="settings-section" id="settingsStaffNoteSection">
-                        <h3 class="settings-title">📝 Ghi chú</h3>
+                    <div class="settings-section collapsible-section" id="settingsStaffNoteSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            📝 Ghi chú
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">Ghi chú công việc</label>
                             <textarea id="staffNoteInput" class="form-input staff-note-textarea"
@@ -525,11 +512,16 @@
                                 style="width:100%;min-height:100px;resize:vertical;padding:10px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#eee;font-size:14px;line-height:1.5;font-family:inherit;"></textarea>
                             <div class="settings-hint">Ghi chú được lưu tự động trên trình duyệt này</div>
                         </div>
+                        </div>
                     </div>
 
                     <!-- PHẦN CÀI ĐẶT CHAT -->
-                    <div class="settings-section" id="settingsChatSection">
-                        <h3 class="settings-title">💬 Cài đặt Chat nội bộ</h3>
+                    <div class="settings-section collapsible-section" id="settingsChatSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            💬 Cài đặt Chat nội bộ
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">Âm thanh thông báo</label>
                             <div class="settings-toggle-row">
@@ -572,11 +564,16 @@
                             </div>
                             <div class="settings-hint">Chỉ admin mới có quyền xóa tin nhắn cũ</div>
                         </div>
+                        </div>
                     </div>
 
                     <!-- PHẦN TELEGRAM -->
-                    <div class="settings-section" id="settingsTelegramSection">
-                        <h3 class="settings-title">🤖 Cấu hình Telegram</h3>
+                    <div class="settings-section collapsible-section" id="settingsTelegramSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🤖 Cấu hình Telegram
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
 
                         <!-- === CHAT ID DÙNG CHUNG === -->
                         <div style="padding:10px 12px;margin-bottom:10px;background:#1e293b;border-radius:8px;border:1px solid #334155;">
@@ -668,8 +665,8 @@
                                     <a href="https://t.me/BotFather" target="_blank"
                                        style="color:#f97316;text-decoration:underline;">Tạo bot tại @BotFather</a>
                                 </div>
+                                </div>
                             </div>
-                        </div>
 
                         <div class="settings-actions" style="margin-top:8px;">
                             <button class="settings-btn settings-btn-primary" onclick="saveTelegramConfig()">💾 Lưu cấu hình</button>
@@ -678,11 +675,16 @@
                             <button class="settings-btn settings-btn-secondary" onclick="clearTelegramConfig()">🗑️ Xóa</button>
                         </div>
                         <div id="telegramConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
                     </div>
 
                     <!-- PHẦN CẤU HÌNH KHÓA BÀN & THỜI GIAN -->
-                    <div class="settings-section" id="settingsLockSection">
-                        <h3 class="settings-title">🔒 Cấu hình khóa bàn & thời gian</h3>
+                    <div class="settings-section collapsible-section" id="settingsLockSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🔒 Cấu hình khóa bàn & thời gian
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">🕐 Giờ mở quán (bắt đầu tính giờ)</label>
                             <input type="number" id="settingsLockStartHour" class="form-input"
@@ -705,7 +707,7 @@
                             <input type="number" id="settingsTableLockHours" class="form-input"
                                 placeholder="VD: 5" min="1" max="24" style="width:100px;">
                             <div class="settings-hint">Quá số giờ này, bàn sẽ bị khóa (mặc định: 5h)</div>
-                        </div>
+                            </div>
                         <div class="settings-field">
                             <label class="settings-label">🔑 Mật khẩu mở khóa bàn</label>
                             <input type="password" id="settingsLockPassword" class="form-input"
@@ -716,11 +718,16 @@
                             <button class="settings-btn settings-btn-primary" onclick="saveLockConfig()">💾 Lưu cấu hình</button>
                         </div>
                         <div id="lockConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
                     </div>
 
                     <!-- PHẦN CẤU HÌNH ESP32 (KÉT TIỀN) -->
-                    <div class="settings-section" id="settingsEsp32Section" style="display:none;">
-                        <h3 class="settings-title">🔌 Cấu hình ESP32 (Két tiền)</h3>
+                    <div class="settings-section collapsible-section" id="settingsEsp32Section" style="display:none;">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🔌 Cấu hình ESP32 (Két tiền)
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">📶 WiFi SSID</label>
                             <input type="text" id="esp32WifiSsid" class="form-input" placeholder="VD: Ca Na">
@@ -754,18 +761,23 @@
                             <label class="settings-label">👥 Telegram Chat ID</label>
                             <input type="text" id="esp32TelegramChatId" class="form-input" placeholder="VD: 6372876364">
                             <div class="settings-hint">Chat ID nhận cảnh báo từ ESP32</div>
-                        </div>
+                            </div>
                         <div class="settings-actions" style="margin-top:8px;">
                             <button class="settings-btn settings-btn-primary" onclick="saveEsp32Config()">💾 Lưu cấu hình ESP32</button>
                             <button class="settings-btn settings-btn-primary" onclick="loadEsp32Config()" style="background:#22c55e;">🔄 Tải lại</button>
                             <button class="settings-btn settings-btn-secondary" onclick="clearEsp32Config()">🗑️ Xóa</button>
                         </div>
                         <div id="esp32ConfigStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
                     </div>
 
                     <!-- PHẦN THÔNG TIN QUÁN -->
-                    <div class="settings-section" id="settingsShopSection">
-                        <h3 class="settings-title">🏪 Thông tin quán</h3>
+                    <div class="settings-section collapsible-section" id="settingsShopSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🏪 Thông tin quán
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">Tên quán</label>
                             <input type="text" id="shopInfoName" class="form-input" placeholder="VD: MILANO COFFEE 259">
@@ -777,7 +789,7 @@
                         <div class="settings-field">
                             <label class="settings-label">Số điện thoại</label>
                             <input type="text" id="shopInfoPhone" class="form-input" placeholder="VD: 0901234567">
-                        </div>
+                            </div>
                         <div class="settings-field">
                             <label class="settings-label">Mã QR thanh toán</label>
                             <input type="text" id="shopInfoQR" class="form-input" placeholder="VD: https://qr.vn/pay/123456 hoặc nội dung QR">
@@ -788,11 +800,16 @@
                             <button class="settings-btn settings-btn-secondary" onclick="clearShopInfo()">🗑️ Xóa</button>
                         </div>
                         <div id="shopInfoStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
                     </div>
 
                     <!-- PHẦN PHÂN QUYỀN QUẢN LÝ (đã chuyển sang modal employees.js) -->
-                    <div class="settings-section" id="settingsPermissionSection" style="display:none;">
-                        <h3 class="settings-title">🔐 Phân quyền quản lý</h3>
+                    <div class="settings-section collapsible-section" id="settingsPermissionSection" style="display:none;">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🔐 Phân quyền quản lý
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">Danh sách nhân viên</label>
                             <div id="staffPermissionList" class="permission-staff-list">
@@ -812,17 +829,23 @@
                             <div class="settings-hint">Nhân viên mới sẽ có quyền Staff mặc định</div>
                         </div>
                         <div id="staffPermissionStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                        </div>
                     </div>
 
                     <!-- PHẦN DỮ LIỆU -->
-                    <div class="settings-section" id="settingsDataSection">
-                        <h3 class="settings-title">🗄️ Dữ liệu</h3>
+                    <div class="settings-section collapsible-section" id="settingsDataSection">
+                        <h3 class="settings-title" onclick="toggleSettingsSection(this)">
+                            🗄️ Dữ liệu
+                            <span class="settings-toggle-icon">▶</span>
+                        </h3>
+                        <div class="settings-section-body">
                         <div class="settings-field">
                             <label class="settings-label">Xóa bộ nhớ đệm IndexedDB</label>
                             <div class="settings-hint" style="margin-bottom:8px;">
                                 Xóa toàn bộ dữ liệu cache trên trình duyệt và tải lại từ Firebase.
                                 Dữ liệu trên Firebase <strong>không bị ảnh hưởng</strong>.
                                 Dùng khi dữ liệu hiển thị không chính xác hoặc cần refresh.
+                                </div>
                             </div>
                             <div class="settings-actions" style="margin-top:4px;">
                                 <button class="settings-btn settings-btn-danger" onclick="clearIndexedDB()" style="font-size:13px;background:#dc2626;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">
@@ -836,7 +859,7 @@
             </div>
         </div>
 
-        <!-- DRAFT BUBBLE CONTAINER -->
+    <!-- DRAFT BUBBLE CONTAINER -->
         <div class="draft-bubble-container" id="draftBubbleContainer"></div>
     </div>
 
@@ -1255,6 +1278,24 @@
         </div>
     </div>
 
+    <!-- MODAL CHI TIẾT QUỸ THƯỞNG -->
+    <div class="modal" id="bonusFundModal">
+        <div class="modal-content" style="max-width:600px;">
+            <div class="modal-header">
+                <span>🎯 Chi tiết Quỹ thưởng trách nhiệm</span>
+                <button class="modal-close-btn" onclick="closeModal('bonusFundModal')">✕ Đóng</button>
+            </div>
+            <div class="modal-body">
+                <div class="bonus-fund-nav">
+                    <button class="bonus-fund-nav-btn" onclick="bonusFundPrevPage()">◀</button>
+                    <span id="bonusFundDateRange">5 ngày gần nhất</span>
+                    <button class="bonus-fund-nav-btn" onclick="bonusFundNextPage()">▶</button>
+                </div>
+                <div id="bonusFundDayList"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="recentToast" class="recent-toast">
         <div class="recent-toast-header" onclick="toggleRecentToast()">
             <span>🔄 GIAO DỊCH GẦN ĐÂY</span>
@@ -1311,6 +1352,8 @@
     <script src="print.js"></script>
     <script src="draft-orders.js"></script>
     <script src="fund-reconciliation.js"></script>
+    <!-- Bonus Fund - Quỹ thưởng trách nhiệm -->
+    <script src="bonus_fund.js"></script>
     <!-- Manager Detail - click vào manager-grid items + tab quản lý -->
     <script src="manager-detail.js"></script>
     <!-- Inventory / Menu management -->

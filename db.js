@@ -91,7 +91,8 @@
         ingredients: true,
         staffs: true,
         cost_categories: true,
-        info: true
+        info: true,
+        bonus_fund: true
     };
     
     // OPTIMIZE: Debounce processSyncQueue - trÃ¡nh gá»i sync sau má»—i DB.update riÃªng láº»
@@ -582,26 +583,53 @@
     }
     
     // OPTIMIZE: Batch sync nhiá»u items cÃ¹ng collection lÃªn Firebase trong 1 láº§n
+    // FIX: Dùng transaction để cấp _version server-side cho batch
     function _batchSyncToFirebase(items) {
         if (items.length === 0) return Promise.resolve();
         var collection = items[0].collection;
         var action = items[0].action;
         var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
-        var batchData = {};
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            var syncData = {};
-            for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
-            syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
-            syncData._syncedBy = item.deviceId;
-            syncData._version = (item.data._version || 1);
-            if (action === 'delete') {
-                batchData[item.targetId] = null;
-            } else {
+        var metaRef = db.ref(CURRENT_SHOP_ID + '/_meta/' + collection + '/maxVersion');
+        
+        if (action === 'delete') {
+            var batchData = {};
+            for (var i = 0; i < items.length; i++) {
+                batchData[items[i].targetId] = null;
+            }
+            return ref.update(batchData);
+        }
+        
+        // Dùng transaction để lấy version range từ server
+        return metaRef.transaction(function(currentMax) {
+            return (currentMax || 0) + items.length;
+        }).then(function(result) {
+            var baseVersion = result.snapshot.val() - items.length;
+            var batchData = {};
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var syncData = {};
+                for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
+                syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
+                syncData._syncedBy = item.deviceId;
+                syncData._version = baseVersion + i + 1; // ✅ Mỗi item có _version riêng, tăng dần
                 batchData[item.targetId] = syncData;
             }
-        }
-        return ref.update(batchData);
+            return ref.update(batchData);
+        }).catch(function(err) {
+            // Fallback: nếu transaction fail, dùng version client
+            console.warn('⚠️ Batch transaction failed, using client versions:', err.message);
+            var batchData = {};
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var syncData = {};
+                for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
+                syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
+                syncData._syncedBy = item.deviceId;
+                syncData._version = (item.data._version || 1);
+                batchData[item.targetId] = syncData;
+            }
+            return ref.update(batchData);
+        });
     }
     
     function _markItemSynced(item) {
@@ -644,16 +672,36 @@
         }
     }
 
+    // FIX: Dùng Firebase transaction để cấp _version server-side duy nhất
+    // Đảm bảo mỗi item có _version tăng dần, không trùng giữa các máy
+    // deltaSync() dùng _version để tải items mới, nếu _version trùng sẽ bỏ sót
     function syncToFirebase(item) {
         var ref = db.ref(CURRENT_SHOP_ID + '/' + item.collection + '/' + item.targetId);
-        var syncData = {};
-        for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
-        syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
-        syncData._syncedBy = item.deviceId;
-        syncData._version = (item.data._version || 1);
-        if (item.action === 'create' || item.action === 'update') return ref.update(syncData);
+        var metaRef = db.ref(CURRENT_SHOP_ID + '/_meta/' + item.collection + '/maxVersion');
+        
         if (item.action === 'delete') return ref.remove();
-        return Promise.resolve();
+        
+        // Dùng transaction để lấy version duy nhất từ server
+        return metaRef.transaction(function(currentMax) {
+            return (currentMax || 0) + 1;
+        }).then(function(result) {
+            var serverVersion = result.snapshot.val();
+            var syncData = {};
+            for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
+            syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
+            syncData._syncedBy = item.deviceId;
+            syncData._version = serverVersion; // ✅ Version từ server, không trùng
+            return ref.update(syncData);
+        }).catch(function(err) {
+            // Fallback: nếu transaction fail (offline), dùng version client
+            console.warn('⚠️ Transaction failed, using client version:', err.message);
+            var syncData = {};
+            for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
+            syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
+            syncData._syncedBy = item.deviceId;
+            syncData._version = (item.data._version || 1);
+            return ref.update(syncData);
+        });
     }
 
     // CRUD Public
@@ -1128,9 +1176,11 @@
         
         // FIX: Chỉ skip _version check cho transactions (chống trùng khi offline sync)
         // KHÔNG skip cho tables, customers, menu v.v. vì có thể bàn bị xóa rồi tạo lại
+        // FIX: Dùng > thay vì >= để không skip items có cùng _version từ máy khác
+        // (khi _version được cấp server-side qua transaction, mỗi item có _version duy nhất)
         if (collection !== 'tables') {
             var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-            if (localItem && (localItem._version || 0) >= (item._version || 0)) {
+            if (localItem && (localItem._version || 0) > (item._version || 0)) {
                 return;
             }
         }
@@ -1185,9 +1235,10 @@
         
         // FIX: Chỉ skip _version check cho transactions
         // KHÔNG skip cho tables vì có thể bàn bị xóa rồi tạo lại
+        // FIX: Dùng > thay vì >= để không skip items có cùng _version từ máy khác
         if (collection !== 'tables') {
             var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-            if (localItem && (localItem._version || 0) >= (item._version || 0)) {
+            if (localItem && (localItem._version || 0) > (item._version || 0)) {
                 return;
             }
         }
@@ -1726,14 +1777,18 @@
                 }
                 
                 return saveChain.then(function() {
-                    // Ghi sync_meta
-                    saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
-                    // Cập nhật maxVersion lên Firebase _meta
-                    updateMetaOnFirebase(collection, maxVersion);
-                    // NÂNG CẤP: Phát 1 event synced duy nhất thay vì hàng loạt added
-                    _setSuppressRealtime(false);
-                    _emit(collection + ':synced', { collection: collection, count: count, timestamp: Date.now() });
-                    resolve();
+                    // FIX: Cleanup deleted IDs sau fullSync (cho cả master và date-based)
+                    // Đảm bảo items đã xóa trên Firebase cũng được xóa khỏi local
+                    return _cleanupDeletedIds(collection).then(function() {
+                        // Ghi sync_meta
+                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
+                        // Cập nhật maxVersion lên Firebase _meta
+                        updateMetaOnFirebase(collection, maxVersion);
+                        // NÂNG CẤP: Phát 1 event synced duy nhất thay vì hàng loạt added
+                        _setSuppressRealtime(false);
+                        _emit(collection + ':synced', { collection: collection, count: count, timestamp: Date.now() });
+                        resolve();
+                    });
                 }).catch(function(err) {
                     console.error('  ❌ Error full syncing ' + collection + ': ', err);
                     _setSuppressRealtime(false);
@@ -1830,20 +1885,20 @@
     }
     
     // FIX: So sánh danh sách ID local vs Firebase để xóa các item đã bị xóa trên Firebase
-    // Chỉ áp dụng cho master collections (date-based collections có cơ chế dateKey riêng)
+    // Áp dụng cho CẢ master collections và date-based collections (transactions, v.v.)
+    // Đảm bảo khi xóa transaction trên Firebase, các máy khác cũng xóa khỏi local
     function _cleanupDeletedIds(collection) {
-        var isMaster = MASTER_COLLECTIONS[collection];
-        if (!isMaster) return Promise.resolve();
         if (!isOnline) return Promise.resolve();
         
         // FIX: Nếu memoryCache chưa được khởi tạo, load từ IndexedDB trước
-        // Tránh trường hợp _cleanupDeletedIds return sớm vì memoryCache rỗng
-        // trong khi IndexedDB vẫn còn items cũ (đã bị xóa trên Firebase)
         var loadMemory = Promise.resolve();
         if (!memoryCache[collection]) {
             loadMemory = loadFromLocal(collection).then(function(data) {
                 if (data) {
-                    memoryCache[collection] = data;
+                    if (!memoryCache[collection]) memoryCache[collection] = {};
+                    for (var i = 0; i < data.length; i++) {
+                        memoryCache[collection][data[i].id] = data[i];
+                    }
                 }
             });
         }
@@ -1870,6 +1925,8 @@
                 
                 if (deletedIds.length === 0) return;
                 
+                console.log('  🗑️ Cleaning up', deletedIds.length, 'deleted IDs from', collection);
+                
                 // Xóa từng ID khỏi local
                 var deleteChain = Promise.resolve();
                 for (var d = 0; d < deletedIds.length; d++) {
@@ -1893,22 +1950,23 @@
     // 2. Items được cập nhật trên Firebase nhưng local chưa sync
     // 3. sync_meta bị lệch (maxVersion sai) dẫn đến deltaSync bỏ sót items
     // Dùng khi: online trở lại, tab resume, hoặc phát hiện dữ liệu bất thường
+    // FIX: Mở rộng cho date-based collections - cleanup deleted IDs + deltaSync
     function reconcileSnapshot(collection) {
         if (!isOnline) return Promise.resolve();
         var isMaster = MASTER_COLLECTIONS[collection];
-        if (!isMaster) {
-            // Date-based collections không cần reconcile (dùng dateKey)
-            return Promise.resolve();
-        }
         console.log('🔄 Reconcile snapshot for:', collection);
-        // Bước 1: Xóa các items đã bị xóa trên Firebase
+        // Bước 1: Xóa các items đã bị xóa trên Firebase (cho cả master và date-based)
         return _cleanupDeletedIds(collection).then(function() {
-            // Bước 2: Reset sync_meta để force fullSync tải lại toàn bộ
-            // Xóa maxVersion để fullSync() không bị giới hạn bởi version cũ
-            return saveSyncMeta(collection, { lastSyncAt: 0, maxVersion: 0, dateKeys: [] });
-        }).then(function() {
-            // Bước 3: FullSync tải toàn bộ dữ liệu mới từ Firebase
-            return fullSync(collection);
+            if (isMaster) {
+                // Master collections: reset sync_meta + fullSync
+                return saveSyncMeta(collection, { lastSyncAt: 0, maxVersion: 0, dateKeys: [] }).then(function() {
+                    return fullSync(collection);
+                });
+            } else {
+                // Date-based collections: chỉ cần deltaSync (tải items mới từ Firebase)
+                // _cleanupDeletedIds() đã xóa items không còn trên Firebase
+                return deltaSync(collection);
+            }
         });
     }
     
@@ -2038,7 +2096,7 @@
     function initLocalDB() {
         if (dbReady) return dbReady;
         dbReady = new Promise(function(resolve, reject) {
-            var request = indexedDB.open(STORE_NAME, 19);
+            var request = indexedDB.open(STORE_NAME, 20);
             request.onerror = function(e) { reject(e.target.error); };
             request.onsuccess = function(e) {
                 localDB = e.target.result;
@@ -2057,7 +2115,8 @@
     'info',
     'messages',
     'delete_logs',
-    'sync_meta'
+    'sync_meta',
+    'bonus_fund'
 ];
                 for (var i = 0; i < stores.length; i++) {
                     if (!db.objectStoreNames.contains(stores[i])) {
@@ -2254,7 +2313,8 @@
             'inventory_transactions', 'manager_cash_pickups',
             'ingredient_transactions', 'notifications',
             'info',
-            'messages'
+            'messages',
+            'bonus_fund'
         ];
         
         console.log('ðŸ”„ Force syncing all collections from Firebase...');

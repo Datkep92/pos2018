@@ -690,6 +690,11 @@ function closeDay(dateStr) {
 
             showToast('🔒 Đã chốt ngày ' + formatDateDisplay(dateStr), 'success');
             
+            // Tự động trừ quỹ thưởng nếu thiếu tiền
+            if (difference < 0 && typeof handleCashShortage === 'function') {
+                handleCashShortage(dateStr, difference);
+            }
+            
             // Luôn gửi Telegram khi chốt ngày (dù khớp hay lệch)
             if (typeof sendTelegramMessage === 'function') {
                 var icon = statusInfo.status === 'ok' ? '✅' : '⚠️';

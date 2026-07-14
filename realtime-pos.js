@@ -933,6 +933,27 @@ function initRealtime() {
     });
 
     // ============================================================
+    // BONUS FUND (Quỹ thưởng trách nhiệm)
+    // ============================================================
+    // Subscribe cũ: cập nhật bonus_fund
+    DB.subscribe('bonus_fund', function() {
+        _debounceRealtime('bonus_fund', function() {
+            if (typeof refreshBonusFund === 'function') {
+                refreshBonusFund();
+            }
+        }, 300);
+    });
+    // NÂNG CẤP: Event Bus handler cho bonus_fund
+    DB.on('bonus_fund:*', function(event) {
+        if (!event || !event.data) return;
+        _debounceRealtime('bonus_fund_ui', function() {
+            if (typeof refreshBonusFund === 'function') {
+                refreshBonusFund();
+            }
+        }, 200);
+    });
+
+    // ============================================================
     // INFO (shop config)
     // ============================================================
     // Subscribe cũ: cập nhật shopConfig
