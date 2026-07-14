@@ -88,12 +88,10 @@ function getLunarDate(dateStr) {
     var day = parseInt(parts[2], 10);
     
     try {
-        // lunar-javascript: Dùng Lunar.fromDate() để chuyển từ Date object sang âm lịch
-        // (API tương tự pos-app.js renderCurrentTime)
-        var dateObj = new Date(year, month - 1, day);
-        var lunar = Lunar.fromDate(dateObj);
-        if (lunar) {
-            return { day: lunar.getDay(), month: lunar.getMonth() };
+        // lunar-javascript: Solar -> Lunar
+        var solar = Lunar.fromYmd(year, month, day);
+        if (solar) {
+            return { day: solar.getDay(), month: solar.getMonth() };
         }
     } catch(e) {
         // fallback nếu thư viện lỗi

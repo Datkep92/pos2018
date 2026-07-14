@@ -80,9 +80,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }).then(function() {
         return loadDraftOrders();
     }).then(function() {
-        // Ẩn màn hình loading sau khi khởi tạo xong
-        _hideLoadingScreen();
-
         // FIX: Khởi tạo realtime subscriptions SAU KHI DB đã sẵn sàng và data đã load
         // Tránh race condition: subscribeWithPolling gọi callback khi memoryCache còn rỗng
         initRealtime();
@@ -113,8 +110,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }).catch(function(err) {
         // FIX: Catch mọi lỗi để đảm bảo UI không bị treo
         console.error('❌ Initialization error:', err);
-        // Ẩn loading ngay cả khi có lỗi để không bị treo màn hình
-        _hideLoadingScreen();
         showToast('⚠️ Lỗi khởi tạo: ' + (err.message || 'unknown'), 'error', 4000);
         // Vẫn cố gắng khởi tạo event listeners để nút bấm hoạt động
         try {
@@ -125,20 +120,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
-
-// Hàm ẩn màn hình loading với hiệu ứng mượt
-function _hideLoadingScreen() {
-    var el = document.getElementById('loadingScreen');
-    if (el) {
-        el.classList.add('hidden');
-        // Xóa khỏi DOM sau khi animation kết thúc để giải phóng bộ nhớ
-        setTimeout(function() {
-            if (el.parentNode) {
-                el.parentNode.removeChild(el);
-            }
-        }, 500);
-    }
-}
 
 // FIX: Kiểm tra dữ liệu local có rỗng không (do IndexedDB bị xóa)
 function _isDataEmpty() {
@@ -358,8 +339,24 @@ function initEventListeners() {
     var nextDayBtn = document.getElementById('nextDayBtn');
     if (nextDayBtn) nextDayBtn.onclick = function() { changeHistoryDate(1); };
 
-    var historyFilter = document.getElementById('historyFilter');
-    if (historyFilter) historyFilter.onchange = function() { renderHistoryByDate(currentHistoryDate); };
+    // FIX: Event delegation cho filter-chip (cả trong #historyFilterChips và #historyStaffChips)
+    // Dùng delegation trên container cha để tránh phải gán lại listener khi staff chips được tạo động
+    var historyView = document.getElementById('historyView');
+    if (historyView) {
+        historyView.addEventListener('click', function(e) {
+            var chip = e.target;
+            // Kiểm tra nếu click vào .filter-chip (hoặc .staff-chip)
+            if (chip && chip.classList && chip.classList.contains('filter-chip')) {
+                // Bỏ active tất cả chip
+                var allChips = document.querySelectorAll('#historyFilterChips .filter-chip, #historyStaffChips .filter-chip');
+                for (var j = 0; j < allChips.length; j++) {
+                    allChips[j].classList.remove('active');
+                }
+                chip.classList.add('active');
+                renderHistoryByDate(currentHistoryDate);
+            }
+        });
+    }
 
     var reportPrevDayBtn = document.getElementById('reportPrevDayBtn');
     if (reportPrevDayBtn) reportPrevDayBtn.onclick = function() { changeReportDate(-1); };

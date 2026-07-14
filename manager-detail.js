@@ -884,7 +884,7 @@ function showManagerEmployeeDetail() {
 
 // 10. THU NHẬP RÒNG
 // ========== QUỸ POS - CHI TIẾT ==========
-// Hiển thị lịch sử giao dịch quỹ (dailyFund + history) theo ngày
+// Hiển thị daily_balances theo ngày với bộ lọc +/- và tổng số tiền âm/dương
 function showManagerPosFundDetail() {
     var range = _getManagerDateRange();
     var title = '\uD83C\uDFE6 QU\u1EF8 POS - ' + range.label;
@@ -900,10 +900,19 @@ function showManagerPosFundDetail() {
         if (e.target === modal) _closeManagerDetail();
     };
 
+    // Lưu range vào modal để dùng khi lọc
+    modal._posFundRange = range;
+
+    // Modal với bộ lọc +/- riêng
     var html = '<div class="manager-detail-content">' +
         '<div class="manager-detail-header">' +
             '<h3>' + title + '</h3>' +
             '<span class="manager-detail-close" onclick="_closeManagerDetail()">&times;</span>' +
+        '</div>' +
+        '<div class="manager-detail-filters" style="padding:8px 16px;display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<button class="filter-btn active" data-posfund-filter="all" onclick="_switchPosFundFilter(this)">\uD83D\uDCCA T\u1EA5t c\u1EA3</button>' +
+            '<button class="filter-btn" data-posfund-filter="surplus" onclick="_switchPosFundFilter(this)">\uD83D\uDFE2 D\u01B0 (+) </button>' +
+            '<button class="filter-btn" data-posfund-filter="deficit" onclick="_switchPosFundFilter(this)">\uD83D\uDD34 Thi\u1EBFu (-) </button>' +
         '</div>' +
         '<div class="manager-detail-summary" id="mdSummary"></div>' +
         '<div class="manager-detail-body" id="mdBody">' +
@@ -914,14 +923,32 @@ function showManagerPosFundDetail() {
     modal.innerHTML = html;
     document.body.appendChild(modal);
 
-    // Load dữ liệu quỹ
-    _loadPosFundData(modal, range);
+    // Load dữ liệu
+    _loadPosFundData(modal, range, 'all');
 }
 
-function _loadPosFundData(modal, range) {
+function _switchPosFundFilter(btn) {
+    var container = btn.parentNode;
+    var btns = container.querySelectorAll('.filter-btn');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+    }
+    btn.classList.add('active');
+
+    var modal = document.getElementById('managerDetailModal');
+    if (!modal) return;
+    var filter = btn.getAttribute('data-posfund-filter');
+    // Dùng range đã lưu trong modal, không gọi _getManagerDateRange() lại
+    var range = modal._posFundRange;
+    if (!range) range = _getManagerDateRange();
+    _loadPosFundData(modal, range, filter);
+}
+
+function _loadPosFundData(modal, range, filter) {
     var body = document.getElementById('mdBody');
     var summary = document.getElementById('mdSummary');
     if (!body) {
+        // Fallback: tìm trong modal
         body = modal.querySelector('#mdBody');
         summary = modal.querySelector('#mdSummary');
         if (!body) return;
@@ -929,49 +956,101 @@ function _loadPosFundData(modal, range) {
 
     body.innerHTML = '<div class="manager-detail-empty">\u23F3 \u0110ang t\u1EA3i...</div>';
 
+    // Đọc daily_balances từ Firebase theo date range
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-    var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
+    var ref = firebase.database().ref(shopId + '/daily_balances');
+    ref.orderByKey().startAt(range.startStr).endAt(range.endStr).once('value', function(snapshot) {
+        var data = snapshot.val() || {};
+        var dateKeys = Object.keys(data).sort().reverse();
 
-    fundRef.once('value', function(snapshot) {
-        var fundData = snapshot.val() || {};
-        var balance = fundData.balance || 0;
+        var days = [];
+        var totalSurplus = 0;  // Tổng số dương (+)
+        var totalDeficit = 0;  // Tổng số âm (-)
 
-        // Sử dụng hàm dùng chung _buildFundEntries() để xây dựng entries
-        var allEntries = _buildFundEntries(fundData);
+        for (var i = 0; i < dateKeys.length; i++) {
+            var dk = dateKeys[i];
+            var entry = data[dk];
+            if (!entry || !entry.isClosed) continue;
 
-        // Lọc theo date range
-        var filtered = [];
-        for (var fi = 0; fi < allEntries.length; fi++) {
-            var item = allEntries[fi];
-            if (item.dateKey && item.dateKey >= range.startStr && item.dateKey <= range.endStr) {
-                filtered.push(item);
-            }
+            var diff = entry.difference || 0;
+            var isNegative = diff < 0;
+            var isSurplus = diff > 0;
+
+            // Lọc theo số học: surplus = diff > 0, deficit = diff < 0
+            // Không dùng differenceType string vì dữ liệu cũ có thể không có
+            if (filter === 'surplus' && diff <= 0) continue;
+            if (filter === 'deficit' && diff >= 0) continue;
+
+            if (isSurplus) totalSurplus += diff;
+            if (isNegative) totalDeficit += diff;
+
+            var label = formatDateDisplay(dk);
+            var icon = isSurplus ? '\uD83D\uDFE2' : (isNegative ? '\uD83D\uDD34' : '\u26AA');
+            var typeLabel = isSurplus ? 'D\u01B0' : (isNegative ? 'Thi\u1EBFu' : 'C\u00E2n b\u1EB1ng');
+
+            days.push({
+                label: label,
+                dateKey: dk,
+                total: diff,
+                icon: icon,
+                typeLabel: typeLabel,
+                diffType: isSurplus ? 'surplus' : (isNegative ? 'deficit' : 'balanced')
+            });
         }
 
-        if (filtered.length === 0) {
-            body.innerHTML = '<div class="manager-detail-empty">\uD83D\uDCED Kh\u00F4ng c\u00F3 giao d\u1ECBch qu\u1EF9 trong k\u1EF3</div>';
+        if (days.length === 0) {
+            body.innerHTML = '<div class="manager-detail-empty">\uD83D\uDCED Kh\u00F4ng c\u00F3 d\u1EEF li\u1EC7u ch\u1ED1t ng\u00E0y trong k\u1EF3</div>';
             if (summary) summary.innerHTML = '';
             return;
         }
 
-        // Render summary: số dư hiện tại
+        // Render summary
         if (summary) {
-            var sumHtml = '<span class="summary-chip" style="color:#fbbf24;">\uD83C\uDFE6 S\u1ED1 d\u01B0 qu\u1EF9: <strong>' + formatMoney(balance) + '</strong></span>' +
-                '<span class="summary-chip">\uD83D\uDCCA S\u1ED1 giao d\u1ECBch: <strong>' + filtered.length + '</strong></span>';
+            var sumHtml = '';
+            if (totalSurplus > 0) {
+                sumHtml += '<span class="summary-chip" style="color:#2e7d32;">\uD83D\uDFE2 T\u1ED5ng d\u01B0 (+): <strong>' + formatMoney(totalSurplus) + '</strong></span>';
+            }
+            if (totalDeficit < 0) {
+                sumHtml += '<span class="summary-chip" style="color:#c62828;">\uD83D\uDD34 T\u1ED5ng thi\u1EBFu (-): <strong>' + formatMoney(totalDeficit) + '</strong></span>';
+            }
+            sumHtml += '<span class="summary-chip">\uD83D\uDCCA S\u1ED1 ng\u00E0y: <strong>' + days.length + '</strong></span>';
             summary.innerHTML = sumHtml;
         }
 
-        // Sử dụng hàm dùng chung _renderFundEntriesHTML() để render HTML
-        _renderFundEntriesHTML(filtered, {
-            showDeleteBtn: false,
-            showDetail: true,
-            maxDisplay: 0,
-            containerId: 'mdBody',
-            showMoreBtnId: ''
-        });
+        // Render danh sách ngày
+        var html = '';
+        for (var d = 0; d < days.length; d++) {
+            var day = days[d];
+            var isFirst = (d === 0);
+            var color = day.total > 0 ? '#2e7d32' : (day.total < 0 ? '#c62828' : '#666');
+
+            html += '<div class="md-accordion' + (isFirst ? ' expanded' : '') + '">' +
+                '<div class="md-accordion-header" onclick="_toggleMDAccordion(this)">' +
+                    '<div class="md-accordion-title">' +
+                        '<span class="md-accordion-icon">' + (isFirst ? '\u25BC' : '\u25B6') + '</span>' +
+                        '<span class="md-accordion-date">' + day.icon + ' ' + escapeHtml(day.label) + '</span>' +
+                    '</div>' +
+                    '<div class="md-accordion-total" style="color:' + color + ';">' +
+                        (day.total >= 0 ? '+' : '') + formatMoney(day.total) +
+                    '</div>' +
+                '</div>' +
+                '<div class="md-accordion-body" style="display:' + (isFirst ? 'block' : 'none') + ';">' +
+                    '<div class="md-method-row">' +
+                        '<div class="md-method-label">' + day.icon + ' ' + day.typeLabel + '</div>' +
+                        '<div class="md-method-right">' +
+                            '<span class="md-method-amount" style="color:' + color + ';">' +
+                                (day.total >= 0 ? '+' : '') + formatMoney(day.total) +
+                            '</span>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        body.innerHTML = html;
     }).catch(function(err) {
         console.error('_loadPosFundData error:', err);
-        body.innerHTML = '<div class="manager-detail-empty">\u274C L\u1ED7i t\u1EA3i d\u1EEF li\u1EC7u qu\u1EF9</div>';
+        body.innerHTML = '<div class="manager-detail-empty">\u274C L\u1ED7i t\u1EA3i d\u1EEF li\u1EC7u</div>';
     });
 }
 
@@ -1090,33 +1169,25 @@ function updateManagerBigValues(startStr, endStr) {
         _setBigValue('managerAdminExpense', totalMgmtCost);
         _setBigValue('managerTotalDebt', totalDebt);
         // managerTotalSalary do employees.js quản lý - cập nhật sau khi các big-value khác xong
-        // Tính period từ endStr: nếu endStr kết thúc ngày 19 → period = tháng trước đó
-        // VD: endStr=2026-07-19 → period=2026-06; endStr=2026-07-31 → period=2026-07
         if (typeof empUpdateManagerButton === 'function') {
-            var _endDay = parseInt(endStr.slice(8, 10));
-            var _endYear = parseInt(endStr.slice(0, 4));
-            var _endMonth = parseInt(endStr.slice(5, 7));
-            var _period;
-            if (_endDay === 19) {
-                // Period mode: period = tháng trước endStr
-                if (_endMonth === 1) {
-                    _period = (_endYear - 1) + '-12';
-                } else {
-                    _period = _endYear + '-' + String(_endMonth - 1).padStart(2, '0');
-                }
-            } else {
-                // Month/Day mode: period = tháng của endStr
-                _period = _endYear + '-' + String(_endMonth).padStart(2, '0');
-            }
-            empUpdateManagerButton(_period);
+            empUpdateManagerButton();
         }
 
-        // Cập nhật Quỹ POS: đọc số dư từ responsibility_fund
+        // Cập nhật Quỹ POS: đọc daily_balances từ Firebase
         var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-        var fundRef = firebase.database().ref(shopId + '/responsibility_fund/balance');
-        fundRef.once('value', function(snapshot) {
-            var balance = snapshot.val() || 0;
-            _setBigValue('managerPosFund', balance);
+        var posRef = firebase.database().ref(shopId + '/daily_balances');
+        posRef.orderByKey().startAt(startStr).endAt(endStr).once('value', function(snapshot) {
+            var balData = snapshot.val() || {};
+            var totalDiff = 0;
+            for (var bdk in balData) {
+                if (balData.hasOwnProperty(bdk)) {
+                    var entry = balData[bdk];
+                    if (entry && entry.isClosed) {
+                        totalDiff += entry.difference || 0;
+                    }
+                }
+            }
+            _setBigValue('managerPosFund', totalDiff);
         }).catch(function() {
             // Silent fail
         });

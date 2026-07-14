@@ -903,7 +903,7 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
 }
 
 // ========== LƯU CHI PHÍ HAO PHÍ ==========
-function saveWasteExpense(categoryName, amount, fundSource, fundHistoryKey) {
+function saveWasteExpense(categoryName, amount, fundSource) {
     var now = new Date();
     var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
 
@@ -958,8 +958,7 @@ function saveWasteExpense(categoryName, amount, fundSource, fundHistoryKey) {
             dateKey: dateKey,
             createdAt: Date.now(),
             createdBy: (DB.getCurrentUser() && DB.getCurrentUser().id) || window.currentDeviceId || '',
-            deleted: false,
-            fundHistoryKey: fundHistoryKey || null
+            deleted: false
         };
         return DB.create('cost_transactions', costData);
     };
@@ -2697,18 +2696,6 @@ function confirmEditExpense(id) {
         return;
     }
 
-    // Lưu thông tin cũ để điều chỉnh quỹ sau này
-    var oldTx = _findTxInCache(id);
-    var oldAmount = oldTx ? oldTx.amount : 0;
-    var oldName = oldTx ? oldTx.categoryName : '';
-    var oldFundSource = oldTx ? oldTx.fundSource : '';
-    
-    // Xác định xem có cần điều chỉnh quỹ không
-    // - Cũ là "Quỹ trách nhiệm" + pos_cash → cần hoàn lại oldAmount
-    // - Mới là "Quỹ trách nhiệm" + pos_cash → cần trừ newAmount
-    var wasFundExpense = oldName === 'Quỹ trách nhiệm' && oldFundSource === 'pos_cash';
-    var willBeFundExpense = newName === 'Quỹ trách nhiệm'; // fundSource giữ nguyên pos_cash
-
     var updateData = {
         categoryName: newName,
         amount: newAmount
@@ -2734,19 +2721,6 @@ function confirmEditExpense(id) {
     DB.update('cost_transactions', id, updateData).then(function() {
         return loadExpenseData();
     }).then(function() {
-        // Điều chỉnh quỹ nếu liên quan đến "Quỹ trách nhiệm"
-        if (wasFundExpense && willBeFundExpense) {
-            // Cả cũ và mới đều là quỹ trách nhiệm → điều chỉnh chênh lệch
-            if (oldAmount !== newAmount) {
-                _adjustFundForExpenseChange('edit', oldAmount, newAmount);
-            }
-        } else if (wasFundExpense && !willBeFundExpense) {
-            // Đổi từ quỹ trách nhiệm → loại khác → hoàn lại toàn bộ
-            _adjustFundForExpenseChange('edit', oldAmount, 0);
-        } else if (!wasFundExpense && willBeFundExpense) {
-            // Đổi từ loại khác → quỹ trách nhiệm → trừ tiền (ghi nhận rút quỹ)
-            _adjustFundForExpenseChange('edit', 0, newAmount);
-        }
         showToast('✅ Đã cập nhật chi phí', 'success');
         cancelEditExpense();
         renderTodayExpenses();
@@ -2892,10 +2866,6 @@ function doDeleteExpense(tx, id, revertStock) {
     }).then(function() {
         return loadExpenseData();
     }).then(function() {
-        // Nếu xóa chi phí "Quỹ trách nhiệm" → hoàn lại tiền vào quỹ
-        if (tx && tx.categoryName === 'Quỹ trách nhiệm' && tx.fundSource === 'pos_cash' && tx.amount > 0) {
-            _adjustFundForExpenseChange('delete', tx.amount, 0);
-        }
         showToast('🗑️ Đã xóa chi phí', 'success');
         renderTodayExpenses();
         renderMonthExpenseTotal();
@@ -2904,62 +2874,6 @@ function doDeleteExpense(tx, id, revertStock) {
         console.error('Delete expense error:', err);
         showToast('Lỗi khi xóa chi phí!', 'error');
     });
-}
-
-// Điều chỉnh quỹ trách nhiệm khi xóa/sửa chi phí liên quan
-// type: 'delete' | 'edit'
-// oldAmount: số tiền cũ của chi phí
-// newAmount: số tiền mới (0 nếu xóa)
-function _adjustFundForExpenseChange(type, oldAmount, newAmount) {
-    try {
-        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-        var fundRef = firebase.database().ref(shopId + '/responsibility_fund');
-        
-        fundRef.child('balance').once('value').then(function(snapshot) {
-            var currentBalance = snapshot.val() || 0;
-            
-            // Tính số tiền cần điều chỉnh
-            // Xóa: hoàn lại oldAmount (balance + oldAmount)
-            // Sửa: hoàn oldAmount, trừ newAmount (balance + oldAmount - newAmount)
-            var adjustment = oldAmount - newAmount;
-            var newBalance = currentBalance + adjustment;
-            
-            // Nếu sửa tăng số tiền, kiểm tra không vượt quá quỹ
-            // (adjustment âm = đang trừ thêm tiền từ quỹ)
-            // Cho phép âm quỹ nhưng cảnh báo
-            if (adjustment < 0 && newBalance < 0) {
-                // Cảnh báo quỹ sẽ âm nhưng vẫn cho phép
-            }
-            
-            var note = '';
-            if (type === 'delete') {
-                note = 'Hoàn lại từ xóa chi phí';
-            } else {
-                note = 'Điều chỉnh từ sửa chi phí (cũ: ' + formatMoney(oldAmount) + ' → mới: ' + formatMoney(newAmount) + ')';
-            }
-            
-            var historyEntry = {
-                type: 'refund',
-                amount: adjustment,
-                balanceBefore: currentBalance,
-                balanceAfter: newBalance,
-                note: note,
-                createdAt: Date.now(),
-                createdBy: window.currentDeviceId || 'system'
-            };
-            
-            var historyRef = fundRef.child('history').push();
-            var updates = {};
-            updates['balance'] = newBalance;
-            updates['history/' + historyRef.key] = historyEntry;
-            
-            return fundRef.update(updates);
-        }).catch(function(err) {
-            // Bỏ qua lỗi, không ảnh hưởng chính
-        });
-    } catch (e) {
-        // Bỏ qua lỗi
-    }
 }
 
 // ========== GẮN SỰ KIỆN ==========

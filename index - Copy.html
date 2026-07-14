@@ -174,23 +174,21 @@
                     <button class="nav-btn" id="prevDayBtn">◀</button>
                     <div class="date-display">📅 <span id="historyDate">--/--/----</span></div>
                     <button class="nav-btn" id="nextDayBtn">▶</button>
+                    <select id="historyFilter" class="filter-select">
+                        <option value="all">📋 Tất cả</option>
+                        <option value="dinein">🍽️ Tại chỗ</option>
+                        <option value="takeaway">🛵 Mang đi</option>
+                        <option value="grab">🚕 Grab</option>
+                        <option value="cash">💰 Tiền mặt</option>
+                        <option value="transfer">💳 Chuyển khoản</option>
+                        <option value="debt">💢 Ghi nợ</option>
+                        <option value="debt_payment">💵 Trả nợ</option>
+                        <option value="credit">💰 Tiền dư</option>
+                        <option value="cancelled">❌ Đã hủy</option>
+                    </select>
                 </div>
-                <div class="history-filter-chips" id="historyFilterChips">
-                    <button class="filter-chip active" data-filter="all" title="Tất cả">📋</button>
-                    <button class="filter-chip" data-filter="dinein" title="Tại chỗ">🍽️</button>
-                    <button class="filter-chip" data-filter="takeaway" title="Mang đi" style="display:none;">🛵</button>
-                    <button class="filter-chip" data-filter="grab" title="Grab">🚕</button>
-                    <button class="filter-chip" data-filter="cash" title="Tiền mặt">💰</button>
-                    <button class="filter-chip" data-filter="transfer" title="Chuyển khoản">💳</button>
-                    <button class="filter-chip" data-filter="debt" title="Ghi nợ">💢</button>
-                    <button class="filter-chip" data-filter="debt_payment" title="Trả nợ / Đưa trước">💵</button>
-                    <button class="filter-chip" data-filter="delete_table" title="Xóa bàn / Hoàn tác">🗑️</button>
-                </div>
-                <div class="history-filter-row" id="historyFilterRow">
-                    <div class="history-search">
-                        <input type="text" id="historySearchInput" class="search-input" placeholder="🔍 Tìm..." oninput="onHistorySearch()">
-                    </div>
-                    <div class="history-staff-chips" id="historyStaffChips"></div>
+                <div class="history-search">
+                    <input type="text" id="historySearchInput" class="search-input" placeholder="🔍 Tìm theo số tiền, tên món, tên khách..." oninput="onHistorySearch()">
                 </div>
                 <div class="history-list" id="historyList"></div>
             </div>

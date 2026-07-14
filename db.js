@@ -1,19 +1,18 @@
-﻿// ========== db.js ES5 - Tương thích Android 6, iOS 16 ==========
+﻿// ========== db.js ES5 - TÆ°Æ¡ng thÃ­ch Android 6, iOS 16 ==========
 (function() {
     // Polyfill CustomEvent
     if (typeof window.CustomEvent !== "function") {
-        window.CustomEvent = function(event, params) {
-            params = params || { bubbles: false, cancelable: false, detail: undefined };
+        function CustomEvent(event, params) {
+            params = params || { bubbles: false, cancelable: false, detail: null };
             var evt = document.createEvent('CustomEvent');
             evt.initCustomEvent(event, params.bubbles, params.cancelable, params.detail);
             return evt;
-        };
-        window.CustomEvent.prototype = window.Event.prototype;
+        }
+        window.CustomEvent = CustomEvent;
     }
 
-    // ========== MASTER-SLAVE FIREBASE CONFIG ==========
-    // Firebase Master (luôn tồn tại - project posmilano)
-    var MASTER_CONFIG = {
+    // Firebase Config
+    var firebaseConfig = {
         apiKey: "AIzaSyCQFIzj8m3kpsE_x354xxJ8MTAuRG9eCx4",
         authDomain: "posmilano.firebaseapp.com",
         projectId: "posmilano",
@@ -23,155 +22,9 @@
         appId: "1:34185947554:web:925f29864d3b17b8d46afb",
         measurementId: "G-J3MX8EL1C8"
     };
-    // Khởi tạo DEFAULT app trước để tương thích với các file cũ (telegram.js, employees.js, ...)
-    // vẫn gọi firebase.database(), firebase.auth() mà không có app name
-    // Sau đó lấy reference đến masterApp (có thể là DEFAULT app nếu không tạo được app riêng)
-    var masterApp, masterDb, auth;
-    try {
-        // Thử tạo DEFAULT app trước
-        firebase.initializeApp(MASTER_CONFIG);
-        masterApp = firebase.app(); // DEFAULT app
-        masterDb = masterApp.database();
-        auth = firebase.auth();
-    } catch(e) {
-        // Nếu DEFAULT app đã tồn tại (do script load lại), dùng nó luôn
-        masterApp = firebase.app();
-        masterDb = masterApp.database();
-        auth = firebase.auth();
-    }
-    
-    // Firebase Slave (chỉ tồn tại nếu POS có config riêng)
-    var slaveApp = null;
-    var slaveDb = null;
-    var slaveConfig = null;
-    
-    // Biến db cũ giữ để tương thích ngược, trỏ về masterDb
-    var db = masterDb;
-    
-    // Collection LUÔN ở Master (staff, registry, firebase_config)
-    var MASTER_ONLY_COLLECTIONS = {
-        staffs: true,
-        shop_registry: true,
-        firebase_config: true,
-        master_admins: true
-    };
-    
-    // Helper: trả về đúng DB instance dựa trên collection
-    function _getDb(collection) {
-        if (MASTER_ONLY_COLLECTIONS[collection]) return masterDb;
-        return slaveDb || masterDb; // Fallback về Master nếu không có Slave
-    }
-    
-    // Helper: khởi tạo/hủy Slave Firebase App
-    function _initSlaveApp(shopId, fbConfig) {
-        var appName = 'slave_' + shopId;
-        // Hủy Slave cũ nếu có
-        if (slaveApp) {
-            try {
-                var oldName = slaveApp.name;
-                slaveApp.delete();
-            } catch(e) {}
-            slaveApp = null;
-            slaveDb = null;
-            slaveConfig = null;
-        }
-        // Kiểm tra nếu app đã tồn tại (do lỗi)
-        try {
-            var existing = firebase.app(appName);
-            if (existing) {
-                try { existing.delete(); } catch(e) {}
-            }
-        } catch(e) {
-            // App chưa tồn tại, tạo mới
-        }
-        try {
-            slaveApp = firebase.initializeApp(fbConfig, appName);
-            slaveDb = slaveApp.database();
-            slaveConfig = fbConfig;
-            return Promise.resolve();
-        } catch(e) {
-            console.error('[db.js] Lỗi khởi tạo Slave Firebase:', e);
-            return Promise.reject(e);
-        }
-    }
-    
-    // Helper: huỷ tất cả Firebase listeners
-    function _destroyAllListeners() {
-        for (var collection in listeners) {
-            if (listeners.hasOwnProperty(collection)) {
-                var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
-                var colListeners = listeners[collection];
-                for (var i = 0; i < colListeners.length; i++) {
-                    var l = colListeners[i];
-                    if (l.value) ref.off('value', l.value);
-                    if (l.child_added) ref.off('child_added', l.child_added);
-                    if (l.child_changed) ref.off('child_changed', l.child_changed);
-                    if (l.child_removed) ref.off('child_removed', l.child_removed);
-                }
-            }
-        }
-        listeners = {};
-    }
-    
-    // Config hash để phát hiện thay đổi Firebase config
-    var CONFIG_HASH_KEY = 'pos_firebase_config_hash';
-    function _getConfigHash(fbConfig) {
-        if (!fbConfig) return 'master';
-        return fbConfig.databaseURL || fbConfig.apiKey || 'custom';
-    }
-
-    // Helper: di chuyển dữ liệu từ Master DB sang Slave DB khi đổi Firebase config
-    // Chỉ migrate các collection không phải MASTER_ONLY (staffs, shop_registry, firebase_config, master_admins)
-    function _migrateData(shopId, oldDb, newDb) {
-        var collections = [];
-        for (var c in MASTER_COLLECTIONS) {
-            if (MASTER_COLLECTIONS.hasOwnProperty(c) && !MASTER_ONLY_COLLECTIONS[c]) {
-                collections.push(c);
-            }
-        }
-        for (var c in DATE_BASED_COLLECTIONS) {
-            if (DATE_BASED_COLLECTIONS.hasOwnProperty(c)) {
-                collections.push(c);
-            }
-        }
-        // Thêm các collection đặc biệt
-        collections.push('messages');
-        collections.push('admin_cost_categories');
-        collections.push('cost_transactions_admin');
-
-        var chain = Promise.resolve();
-        var migratedCount = 0;
-
-        for (var i = 0; i < collections.length; i++) {
-            chain = chain.then((function(collection) {
-                return function() {
-                    return oldDb.ref(shopId + '/' + collection).once('value').then(function(snapshot) {
-                        if (!snapshot.exists()) return;
-                        var data = snapshot.val();
-                        var updates = {};
-                        for (var key in data) {
-                            if (data.hasOwnProperty(key)) {
-                                updates[key] = data[key];
-                            }
-                        }
-                        if (Object.keys(updates).length > 0) {
-                            return newDb.ref(shopId + '/' + collection).update(updates).then(function() {
-                                migratedCount++;
-                                console.log('  📦 Migrated', collection, ':', Object.keys(updates).length, 'items');
-                            });
-                        }
-                    }).catch(function(err) {
-                        console.warn('  ⚠️ Migration warning for', collection, ':', err.message);
-                    });
-                };
-            })(collections[i]));
-        }
-
-        return chain.then(function() {
-            console.log('✅ Migration completed:', migratedCount, 'collections migrated');
-            return migratedCount;
-        });
-    }
+    firebase.initializeApp(firebaseConfig);
+    var db = firebase.database();
+    var auth = firebase.auth();
 
     // Constants
     var STORE_NAME = 'pos_data';
@@ -729,12 +582,11 @@
     }
     
     // OPTIMIZE: Batch sync nhiá»u items cÃ¹ng collection lÃªn Firebase trong 1 láº§n
-    // DÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave tÃ¹y theo collection
     function _batchSyncToFirebase(items) {
         if (items.length === 0) return Promise.resolve();
         var collection = items[0].collection;
         var action = items[0].action;
-        var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+        var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
         var batchData = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
@@ -793,7 +645,7 @@
     }
 
     function syncToFirebase(item) {
-        var ref = _getDb(item.collection).ref(CURRENT_SHOP_ID + '/' + item.collection + '/' + item.targetId);
+        var ref = db.ref(CURRENT_SHOP_ID + '/' + item.collection + '/' + item.targetId);
         var syncData = {};
         for (var k in item.data) if (item.data.hasOwnProperty(k)) syncData[k] = item.data[k];
         syncData._syncedAt = firebase.database.ServerValue.TIMESTAMP;
@@ -928,7 +780,7 @@
                             var key = CURRENT_SHOP_ID + '/' + firebasePath + '/' + items[i].id + '/sortOrder';
                             updates[key] = items[i].sortOrder;
                         }
-                        masterDb.ref().update(updates).catch(function(err) {
+                        db.ref().update(updates).catch(function(err) {
                             console.error('Lá»—i batch sync sortOrder cho ' + collection + ':', err);
                         });
                     }
@@ -1206,8 +1058,7 @@
     
     // OPTIMIZE: Há»— trá»£ query options (limitToLast, orderByChild) Ä‘á»ƒ giáº£m dung lÆ°á»£ng download
     // VÃ­ dá»¥: { limitToLast: 200, orderByChild: 'createdAt' } chá»‰ láº¥y 200 item má»›i nháº¥t
-    // DÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave tÃ¹y theo collection
-    var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+    var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
     if (options && options.orderByChild) {
         var queryRef = ref.orderByChild(options.orderByChild);
         if (options.limitToLast) {
@@ -1405,8 +1256,7 @@
             };
         }
         
-        // DÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave tÃ¹y theo collection
-        var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+        var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
         
         // Load lần đầu (chỉ 1 lần) — dùng deltaSync nếu đã có sync_meta
         getSyncMeta(collection).then(function(meta) {
@@ -1637,8 +1487,7 @@
     // Lấy maxVersion của 1 collection từ Firebase _meta node
     function getMaxVersionFromFirebase(collection) {
         if (!isOnline) return Promise.resolve(0);
-        // Dùng _getDb() để chọn Master/Slave tùy theo collection
-        return _getDb(collection).ref(CURRENT_SHOP_ID + '/_meta/' + collection + '/maxVersion').once('value').then(function(snapshot) {
+        return db.ref(CURRENT_SHOP_ID + '/_meta/' + collection + '/maxVersion').once('value').then(function(snapshot) {
             return snapshot.val() || 0;
         }).catch(function() { return 0; });
     }
@@ -1646,8 +1495,7 @@
     // Cập nhật maxVersion lên Firebase _meta node
     function updateMetaOnFirebase(collection, maxVersion) {
         if (!isOnline) return Promise.resolve();
-        // Dùng _getDb() để chọn Master/Slave tùy theo collection
-        return _getDb(collection).ref(CURRENT_SHOP_ID + '/_meta/' + collection).update({
+        return db.ref(CURRENT_SHOP_ID + '/_meta/' + collection).update({
             maxVersion: maxVersion,
             lastUpdatedAt: firebase.database.ServerValue.TIMESTAMP
         }).catch(function(err) {
@@ -1784,8 +1632,7 @@
         }
         
         return new Promise(function(resolve, reject) {
-            // DÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave tÃ¹y theo collection
-            var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+            var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
             
             // Nếu là date-based, chỉ lấy 30 ngày gần nhất
             if (isDateBased) {
@@ -1909,8 +1756,7 @@
             
             return new Promise(function(resolve, reject) {
                 // Query Firebase: lấy items có _version > localMaxVersion
-                // Dùng _getDb() để chọn Master/Slave tùy theo collection
-                var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+                var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
                 var queryRef = ref.orderByChild('_version').startAt(localMaxVersion + 1);
                 
                 queryRef.once('value', function(snapshot) {
@@ -2009,8 +1855,7 @@
             if (localIds.length === 0) return;
         
             // Query Firebase để lấy tất cả keys hiện tại (chỉ lấy keys, không lấy data - nhẹ)
-            // Dùng _getDb() để chọn Master/Slave tùy theo collection
-            var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+            var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
             return ref.once('value').then(function(snapshot) {
                 var remoteData = snapshot.val() || {};
                 var remoteIds = Object.keys(remoteData);
@@ -2113,8 +1958,7 @@
             console.log('  📥 Fetching', collection, 'for date:', dateKey);
             
             return new Promise(function(resolve, reject) {
-                // Dùng _getDb() để chọn Master/Slave tùy theo collection
-                var ref = _getDb(collection).ref(CURRENT_SHOP_ID + '/' + collection);
+                var ref = db.ref(CURRENT_SHOP_ID + '/' + collection);
                 ref.orderByChild('dateKey').equalTo(dateKey).once('value', function(snapshot) {
                     if (!snapshot.exists()) {
                         // Không có dữ liệu cho ngày này, nhưng vẫn lưu dateKey vào sync_meta
@@ -2257,9 +2101,8 @@
     }
 
     // Seed dá»¯ liá»‡u cho POS máº·c Ä‘á»‹nh (shop_default) náº¿u chÆ°a cÃ³ shop_registry
-    // LUÃ”N ghi vÃ o Master DB
     function seedDefaultShop() {
-        return masterDb.ref('shop_registry/123123').once('value').then(function(snapshot) {
+        return db.ref('shop_registry/123123').once('value').then(function(snapshot) {
             if (snapshot.exists()) return; // ÄÃ£ cÃ³ rá»“i, khÃ´ng cáº§n seed
             
             console.log('ðŸŒ± Seeding default shop data...');
@@ -2271,8 +2114,7 @@
                 shopId: 'shop_default',
                 shopName: 'MILANO COFFEE 259',
                 shopCode: '123123',
-                createdAt: Date.now(),
-                status: 'active'
+                createdAt: Date.now()
             };
             
             // Táº¡o staff admin cho shop_default
@@ -2307,7 +2149,7 @@
                 tableLockHours: 5
             };
             
-            return masterDb.ref().update(updates).then(function() {
+            return db.ref().update(updates).then(function() {
                 console.log('âœ… Default shop seeded: mÃ£ 123123, user admin123123, pass 123123');
             });
         }).catch(function(err) {
@@ -2316,10 +2158,9 @@
     }
 
     // Tá»± Ä‘á»™ng táº¡o config fields cho shop hiá»‡n táº¡i náº¿u chÆ°a cÃ³
-    // DÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave tÃ¹y theo collection
     function ensureShopConfig() {
         // Äáº£m báº£o cÃ¡c config fields tá»“n táº¡i trong /info
-        return _getDb('info').ref(CURRENT_SHOP_ID + '/info').once('value').then(function(snapshot) {
+        return db.ref(CURRENT_SHOP_ID + '/info').once('value').then(function(snapshot) {
             var info = snapshot.val() || {};
             var needsUpdate = false;
             var defaults = {
@@ -2346,7 +2187,7 @@
             }
             if (needsUpdate) {
                 console.log('âš™ï¸ Adding missing config fields to shop info...');
-                return _getDb('info').ref(CURRENT_SHOP_ID + '/info').update(updates).then(function() {
+                return db.ref(CURRENT_SHOP_ID + '/info').update(updates).then(function() {
                     console.log('âœ… Shop config fields created');
                 });
             }
@@ -2502,7 +2343,7 @@
                 if (!_pollingTimers['menu']) {
                     _pollingTimers['menu'] = setInterval(function() {
                         if (!isOnline) return;
-                        var ref = _getDb('menu').ref(CURRENT_SHOP_ID + '/menu');
+                        var ref = db.ref(CURRENT_SHOP_ID + '/menu');
                         getSyncMeta('menu').then(function(meta) {
                             var localMaxVersion = (meta && meta.maxVersion) || 0;
                             ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
@@ -2533,7 +2374,7 @@
                 if (!_pollingTimers['menu_categories']) {
                     _pollingTimers['menu_categories'] = setInterval(function() {
                         if (!isOnline) return;
-                        var ref = _getDb('menu_categories').ref(CURRENT_SHOP_ID + '/menu_categories');
+                        var ref = db.ref(CURRENT_SHOP_ID + '/menu_categories');
                         getSyncMeta('menu_categories').then(function(meta) {
                             var localMaxVersion = (meta && meta.maxVersion) || 0;
                             ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
@@ -2564,7 +2405,7 @@
                 if (!_pollingTimers['ingredients']) {
                     _pollingTimers['ingredients'] = setInterval(function() {
                         if (!isOnline) return;
-                        var ref = _getDb('ingredients').ref(CURRENT_SHOP_ID + '/ingredients');
+                        var ref = db.ref(CURRENT_SHOP_ID + '/ingredients');
                         getSyncMeta('ingredients').then(function(meta) {
                             var localMaxVersion = (meta && meta.maxVersion) || 0;
                             ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
@@ -2595,7 +2436,7 @@
                 if (!_pollingTimers['messages']) {
                     _pollingTimers['messages'] = setInterval(function() {
                         if (!isOnline) return;
-                        var ref = _getDb('messages').ref(CURRENT_SHOP_ID + '/messages');
+                        var ref = db.ref(CURRENT_SHOP_ID + '/messages');
                         getSyncMeta('messages').then(function(meta) {
                             var localMaxVersion = (meta && meta.maxVersion) || 0;
                             ref.orderByChild('_version').startAt(localMaxVersion + 1).once('value', function(snapshot) {
@@ -2702,73 +2543,20 @@
     }
     
     // ÄÄƒng nháº­p: kiá»ƒm tra shopCode -> láº¥y shopId -> verify staff credentials
-    // Há»— trá»£: master_admin (shopCode='master'), POS cÃ³ firebase_config riÃªng, migration tá»± Ä‘á»™ng
     function login(shopCode, username, password) {
         if (!shopCode || !username || !password) {
             return Promise.reject(new Error('Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ thÃ´ng tin'));
         }
-
-        // ===== TRÆ¯á»œNG Há»¢P 1: Master Admin login =====
-        if (shopCode === 'master') {
-            return masterDb.ref('master_admins').once('value').then(function(snapshot) {
-                var admins = snapshot.val() || {};
-                var foundAdmin = null;
-                for (var key in admins) {
-                    if (admins.hasOwnProperty(key)) {
-                        var a = admins[key];
-                        if (a.username === username && a.password === password) {
-                            foundAdmin = a;
-                            foundAdmin.id = key;
-                            break;
-                        }
-                    }
-                }
-                if (!foundAdmin) {
-                    throw new Error('Sai tÃªn Ä‘Äƒng nháº­p hoáº·c máº­t kháº©u Master Admin');
-                }
-                return clearLocalData().then(function() {
-                    currentUser = {
-                        id: foundAdmin.id,
-                        username: foundAdmin.username,
-                        displayName: foundAdmin.displayName || foundAdmin.username,
-                        role: 'master_admin',
-                        shopId: 'master',
-                        shopCode: 'master',
-                        shopName: 'Master Admin'
-                    };
-                    localStorage.setItem('pos_session', JSON.stringify(currentUser));
-                    setShopId('master');
-                    // Master admin khÃ´ng cáº§n Slave App
-                    if (slaveApp) {
-                        try { slaveApp.delete(); } catch(e) {}
-                        slaveApp = null;
-                        slaveDb = null;
-                        slaveConfig = null;
-                    }
-                    return currentUser;
-                });
-            });
-        }
-
-        // ===== TRÆ¯á»œNG Há»¢P 2: POS login (shopCode bÃ¬nh thÆ°á»ng) =====
-        // Tra cá»©u shopCode trong shop_registry (LUÃ”N á»Ÿ Master)
-        return masterDb.ref('shop_registry/' + shopCode).once('value').then(function(snapshot) {
+        // Tra cá»©u shopCode trong shop_registry
+        return db.ref('shop_registry/' + shopCode).once('value').then(function(snapshot) {
             if (!snapshot.exists()) {
                 throw new Error('MÃ£ POS khÃ´ng tá»“n táº¡i');
             }
             var shopInfo = snapshot.val();
             var shopId = shopInfo.shopId;
-
-            // Kiá»ƒm tra tráº¡ng thÃ¡i POS (locked/active)
-            if (shopInfo.status === 'locked') {
-                throw new Error('POS nÃ y Ä‘Ã£ bá»‹ khÃ³a. Vui lÃ²ng liÃªn há»‡ Admin Master.');
-            }
-            if (shopInfo.status === 'deleted') {
-                throw new Error('POS nÃ y Ä‘Ã£ bá»‹ xÃ³a. Vui lÃ²ng liÃªn há»‡ Admin Master.');
-            }
-
-            // Kiá»ƒm tra staff credentials (staff LUÃ”N á»Ÿ Master)
-            return masterDb.ref(shopId + '/staffs').once('value').then(function(staffSnapshot) {
+            
+            // Kiá»ƒm tra staff credentials trong shops/{shopId}/staffs
+            return db.ref(shopId + '/staffs').once('value').then(function(staffSnapshot) {
                 var staffs = staffSnapshot.val() || {};
                 var foundStaff = null;
                 for (var key in staffs) {
@@ -2784,72 +2572,32 @@
                 if (!foundStaff) {
                     throw new Error('Sai tÃªn Ä‘Äƒng nháº­p hoáº·c máº­t kháº©u');
                 }
-
-                // Äá»c firebase_config tá»« Master (náº¿u cÃ³)
-                return masterDb.ref('firebase_config/' + shopId).once('value').then(function(configSnapshot) {
-                    var fbConfig = configSnapshot.val() || null;
-                    var oldConfigHash = localStorage.getItem(CONFIG_HASH_KEY);
-                    var newConfigHash = _getConfigHash(fbConfig);
-
-                    // XÃ³a dá»¯ liá»‡u local cÅ© trÆ°á»›c khi chuyá»ƒn POS
-                    return clearLocalData().then(function() {
-                        // Náº¿u cÃ³ firebase_config riÃªng
-                        if (fbConfig) {
-                            // PhÃ¡t hiá»‡n thay Ä‘á»•i config -> cáº§n migration
-                            if (oldConfigHash && oldConfigHash !== 'master' && oldConfigHash !== newConfigHash) {
-                                console.log('ðŸ”€ PhÃ¡t hiá»‡n thay Ä‘á»•i Firebase config, chuáº©n bá»‹ migration...');
-                                // Khá»Ÿi táº¡o Slave má»›i trÆ°á»›c
-                                return _initSlaveApp(shopId, fbConfig).then(function() {
-                                    // Migrate dá»¯ liá»‡u tá»« Master (DB cÅ©) sang Slave (DB má»›i)
-                                    return _migrateData(shopId, masterDb, slaveDb).then(function() {
-                                        localStorage.setItem(CONFIG_HASH_KEY, newConfigHash);
-                                        console.log('ðŸ”€ Migration hoÃ n táº¥t cho', shopId);
-                                    });
-                                });
-                            } else {
-                                // Khá»Ÿi táº¡o Slave App vá»›i config má»›i
-                                return _initSlaveApp(shopId, fbConfig).then(function() {
-                                    localStorage.setItem(CONFIG_HASH_KEY, newConfigHash);
-                                });
-                            }
-                        } else {
-                            // KhÃ´ng cÃ³ config riÃªng -> dÃ¹ng Master
-                            localStorage.setItem(CONFIG_HASH_KEY, 'master');
-                            // Há»§y Slave náº¿u Ä‘ang tá»“n táº¡i
-                            if (slaveApp) {
-                                try { slaveApp.delete(); } catch(e) {}
-                                slaveApp = null;
-                                slaveDb = null;
-                                slaveConfig = null;
-                            }
-                        }
-
-                        // LÆ°u session
-                        currentUser = {
-                            id: foundStaff.id,
-                            username: foundStaff.username,
-                            displayName: foundStaff.displayName || foundStaff.username,
-                            role: foundStaff.role || 'staff',
-                            shopId: shopId,
-                            shopCode: shopCode,
-                            shopName: shopInfo.shopName || '',
-                            hasCustomConfig: !!fbConfig
-                        };
-                        localStorage.setItem('pos_session', JSON.stringify(currentUser));
-
-                        // Cáº­p nháº­t shopId
-                        setShopId(shopId);
-
-                        return currentUser;
-                    });
+                
+                // XÃ³a dá»¯ liá»‡u local cÅ© trÆ°á»›c khi chuyá»ƒn POS
+                return clearLocalData().then(function() {
+                    // LÆ°u session
+                    currentUser = {
+                        id: foundStaff.id,
+                        username: foundStaff.username,
+                        displayName: foundStaff.displayName || foundStaff.username,
+                        role: foundStaff.role || 'staff',
+                        shopId: shopId,
+                        shopCode: shopCode,
+                        shopName: shopInfo.shopName || ''
+                    };
+                    localStorage.setItem('pos_session', JSON.stringify(currentUser));
+                    
+                    // Cáº­p nháº­t shopId
+                    setShopId(shopId);
+                    
+                    return currentUser;
                 });
             });
         });
     }
     
     // ÄÄƒng kÃ½ POS má»›i (táº¡o shop + admin)
-    // Tham sá»‘ firebaseConfig (tÃ¹y chá»n): náº¿u cÃ³, POS sáº½ dÃ¹ng Firebase riÃªng
-    function registerShop(shopName, shopCode, adminUser, adminPass, firebaseConfig) {
+    function registerShop(shopName, shopCode, adminUser, adminPass) {
         if (!shopName || !shopCode || !adminUser || !adminPass) {
             return Promise.reject(new Error('Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ thÃ´ng tin'));
         }
@@ -2860,8 +2608,8 @@
             return Promise.reject(new Error('Máº­t kháº©u pháº£i cÃ³ Ã­t nháº¥t 4 kÃ½ tá»±'));
         }
         
-        // Kiá»ƒm tra shopCode Ä‘Ã£ tá»“n táº¡i chÆ°a (LUÃ”N á»Ÿ Master)
-        return masterDb.ref('shop_registry/' + shopCode).once('value').then(function(snapshot) {
+        // Kiá»ƒm tra shopCode Ä‘Ã£ tá»“n táº¡i chÆ°a
+        return db.ref('shop_registry/' + shopCode).once('value').then(function(snapshot) {
             if (snapshot.exists()) {
                 throw new Error('MÃ£ POS nÃ y Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng kÃ½');
             }
@@ -2886,12 +2634,10 @@
                 shopId: shopId,
                 shopName: shopName,
                 shopCode: shopCode,
-                createdAt: Date.now(),
-                status: 'active',
-                hasCustomConfig: !!firebaseConfig
+                createdAt: Date.now()
             };
             
-            // Batch write: shop_registry + shop data + staff (LUÃ”N á»Ÿ Master)
+            // Batch write: shop_registry + shop data + staff
             var updates = {};
             updates['shop_registry/' + shopCode] = registryData;
             updates[shopId + '/staffs/' + staffId] = staffData;
@@ -2902,15 +2648,7 @@
                 createdAt: Date.now()
             };
             
-            // Náº¿u cÃ³ firebaseConfig, lÆ°u vÃ o firebase_config (LUÃ”N á»Ÿ Master)
-            if (firebaseConfig) {
-                updates['firebase_config/' + shopId] = firebaseConfig;
-            }
-            
-            // Luôn tạo tài khoản master_admin mặc định
-            updates['master_admins/' + masterAdminId] = masterAdminData;
-            
-            return masterDb.ref().update(updates).then(function() {
+            return db.ref().update(updates).then(function() {
                 // XÃ³a dá»¯ liá»‡u local cÅ© trÆ°á»›c khi chuyá»ƒn POS má»›i
                 return clearLocalData();
             }).then(function() {
@@ -2922,8 +2660,7 @@
                     role: 'admin',
                     shopId: shopId,
                     shopCode: shopCode,
-                    shopName: shopName,
-                    hasCustomConfig: !!firebaseConfig
+                    shopName: shopName
                 };
                 localStorage.setItem('pos_session', JSON.stringify(currentUser));
                 setShopId(shopId);
@@ -2932,9 +2669,9 @@
         });
     }
     
-    // Táº¡o nhÃ¢n viÃªn má»›i (chá»‰ admin) - staff LUÃ”N á»Ÿ Master
+    // Táº¡o nhÃ¢n viÃªn má»›i (chá»‰ admin)
     function createStaff(staffData) {
-        if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'master_admin')) {
+        if (!currentUser || currentUser.role !== 'admin') {
             return Promise.reject(new Error('Chá»‰ admin má»›i cÃ³ thá»ƒ táº¡o nhÃ¢n viÃªn'));
         }
         if (!staffData.username || !staffData.password) {
@@ -2952,8 +2689,7 @@
             createdBy: currentUser.id
         };
         
-        // Staff LUÃ”N ghi vÃ o Master
-        var ref = masterDb.ref(CURRENT_SHOP_ID + '/staffs/' + staffId);
+        var ref = db.ref(CURRENT_SHOP_ID + '/staffs/' + staffId);
         return ref.set(data).then(function() {
             // LÆ°u vÃ o IndexedDB local
             return saveToLocal('staffs', data);
@@ -2962,14 +2698,14 @@
         });
     }
     
-    // Láº¥y danh sÃ¡ch nhÃ¢n viÃªn - staff LUÃ”N á»Ÿ Master
+    // Láº¥y danh sÃ¡ch nhÃ¢n viÃªn
     function getStaffs() {
         // Æ¯u tiÃªn Ä‘á»c tá»« local cache trÆ°á»›c
         return getAll('staffs').then(function(localStaffs) {
             // Náº¿u cÃ³ local cache, tráº£ vá» ngay
             if (localStaffs && localStaffs.length > 0) {
-                // Ä&#x2018;á»“ng thá»i fetch Master Firebase Ä‘á»ƒ cáº­p nháº­t ná»n
-                masterDb.ref(CURRENT_SHOP_ID + '/staffs').once('value').then(function(snapshot) {
+                // Ä&#x2018;á»“ng thá»i fetch Firebase Ä‘á»ƒ cáº­p nháº­t ná»n
+                db.ref(CURRENT_SHOP_ID + '/staffs').once('value').then(function(snapshot) {
                     var data = snapshot.val() || {};
                     for (var key in data) {
                         if (data.hasOwnProperty(key)) {
@@ -2983,8 +2719,8 @@
                 });
                 return localStaffs;
             }
-            // KhÃ´ng cÃ³ local cache, fetch tá»« Master Firebase
-            return masterDb.ref(CURRENT_SHOP_ID + '/staffs').once('value').then(function(snapshot) {
+            // KhÃ´ng cÃ³ local cache, fetch tá»« Firebase
+            return db.ref(CURRENT_SHOP_ID + '/staffs').once('value').then(function(snapshot) {
                 var data = snapshot.val() || {};
                 var list = [];
                 for (var key in data) {
@@ -3010,17 +2746,9 @@
     function logout() {
         currentUser = null;
         localStorage.removeItem('pos_session');
-        localStorage.removeItem(CONFIG_HASH_KEY);
         // Reset vá» shop máº·c Ä‘á»‹nh
         CURRENT_SHOP_ID = 'shop_default';
         localStorage.setItem('current_shop_id', 'shop_default');
-        // Há»§y Slave App náº¿u cÃ³
-        if (slaveApp) {
-            try { slaveApp.delete(); } catch(e) {}
-            slaveApp = null;
-            slaveDb = null;
-            slaveConfig = null;
-        }
         console.log('ðŸ‘‹ Logged out');
     }
     
@@ -3039,11 +2767,11 @@
         return currentUser && currentUser.role === 'admin';
     }
 
-    // Äá»c shop config trá»±c tiáº¿p tá»« Firebase (dÃ¹ng _getDb Ä‘á»ƒ chá»n Master/Slave)
+    // Äá»c shop config trá»±c tiáº¿p tá»« Firebase
     function getShopConfig() {
         return dbReady.then(function() {
             if (!isOnline) return Promise.resolve({});
-            return _getDb('info').ref(CURRENT_SHOP_ID + '/info').once('value').then(function(snapshot) {
+            return db.ref(CURRENT_SHOP_ID + '/info').once('value').then(function(snapshot) {
                 return snapshot.val() || {};
             }).catch(function() {
                 return {};
@@ -3064,96 +2792,6 @@
             return arr.length > 0 ? arr : null;
         }
         return null;
-    }
-
-    // ========== MASTER ADMIN: Lấy danh sách tất cả POS đã đăng ký ==========
-    // Trả về mảng các shop: { shopCode, shopId, shopName, status, createdAt, hasCustomConfig, adminUsername, adminPassword }
-    function getAllShops() {
-        return masterDb.ref('shop_registry').once('value').then(function(snapshot) {
-            var registry = snapshot.val() || {};
-            var shopCodes = Object.keys(registry);
-            var promises = [];
-
-            shopCodes.forEach(function(code) {
-                var info = registry[code];
-                var p = masterDb.ref(info.shopId + '/staffs').once('value').then(function(staffSnap) {
-                    var staffs = staffSnap.val() || {};
-                    var adminStaff = null;
-                    for (var key in staffs) {
-                        if (staffs.hasOwnProperty(key)) {
-                            var s = staffs[key];
-                            if (s.role === 'admin') {
-                                adminStaff = s;
-                                adminStaff.id = key;
-                                break;
-                            }
-                        }
-                    }
-                    return {
-                        shopCode: code,
-                        shopId: info.shopId,
-                        shopName: info.shopName || '',
-                        status: info.status || 'active',
-                        createdAt: info.createdAt || 0,
-                        hasCustomConfig: !!info.hasCustomConfig,
-                        adminUsername: adminStaff ? adminStaff.username : '',
-                        adminPassword: adminStaff ? adminStaff.password : ''
-                    };
-                }).catch(function() {
-                    return {
-                        shopCode: code,
-                        shopId: info.shopId,
-                        shopName: info.shopName || '',
-                        status: info.status || 'active',
-                        createdAt: info.createdAt || 0,
-                        hasCustomConfig: !!info.hasCustomConfig,
-                        adminUsername: '',
-                        adminPassword: ''
-                    };
-                });
-                promises.push(p);
-            });
-
-            return Promise.all(promises).then(function(shops) {
-                // Sắp xếp theo thời gian tạo mới nhất
-                shops.sort(function(a, b) { return b.createdAt - a.createdAt; });
-                return shops;
-            });
-        });
-    }
-
-    // ========== MASTER ADMIN: Cập nhật trạng thái POS (lock/unlock/delete) ==========
-    function updateShopStatus(shopCode, newStatus) {
-        return masterDb.ref('shop_registry/' + shopCode + '/status').set(newStatus).then(function() {
-            return { success: true, shopCode: shopCode, status: newStatus };
-        });
-    }
-
-    // ========== MASTER ADMIN: Cập nhật thông tin đăng nhập admin của POS ==========
-    function updateShopAdmin(shopCode, shopId, newUsername, newPassword) {
-        // Tìm staff admin trong shop
-        return masterDb.ref(shopId + '/staffs').once('value').then(function(snapshot) {
-            var staffs = snapshot.val() || {};
-            var adminId = null;
-            for (var key in staffs) {
-                if (staffs.hasOwnProperty(key)) {
-                    var s = staffs[key];
-                    if (s.role === 'admin') {
-                        adminId = key;
-                        break;
-                    }
-                }
-            }
-            if (!adminId) {
-                throw new Error('Không tìm thấy tài khoản admin của POS này');
-            }
-            var updates = {};
-            if (newUsername) updates[shopId + '/staffs/' + adminId + '/username'] = newUsername;
-            if (newPassword) updates[shopId + '/staffs/' + adminId + '/password'] = newPassword;
-            return masterDb.ref().update(updates);
-        }).then(function() {
-            return { success: true, shopCode: shopCode };
-        });
     }
 
     // Export
@@ -3207,17 +2845,7 @@
         // Trả về hàm unsubscribe
         renderOn: function(collection, selector, renderFn) {
             return _renderOn(collection, selector, renderFn);
-        },
-        // MULTI-FIREBASE: Lấy Master DB instance (dùng cho Admin Master)
-        getMasterDb: function() { return masterDb; },
-        // MULTI-FIREBASE: Lấy Slave DB instance (dùng cho POS có config riêng)
-        getSlaveDb: function() { return slaveDb; },
-        // MASTER ADMIN: Lấy danh sách tất cả POS + thông tin admin
-        getAllShops: getAllShops,
-        // MASTER ADMIN: Cập nhật trạng thái POS (lock/unlock/delete)
-        updateShopStatus: updateShopStatus,
-        // MASTER ADMIN: Cập nhật username/password admin của POS
-        updateShopAdmin: updateShopAdmin
+        }
     };
 })();
 
