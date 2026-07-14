@@ -7,15 +7,23 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#f97316">
+    <!-- Anti-cache cho Safari iOS -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Hệ Thống Bán Hàng</title>
-    <link rel="stylesheet" href="css/pos-base.css">
-    <link rel="stylesheet" href="css/report.css">
-    <link rel="stylesheet" href="css/menu.css">
-    <link rel="stylesheet" href="css/modals.css">
-    <link rel="stylesheet" href="css/manager.css">
-    <link rel="stylesheet" href="css/expense.css">
-    <link rel="stylesheet" href="css/manager-detail.css">
-    <link rel="stylesheet" href="css/admin.css">
+    <!-- Favicon & iOS Bookmark Icon -->
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/Datkep92/milano/main/IMG_6068.png">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/Datkep92/milano/main/IMG_6068.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="https://raw.githubusercontent.com/Datkep92/milano/main/IMG_6068.png">
+    <link rel="apple-touch-icon-precomposed" href="https://raw.githubusercontent.com/Datkep92/milano/main/IMG_6068.png">
+    <link rel="stylesheet" href="css/pos-base.css?v=1">
+    <link rel="stylesheet" href="css/report.css?v=1">
+    <link rel="stylesheet" href="css/menu.css?v=1">
+    <link rel="stylesheet" href="css/modals.css?v=1">
+    <link rel="stylesheet" href="css/manager.css?v=1">
+    <link rel="stylesheet" href="css/expense.css?v=1">
+    <link rel="stylesheet" href="css/manager-detail.css?v=1">
 </head>
 <body>
     <!-- ========== MÀN HÌNH LOADING KHỞI TẠO ========== -->
@@ -122,7 +130,7 @@
 
         <!-- POS TABS -->
         <div class="main-tabs">
-            <div class="tab-btn" data-tab="takeaway">🛵 Mang đi</div>
+            <div class="tab-btn" data-tab="takeaway" style="display:none;">🛵 Mang đi</div>
             <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
             <div class="tab-btn" data-tab="customers">👥 Khách</div>
             <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
@@ -135,7 +143,7 @@
 
         <div class="main-content">
             <!-- TAB MANG ĐI -->
-            <div id="takeawayView" class="tab-content">
+            <div id="takeawayView" class="tab-content" style="display:none;">
                 <div class="takeaway-layout">
                     <!-- CỘT TRÁI: DANH MỤC -->
                     <div class="takeaway-categories" id="takeawayCategories"></div>
@@ -202,21 +210,23 @@
                     <button class="nav-btn" id="prevDayBtn">◀</button>
                     <div class="date-display">📅 <span id="historyDate">--/--/----</span></div>
                     <button class="nav-btn" id="nextDayBtn">▶</button>
-                    <select id="historyFilter" class="filter-select">
-                        <option value="all">📋 Tất cả</option>
-                        <option value="dinein">🍽️ Tại chỗ</option>
-                        <option value="takeaway">🛵 Mang đi</option>
-                        <option value="grab">🚕 Grab</option>
-                        <option value="cash">💰 Tiền mặt</option>
-                        <option value="transfer">💳 Chuyển khoản</option>
-                        <option value="debt">💢 Ghi nợ</option>
-                        <option value="debt_payment">💵 Trả nợ</option>
-                        <option value="credit">💰 Tiền dư</option>
-                        <option value="cancelled">❌ Đã hủy</option>
-                    </select>
                 </div>
-                <div class="history-search">
-                    <input type="text" id="historySearchInput" class="search-input" placeholder="🔍 Tìm theo số tiền, tên món, tên khách..." oninput="onHistorySearch()">
+                <div class="history-filter-chips" id="historyFilterChips">
+                    <button class="filter-chip active" data-filter="all" title="Tất cả">📋</button>
+                    <button class="filter-chip" data-filter="dinein" title="Tại chỗ">🍽️</button>
+                    <button class="filter-chip" data-filter="takeaway" title="Mang đi" style="display:none;">🛵</button>
+                    <button class="filter-chip" data-filter="grab" title="Grab">🚕</button>
+                    <button class="filter-chip" data-filter="cash" title="Tiền mặt">💰</button>
+                    <button class="filter-chip" data-filter="transfer" title="Chuyển khoản">💳</button>
+                    <button class="filter-chip" data-filter="debt" title="Ghi nợ">💢</button>
+                    <button class="filter-chip" data-filter="debt_payment" title="Trả nợ / Đưa trước">💵</button>
+                    <button class="filter-chip" data-filter="delete_table" title="Xóa bàn / Hoàn tác">🗑️</button>
+                </div>
+                <div class="history-filter-row" id="historyFilterRow">
+                    <div class="history-search">
+                        <input type="text" id="historySearchInput" class="search-input" placeholder="🔍 Tìm..." oninput="onHistorySearch()">
+                    </div>
+                    <div class="history-staff-chips" id="historyStaffChips"></div>
                 </div>
                 <div class="history-list" id="historyList"></div>
             </div>
@@ -1489,21 +1499,20 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     
     <!-- DB CHUNG -->
-    <script src="db.js?v=3"></script>
+    <script src="db.js?v=4"></script>
     <!-- Auth CHUNG -->
-    <script src="auth.js"></script>
+    <script src="auth.js?v=1"></script>
     <!-- Admin Dashboard (tách riêng từ auth.js) -->
-    <script src="admin-dashboard.js"></script>
     
     <!-- POS-APP RÚT GỌN (thay thế app.js) -->
     <!-- index.html mặc định hiển thị tab Bàn, mangdi.html dùng tab Mang đi -->
     <script>window._defaultTab = 'tables';</script>
-    <script src="pos-app.js"></script>
+    <script src="pos-app.js?v=1"></script>
     <!-- REALTIME RÚT GỌN (thay thế realtime.js) -->
-    <script src="realtime-pos.js"></script>
+    <script src="realtime-pos.js?v=1"></script>
     
     <!-- INGREDIENTS - kiểm tra tồn kho, trừ nguyên liệu (cần cho order.js, tables.js) -->
-    <script src="ingredients.js"></script>
+    <script src="ingredients.js?v=1"></script>
     
     <!-- ESP32 Cash Drawer Audit - Định nghĩa handleCashPayment mặc định TRƯỚC order.js -->
     <!-- để order.js, tables.js, customers.js có thể gọi ngay cả khi esp32_audit.js chưa load -->
@@ -1522,30 +1531,30 @@
     </script>
     
     <!-- Notifications - Định nghĩa notifyPaymentToTelegram TRƯỚC order.js, tables.js, customers.js -->
-    <script src="notifications.js"></script>
+    <script src="notifications.js?v=1"></script>
     
     <!-- CORE MODULES DÙNG CHUNG -->
-    <script src="order.js"></script>
-    <script src="tables.js?v=2"></script>
-    <script src="split-transfer-merge.js"></script>
-    <script src="customers.js"></script>
-    <script src="history.js"></script>
-    <script src="print.js"></script>
-    <script src="draft-orders.js"></script>
-    <script src="fund-reconciliation.js"></script>
+    <script src="order.js?v=1"></script>
+    <script src="tables.js?v=3"></script>
+    <script src="split-transfer-merge.js?v=1"></script>
+    <script src="customers.js?v=1"></script>
+    <script src="history.js?v=1"></script>
+    <script src="print.js?v=1"></script>
+    <script src="draft-orders.js?v=1"></script>
+    <script src="fund-reconciliation.js?v=1"></script>
     <!-- Manager Detail - click vào manager-grid items + tab quản lý -->
-    <script src="manager-detail.js?v=8"></script>
+    <script src="manager-detail.js?v=9"></script>
     <!-- Inventory / Menu management -->
-    <script src="inventory-manager.js"></script>
-    <script src="expense.js"></script>
+    <script src="inventory-manager.js?v=1"></script>
+    <script src="expense.js?v=1"></script>
     <!-- Telegram notification integration -->
-    <script src="telegram.js"></script>
+    <script src="telegram.js?v=1"></script>
     
     <!-- ESP32 Cash Drawer Audit -->
-    <script src="esp32_audit.js"></script>
+    <script src="esp32_audit.js?v=1"></script>
     
     <!-- Chat nội bộ -->
-    <script src="messages.js"></script>
+    <script src="messages.js?v=1"></script>
     
     <!-- Lunar calendar -->
     <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/lunar.min.js"></script>
@@ -1564,33 +1573,33 @@
     </script>
     
     <!-- Employees management - Modal quản lý nhân viên (thay thế staff logic trong auth.js, settings.js, manager-detail.js) -->
-    <script src="employees.js"></script>
+    <script src="employees.js?v=1"></script>
     
     <!-- Settings modules (tách từ settings.js) -->
-    <script src="settings-core.js"></script>
-    <script src="settings-escape.js"></script>
-    <script src="settings-cash-counter.js"></script>
-    <script src="settings-manager-pickup.js"></script>
-    <script src="settings-date.js"></script>
-    <script src="settings-alert.js"></script>
-    <script src="settings-close-day.js"></script>
-    <script src="settings-toast.js"></script>
-    <script src="settings-init.js"></script>
-    <script src="settings-staff.js"></script>
-    <script src="settings-shop-info.js"></script>
-    <script src="settings-telegram.js"></script>
-    <script src="settings-lock-config.js"></script>
-    <script src="settings-permissions.js"></script>
-    <script src="settings-data-fix.js"></script>
-    <script src="settings-esp32.js"></script>
-    <script src="settings-modals.js"></script>
-    <script src="settings-print.js"></script>
-    <script src="settings-fund.js"></script>
-    <script src="settings-firebase-config.js"></script>
-    <script src="settings-visibility.js"></script>
+    <script src="settings-core.js?v=1"></script>
+    <script src="settings-escape.js?v=1"></script>
+    <script src="settings-cash-counter.js?v=1"></script>
+    <script src="settings-manager-pickup.js?v=1"></script>
+    <script src="settings-date.js?v=1"></script>
+    <script src="settings-alert.js?v=1"></script>
+    <script src="settings-close-day.js?v=1"></script>
+    <script src="settings-toast.js?v=1"></script>
+    <script src="settings-init.js?v=1"></script>
+    <script src="settings-staff.js?v=1"></script>
+    <script src="settings-shop-info.js?v=1"></script>
+    <script src="settings-telegram.js?v=1"></script>
+    <script src="settings-lock-config.js?v=1"></script>
+    <script src="settings-permissions.js?v=1"></script>
+    <script src="settings-data-fix.js?v=1"></script>
+    <script src="settings-esp32.js?v=1"></script>
+    <script src="settings-modals.js?v=1"></script>
+    <script src="settings-print.js?v=1"></script>
+    <script src="settings-fund.js?v=1"></script>
+    <script src="settings-firebase-config.js?v=1"></script>
+    <script src="settings-visibility.js?v=1"></script>
     
     <!-- Settings + Đếm tiền nhanh (thin loader) -->
-    <script src="settings.js"></script>
+    <script src="settings.js?v=1"></script>
     
     <!-- HEADER DƯỚI ĐÁY -->
     <div class="header">
@@ -1599,7 +1608,7 @@
             <span class="header-date" id="headerDate">--</span>
         </div>
         <div class="header-right">
-            <span class="staff-name">👤 Nhân viên</span>
+            <span class="staff-name" id="staffName">👤 Nhân viên</span>
             <button class="chat-btn" id="chatBtn" onclick="toggleChatPopup()" title="Chat nội bộ">
                 💬 <span id="chatBadge" class="chat-badge" style="display:none;">0</span>
             </button>

@@ -24,45 +24,74 @@ function _getLatestActivityTime(c) {
             if (t > latest) latest = t;
         }
     }
+    // FIX: Cũng kiểm tra từ transactions collection cho các type mới
+    var allTransactions = window.costTransactions || [];
+    for (var i = 0; i < allTransactions.length; i++) {
+        var tx = allTransactions[i];
+        if (tx.customer && tx.customer.id === c.id) {
+            if (tx.type === 'prepaid' || tx.type === 'change_in' || tx.type === 'change_use') {
+                var t = new Date(tx.createdAt || tx.date).getTime();
+                if (t > latest) latest = t;
+            }
+        }
+    }
     return latest;
 }
 
+// Helper: loại bỏ dấu tiếng Việt, khoảng trắng, ký tự đặc biệt để tìm kiếm
+function _removeAccents(str) {
+    if (!str) return '';
+    var s = str.toLowerCase();
+    // Xử lý đ/Đ trước
+    s = s.replace(/đ/g, 'd');
+    var accents = 'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ';
+    var noAccents = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiioooooooooooooooooouuuuuuuuuuuyyyy';
+    for (var i = 0; i < accents.length; i++) {
+        s = s.replace(new RegExp(accents.charAt(i), 'g'), noAccents.charAt(i));
+    }
+    s = s.replace(/\s+/g, ''); // loại bỏ khoảng trắng
+    s = s.replace(/[^a-z0-9]/g, ''); // chỉ giữ chữ và số
+    return s;
+}
+
 // ========== KHÁCH HÀNG ==========
+// FIX: Guard chống render liên tiếp trong thời gian ngắn
+var _customerRenderGuard = 0;
 function renderCustomerList() {
+    // FIX: Nếu đang trong quá trình render (gọi liên tiếp < 50ms), bỏ qua
+    var now = Date.now();
+    if (_customerRenderGuard > 0 && (now - _customerRenderGuard) < 50) {
+        return;
+    }
+    _customerRenderGuard = now;
     // Dùng memory cache, không query DB
-    var keyword = document.getElementById('customerSearchInput') ? document.getElementById('customerSearchInput').value.toLowerCase() : '';
-    var filtered = keyword ? customers.filter(function(c) { return c.name.toLowerCase().indexOf(keyword) !== -1 || (c.phone && c.phone.indexOf(keyword) !== -1); }) : customers;
-    // Tính tổng công nợ thực tế = tổng số dư âm (totalDebt - creditBalance)
+    var keywordRaw = document.getElementById('customerSearchInput') ? document.getElementById('customerSearchInput').value : '';
+    var keyword = _removeAccents(keywordRaw);
+    var filtered = keyword ? customers.filter(function(c) { return _removeAccents(c.name).indexOf(keyword) !== -1 || (c.phone && _removeAccents(c.phone).indexOf(keyword) !== -1); }) : customers;
+    // Tính tổng công nợ thực tế = outstandingDebt (không trừ prepaid/change vì là tiền riêng)
     var totalDebt = 0;
     for (var i = 0; i < filtered.length; i++) {
-        var net = (filtered[i].totalDebt || 0) - (filtered[i].creditBalance || 0);
-        if (net > 0) totalDebt += net;
+        var c = filtered[i];
+        var totalFromHistory = 0;
+        if (c.debtHistory) {
+            for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                totalFromHistory += c.debtHistory[hi].amount || 0;
+            }
+        }
+        var totalPayment = 0;
+        if (c.paymentHistory) {
+            for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                totalPayment += c.paymentHistory[pi].amount || 0;
+            }
+        }
+        var outstandingDebt = Math.max(0, totalFromHistory - totalPayment);
+        if (outstandingDebt > 0) totalDebt += outstandingDebt;
     }
     document.getElementById('totalDebtAmount').innerText = formatMoney(totalDebt);
     var container = document.getElementById('customerList');
     if (!container) return;
     if (!filtered.length) { container.innerHTML = '<div class="empty-state">📭 Không có khách hàng</div>'; return; }
-    // Sắp xếp: khách có giao dịch ghi nợ/thanh toán lên đầu, theo thời gian gần nhất
-    filtered.sort(function(a, b) {
-        // Lấy thời gian giao dịch gần nhất của mỗi khách (từ debtHistory, paymentHistory, creditHistory)
-        var aLatest = _getLatestActivityTime(a);
-        var bLatest = _getLatestActivityTime(b);
-        // Khách có giao dịch (aLatest > 0) được ưu tiên lên trước khách không có giao dịch
-        var aHasActivity = aLatest > 0;
-        var bHasActivity = bLatest > 0;
-        if (aHasActivity && !bHasActivity) return -1;
-        if (!aHasActivity && bHasActivity) return 1;
-        // Nếu cả 2 đều có giao dịch, khách có giao dịch gần hơn lên trước
-        if (aHasActivity && bHasActivity) {
-            if (bLatest !== aLatest) return bLatest - aLatest;
-        }
-        // Cùng cấp: khách có nợ (netBalance < 0) lên trước
-        var debtA = (a.totalDebt || 0) - (a.creditBalance || 0);
-        var debtB = (b.totalDebt || 0) - (b.creditBalance || 0);
-        if (debtA > 0 && debtB <= 0) return -1;
-        if (debtB > 0 && debtA <= 0) return 1;
-        return 0;
-    });
+    
     // Helper lấy ngày hôm nay theo giờ địa phương YYYY-MM-DD
     var todayStr = '';
     try {
@@ -91,115 +120,127 @@ function renderCustomerList() {
         } catch(e) { return false; }
     }
     
+    // Helper kiểm tra khách có giao dịch hôm nay không
+    function _hasTodayActivity(c) {
+        if (c.debtHistory) { for (var i = 0; i < c.debtHistory.length; i++) { if (_isTodayEntry(c.debtHistory[i])) return true; } }
+        if (c.paymentHistory) { for (var i = 0; i < c.paymentHistory.length; i++) { if (_isTodayEntry(c.paymentHistory[i])) return true; } }
+        if (c.creditHistory) { for (var i = 0; i < c.creditHistory.length; i++) { if (_isTodayEntry(c.creditHistory[i])) return true; } }
+        return false;
+    }
+    // Sắp xếp: ưu tiên khách có giao dịch hôm nay, theo thứ tự chữ cái
+    filtered.sort(function(a, b) {
+        var aToday = _hasTodayActivity(a);
+        var bToday = _hasTodayActivity(b);
+        // Nhóm 1: khách có giao dịch hôm nay lên đầu, sắp xếp theo chữ cái
+        if (aToday && !bToday) return -1;
+        if (!aToday && bToday) return 1;
+        if (aToday && bToday) {
+            var nameA = (a.name || '').toLowerCase();
+            var nameB = (b.name || '').toLowerCase();
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        }
+        // Nhóm 2: khách có giao dịch cũ hơn, theo thời gian gần nhất
+        var aLatest = _getLatestActivityTime(a);
+        var bLatest = _getLatestActivityTime(b);
+        var aHasActivity = aLatest > 0;
+        var bHasActivity = bLatest > 0;
+        if (aHasActivity && !bHasActivity) return -1;
+        if (!aHasActivity && bHasActivity) return 1;
+        if (aHasActivity && bHasActivity) {
+            if (bLatest !== aLatest) return bLatest - aLatest;
+        }
+        // Nhóm 3: khách có nợ lên trước
+        var debtA = (a.totalDebt || 0);
+        var debtB = (b.totalDebt || 0);
+        if (debtA > 0 && debtB <= 0) return -1;
+        if (debtB > 0 && debtA <= 0) return 1;
+        return 0;
+    });
+    
+    var allTransactions = window.costTransactions || [];
+    
     var html = '';
     for (var i = 0; i < filtered.length; i++) {
         var c = filtered[i];
-        var netBalance = (c.creditBalance || 0) - (c.totalDebt || 0);
         
-        // Tính nợ hôm nay từ debtHistory
-        var todayDebt = 0;
-        if (todayStr && c.debtHistory) {
-            for (var d = 0; d < c.debtHistory.length; d++) {
-                var entry = c.debtHistory[d];
-                if (_isTodayEntry(entry)) {
-                    todayDebt += entry.amount || 0;
-                }
+        // FIX: Tính toán rõ ràng 3 giá trị: nợ, dư, đưa trước
+        var totalFromHistory = 0;
+        if (c.debtHistory) {
+            for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                totalFromHistory += c.debtHistory[hi].amount || 0;
             }
         }
-        // Tính thanh toán hôm nay từ paymentHistory
-        var todayPayment = 0;
-        if (todayStr && c.paymentHistory) {
-            for (var d = 0; d < c.paymentHistory.length; d++) {
-                var entry = c.paymentHistory[d];
-                if (_isTodayEntry(entry)) {
-                    todayPayment += entry.amount || 0;
-                }
+        var totalPayment = 0;
+        if (c.paymentHistory) {
+            for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                totalPayment += c.paymentHistory[pi].amount || 0;
             }
         }
-        var oldDebt = (c.totalDebt || 0) - todayDebt + todayPayment;
+        var outstandingDebt = Math.max(0, totalFromHistory - totalPayment);
+        // FIX: Gộp changeBalance và prepaidBalance thành 1 loại duy nhất (prepaidBalance)
+        // Vì cả 2 đều là tiền của khách, cùng bản chất
+        var prepaidBal = c.prepaidBalance || 0;
         
-        // Tính tiền dư hôm nay từ creditHistory
-        var todayCredit = 0; // tiền dư thêm hôm nay (số dương)
-        var todayUsed = 0;   // tiền dư đã dùng hôm nay (số âm)
-        if (todayStr && c.creditHistory) {
-            for (var d = 0; d < c.creditHistory.length; d++) {
-                var entry = c.creditHistory[d];
-                if (_isTodayEntry(entry)) {
-                    var amt = entry.amount || 0;
-                    if (amt > 0) todayCredit += amt;
-                    else todayUsed += amt; // số âm
+        // FIX: Tính toán nợ hôm nay và nợ trước đó
+        var debtToday = 0;
+        var paymentToday = 0;
+        if (c.debtHistory) {
+            for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                if (_isTodayEntry(c.debtHistory[hi])) {
+                    debtToday += c.debtHistory[hi].amount || 0;
                 }
             }
         }
-        var oldCredit = (c.creditBalance || 0) - todayCredit - todayUsed; // todayUsed là số âm, trừ todayUsed = cộng
+        if (c.paymentHistory) {
+            for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                if (_isTodayEntry(c.paymentHistory[pi])) {
+                    paymentToday += c.paymentHistory[pi].amount || 0;
+                }
+            }
+        }
+        var debtBefore = Math.max(0, (totalFromHistory - debtToday) - (totalPayment - paymentToday));
         
-        var balanceHtml = '';
-        if (netBalance > 0) {
-            var totalCreditVal = c.creditBalance || 0;
-            if (todayCredit > 0 && todayUsed < 0) {
-                // Vừa thêm tiền dư vừa dùng tiền dư trong cùng ngày
-                var creditParts = '';
-                if (oldCredit > 0) {
-                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> +';
-                }
-                creditParts += '<span style="color:#16a34a;font-weight:700;">' + formatMoney(todayCredit) + '</span>' +
-                    ' -<span style="color:#f97316;font-weight:700;">' + formatMoney(Math.abs(todayUsed)) + '</span>' +
-                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
-            } else if (todayCredit > 0) {
-                // Chỉ thêm tiền dư hôm nay
-                var creditParts = '';
-                if (oldCredit > 0) {
-                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> +';
-                }
-                creditParts += '<span style="color:#16a34a;font-weight:700;">' + formatMoney(todayCredit) + '</span>' +
-                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
-            } else if (todayUsed < 0) {
-                // Chỉ dùng tiền dư hôm nay
-                var creditParts = '';
-                if (oldCredit > 0) {
-                    creditParts += '<span style="color:#64748b;">' + formatMoney(oldCredit) + '</span> -';
-                } else {
-                    creditParts += '0 -';
-                }
-                creditParts += '<span style="color:#f97316;font-weight:700;">' + formatMoney(Math.abs(todayUsed)) + '</span>' +
-                    ' = <span style="color:#16a34a;font-weight:700;">+' + formatMoney(totalCreditVal) + '</span>';
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' + creditParts + '</div>';
-            } else {
-                balanceHtml = '<span style="color:#16a34a;">+' + formatMoney(netBalance) + '</span>';
+        // FIX: Tên + nợ cùng dòng, mỗi phần màu sắc khác nhau
+        var hasTodayActivity = debtToday > 0 || paymentToday > 0;
+        
+        // Badge: chỉ icon
+        var badgeIcon = hasTodayActivity ? '🔴' : '';
+        var statusIcon = (!outstandingDebt && !prepaidBal) ? '✅' : '';
+        
+        // Xây dựng text nợ: (nợ trước +nợ hôm nay -trả hôm nay) = 💢 Nợ: tổng
+        var debtHtml = '';
+        if (outstandingDebt > 0) {
+            if (hasTodayActivity) {
+                debtHtml += ' <span class="debt-bracket">(</span>';
+                debtHtml += '<span class="debt-before">' + formatMoney(debtBefore) + '</span>';
+                if (debtToday > 0) debtHtml += ' <span class="debt-today">+' + formatMoney(debtToday) + '</span>';
+                if (paymentToday > 0) debtHtml += ' <span class="debt-pay">-' + formatMoney(paymentToday) + '</span>';
+                debtHtml += ' <span class="debt-bracket">) = </span>';
             }
-        } else if (netBalance < 0) {
-            var totalDebtVal = c.totalDebt || 0;
-            // Nếu có trả sau mới hôm nay: hiển thị dạng "Cũ + Mới = Tổng"
-            if (todayDebt > 0 && todayPayment > 0) {
-                // Vừa ghi trả sau vừa thanh toán trong cùng ngày
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' +
-                    '<span style="color:#64748b;">' + formatMoney(oldDebt) + '</span>' +
-                    ' +<span style="color:#f97316;font-weight:700;">' + formatMoney(todayDebt) + '</span>' +
-                    ' -<span style="color:#16a34a;font-weight:700;">' + formatMoney(todayPayment) + '</span>' +
-                    ' = <span style="color:#ef4444;font-weight:700;">' + formatMoney(totalDebtVal) + '</span>' +
-                    '</div>';
-            } else if (todayDebt > 0) {
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' +
-                    '<span style="color:#64748b;">' + formatMoney(oldDebt) + '</span>' +
-                    ' + <span style="color:#f97316;font-weight:700;">' + formatMoney(todayDebt) + '</span>' +
-                    ' = <span style="color:#ef4444;font-weight:700;">' + formatMoney(totalDebtVal) + '</span>' +
-                    '</div>';
-            } else if (todayPayment > 0) {
-                // Chỉ thanh toán hôm nay, không ghi trả sau mới
-                balanceHtml = '<div style="font-size:11px;line-height:1.4;text-align:right;">' +
-                    '<span style="color:#64748b;">' + formatMoney(oldDebt) + '</span>' +
-                    ' - <span style="color:#16a34a;font-weight:700;">' + formatMoney(todayPayment) + '</span>' +
-                    ' = <span style="color:#ef4444;font-weight:700;">' + formatMoney(totalDebtVal) + '</span>' +
-                    '</div>';
-            } else {
-                balanceHtml = '<span style="color:#ef4444;">-' + formatMoney(Math.abs(netBalance)) + '</span>';
-            }
-        } else {
-            balanceHtml = '✅';
+            debtHtml += '<span class="debt-total"> ' + formatMoney(outstandingDebt) + '</span>';
         }
-        html += '<div class="customer-card" onclick="showCustomerDetail(\'' + c.id + '\')"><div class="customer-avatar">' + c.name.charAt(0).toUpperCase() + '</div><div class="customer-info"><div class="customer-name">' + escapeHtml(c.name) + '</div><div class="customer-phone">📞 ' + (c.phone || '') + '</div></div><div class="customer-debt">' + balanceHtml + '</div></div>';
+        
+        // Dòng tên + badge + nợ
+        var nameLine = escapeHtml(c.name);
+        if (badgeIcon) nameLine += ' ' + badgeIcon;
+        if (!debtHtml && statusIcon) nameLine += ' ' + statusIcon;
+        
+        // Dòng phụ: tiền của khách (dư/trước) - gộp chung 1 loại
+        var subLines = [];
+        if (prepaidBal > 0) {
+            subLines.push('<span class="debt-prepaid">💰 Dư: ' + formatMoney(prepaidBal) + '</span>');
+        }
+        
+        var infoHtml = '<div class="customer-name"><span>' + nameLine + '</span>' + (debtHtml ? '<span class="debt-inline">' + debtHtml + '</span>' : '') + '</div>' +
+            '<div class="customer-phone">📞 ' + (c.phone || '') + '</div>';
+        
+        if (subLines.length > 0) {
+            infoHtml += '<div class="customer-debt">' + subLines.join('') + '</div>';
+        }
+        
+        html += '<div class="customer-card" onclick="showCustomerDetail(\'' + c.id + '\')"><div class="customer-avatar">' + c.name.charAt(0).toUpperCase() + '</div><div class="customer-info">' + infoHtml + '</div></div>';
     }
     container.innerHTML = html;
 }
@@ -228,7 +269,8 @@ function quickAddCustomer() {
 
 function addCustomer(name, phone) {
     var newId = Date.now().toString() + Math.random().toString(36).substr(2, 6);
-    var newCustomer = { id: newId, name: name.trim(), phone: phone || '', address: '', totalDebt: 0, totalSpent: 0, creditBalance: 0, createdAt: new Date().toISOString(), debtHistory: [], paymentHistory: [], creditHistory: [] };
+    // FIX: Gộp thành prepaidBalance duy nhất
+    var newCustomer = { id: newId, name: name.trim(), phone: phone || '', address: '', totalDebt: 0, totalSpent: 0, creditBalance: 0, prepaidBalance: 0, createdAt: new Date().toISOString(), debtHistory: [], paymentHistory: [], creditHistory: [] };
     return DB.create('customers', newCustomer).then(function() {
         customers.push(newCustomer);
         return newCustomer;
@@ -295,29 +337,50 @@ function _renderCustomerDetail(c, customerId) {
     
     all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
     
-    var historyHtml = _renderCustomerHistoryHtml(all, false, customerId);
     var hasMore = all.length > 5;
     
     var content = document.getElementById('customerDetailContent');
     if (!content) return;
     content.setAttribute('data-customer-id', customerId);
     
-    var netBalance = (c.creditBalance || 0) - (c.totalDebt || 0);
-    var balanceColor = netBalance >= 0 ? '#16a34a' : '#ef4444';
-    var showPayBtn = netBalance < 0;
-    var debtForPayment = Math.abs(netBalance);
+    // FIX: Tính toán rõ ràng 3 giá trị: nợ, dư, đưa trước
+    var totalFromHistory = 0;
+    if (c.debtHistory) {
+        for (var hi = 0; hi < c.debtHistory.length; hi++) {
+            totalFromHistory += c.debtHistory[hi].amount || 0;
+        }
+    }
+    var totalPayment = 0;
+    if (c.paymentHistory) {
+        for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+            totalPayment += c.paymentHistory[pi].amount || 0;
+        }
+    }
+    var outstandingDebt = Math.max(0, totalFromHistory - totalPayment);
+    // FIX: Gộp changeBalance và prepaidBalance thành 1 loại duy nhất
+    var prepaidBal = c.prepaidBalance || 0;
+    
+    // Hiển thị rõ ràng
+    var balanceLines = '';
+    if (outstandingDebt > 0) {
+        balanceLines += '<div style="font-size:13px;color:#ef4444;font-weight:700;">💢 Trả sau: ' + formatMoney(outstandingDebt) + '</div>';
+    }
+    if (prepaidBal > 0) {
+        balanceLines += '<div style="font-size:13px;color:#16a34a;font-weight:700;">💰 Dư: ' + formatMoney(prepaidBal) + '</div>';
+    }
+    if (!balanceLines) {
+        balanceLines = '<span style="color:#94a3b8;font-size:13px;">✅ Thanh toán</span>';
+    }
+    
+    var showPayBtn = outstandingDebt > 0;
+    var debtForPayment = outstandingDebt;
     
     var titleEl = document.getElementById('customerDetailTitle');
     if (titleEl) titleEl.innerHTML = '👤 ' + escapeHtml(c.name);
     var balanceEl = document.getElementById('customerDetailBalance');
     if (balanceEl) {
-        if (netBalance !== 0) {
-            balanceEl.innerHTML = (netBalance > 0 ? '💰 +' : '💢 ') + formatMoney(Math.abs(netBalance));
-            balanceEl.style.color = balanceColor;
-            balanceEl.style.display = 'inline-block';
-        } else {
-            balanceEl.style.display = 'none';
-        }
+        balanceEl.innerHTML = balanceLines;
+        balanceEl.style.display = 'block';
     }
     
     var leftHtml = '';
@@ -325,17 +388,17 @@ function _renderCustomerDetail(c, customerId) {
         leftHtml = '<div class="cus-pay-inline"><input type="number" id="inlineDebtAmount" class="cus-pay-input" value="' + debtForPayment + '" step="1000" placeholder="Số tiền"><div class="cus-pay-btns"><button class="cus-pay-btn cus-pay-cash" onclick="confirmInlineDebtPayment(\'' + c.id + '\',\'cash\')">💰 TM</button><button class="cus-pay-btn cus-pay-transfer" onclick="confirmInlineDebtPayment(\'' + c.id + '\',\'transfer\')">💳 CK</button></div></div>';
     }
     if (DB.isAdmin && DB.isAdmin()) {
-        leftHtml += '<div class="cus-admin-actions">' +
-            '<button class="cus-edit-btn" onclick="editCustomerInfo(\'' + c.id + '\')">✏️ Sửa</button>' +
-            '<button class="cus-delete-btn" onclick="deleteCustomer(\'' + c.id + '\')">🗑️ Xóa</button>' +
-            '</div>' +
-            '<div class="cus-admin-actions" style="margin-top:6px;">' +
-            '<button class="cus-add-debt-btn" onclick="showAddOldDebtForm(\'' + c.id + '\')" style="padding:8px 12px;font-size:13px;border:none;border-radius:6px;background:#f59e0b;color:#fff;cursor:pointer;width:100%;">➕ Thêm nợ cũ</button>' +
-            '</div>' +
-            '<div class="cus-admin-actions" style="margin-top:6px;">' +
-            '<button class="cus-add-debt-btn" onclick="showAddPrepaidForm(\'' + c.id + '\')" style="padding:8px 12px;font-size:13px;border:none;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;width:100%;">💰 Thêm tiền đưa trước</button>' +
+        leftHtml += '<div class="cus-admin-actions" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' +
+            '<button class="cus-edit-btn" onclick="editCustomerInfo(\'' + c.id + '\')" style="padding:6px 10px;font-size:12px;border:none;border-radius:6px;background:#3b82f6;color:#fff;cursor:pointer;">✏️ Sửa</button>' +
+            '<button class="cus-delete-btn" onclick="deleteCustomer(\'' + c.id + '\')" style="padding:6px 10px;font-size:12px;border:none;border-radius:6px;background:#ef4444;color:#fff;cursor:pointer;">🗑️ Xóa</button>' +
+            '<button class="cus-add-debt-btn" onclick="showAddOldDebtForm(\'' + c.id + '\')" style="padding:6px 10px;font-size:12px;border:none;border-radius:6px;background:#f59e0b;color:#fff;cursor:pointer;">➕ Nợ cũ</button>' +
+            '<button class="cus-add-debt-btn" onclick="showAddPrepaidForm(\'' + c.id + '\')" style="padding:6px 10px;font-size:12px;border:none;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;">💰 Trước</button>' +
             '</div>';
     }
+    
+    // FIX: Gọi _renderCustomerHistoryHtml để lấy historyHtml
+    var historyResult = _renderCustomerHistoryHtml(all, _customerHistoryExpanded, customerId);
+    var historyHtml = historyResult.html;
     
     var rightHtml = '<div class="cus-history-title">📜 Lịch sử <span style="font-size:12px;font-weight:normal;color:#64748b;">(' + all.length + ' giao dịch)</span></div>' +
         '<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">' +
@@ -348,19 +411,16 @@ function _renderCustomerDetail(c, customerId) {
     document.getElementById('customerDetailModal').style.display = 'flex';
 }
 
-// Render danh sách lịch sử, nếu expanded=false chỉ lấy 5 cái đầu
+// FIX: Render danh sách lịch sử - hiển thị TẤT CẢ các loại giao dịch
+// bao gồm debt, payment, credit, prepaid, change_in, change_use
 // customerId được truyền trực tiếp từ nơi gọi, không đọc từ DOM (tránh sai lệch)
+// Trả về { html, latestBalance } - latestBalance là số dư của entry mới nhất
 function _renderCustomerHistoryHtml(all, expanded, customerId) {
     var html = '';
     var isAdmin = DB.isAdmin && DB.isAdmin();
     
-    // Lọc: chỉ hiển thị debt và payment, bỏ credit (vì credit đã được gộp vào payment)
-    var filtered = [];
-    for (var idx = 0; idx < all.length; idx++) {
-        if (all[idx].type !== 'credit') {
-            filtered.push(all[idx]);
-        }
-    }
+    // FIX: KHÔNG lọc bỏ credit nữa - hiển thị tất cả
+    var filtered = all;
     
     var limit = expanded ? filtered.length : Math.min(5, filtered.length);
     
@@ -377,6 +437,7 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
         } else if (hh.type === 'payment') {
             total -= hh.amount;
         }
+        // credit, prepaid, change_in, change_use không ảnh hưởng dư nợ
     }
     // Vòng 2: chạy từ mới nhất (đầu) đến cũ nhất (cuối)
     var accumulated = total;
@@ -400,15 +461,30 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
         // Dư nợ sau giao dịch này
         var balance = balances[i] || 0;
         
-        // Xác định nhãn và số tiền
+        // FIX: Xác định nhãn và số tiền cho TẤT CẢ các loại giao dịch
         var label = '';
         var amountColor = '';
+        var isCreditTx = false;
         if (h.type === 'debt') {
             label = 'Ghi trả sau';
             amountColor = '#dc2626';
         } else if (h.type === 'payment') {
             label = 'Thanh toán';
             amountColor = '#16a34a';
+        } else if (h.type === 'credit' || h.type === 'change_in') {
+            // Tiền dư (từ thanh toán dư)
+            label = (h.amount >= 0) ? '💰 Tiền dư +' : '💰 Dùng tiền dư';
+            amountColor = '#16a34a';
+            isCreditTx = true;
+        } else if (h.type === 'prepaid') {
+            // Tiền đưa trước
+            label = '💳 Đưa trước';
+            amountColor = '#8b5cf6';
+            isCreditTx = true;
+        } else if (h.type === 'change_use') {
+            label = '💰 Dùng tiền dư';
+            amountColor = '#f59e0b';
+            isCreditTx = true;
         }
         
         // Format tổng nợ
@@ -424,6 +500,10 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
             balanceText = '0đ';
             balanceColor = '#64748b';
         }
+        
+        // FIX: Với giao dịch credit/prepaid, không hiển thị "Tổng tiền" (dư nợ)
+        // vì các giao dịch này không ảnh hưởng dư nợ
+        var showBalance = !isCreditTx;
         
         // Nếu có items
         var hasItems = h.items && h.items.length > 0;
@@ -457,10 +537,12 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
         // Dòng 1: ngày
         html += '<div style="font-size:12px;color:#64748b;margin-bottom:4px;">ngày ' + dateStr + '</div>';
         
-        // Dòng 2: Loại giao dịch | Tổng nợ
+        // Dòng 2: Loại giao dịch | Tổng nợ (chỉ hiển thị Tổng tiền cho debt/payment)
         html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-        html += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(h.amount) + '</span>';
-        html += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
+        html += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(Math.abs(h.amount)) + '</span>';
+        if (showBalance) {
+            html += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
+        }
         html += '</div>';
         
         // Ghi chú + items
@@ -472,9 +554,11 @@ function _renderCustomerHistoryHtml(all, expanded, customerId) {
         
         html += '</div>';
     }
-    return html;
+    
+    // Trả về cả html và số dư của entry đầu tiên (mới nhất) để hiển thị header
+    var firstBalance = filtered.length > 0 ? (balances[0] || 0) : 0;
+    return { html: html, latestBalance: firstBalance };
 }
-
 // Toggle mở rộng lịch sử
 function toggleCustomerHistory(customerId) {
     _customerHistoryExpanded = !_customerHistoryExpanded;
@@ -502,16 +586,29 @@ function toggleCustomerHistory(customerId) {
         }
     }
     
+    // FIX: Thêm các giao dịch mới từ transactions collection
     for (var i = 0; i < allTransactions.length; i++) {
         var tx = allTransactions[i];
-        if (tx.type === 'debt_payment' && tx.customer && tx.customer.id === customerId) {
-            var txTime = new Date(tx.createdAt || tx.date).getTime();
-            for (var j = 0; j < all.length; j++) {
-                var hTime = new Date(all[j].date).getTime();
-                if (Math.abs(txTime - hTime) < 60000 && all[j].transactionId === null) {
-                    all[j].transactionId = tx.id;
-                    all[j].items = tx.items || [];
-                    break;
+        if (tx.customer && tx.customer.id === customerId) {
+            // Các type mới: prepaid, change_in, change_use
+            if (tx.type === 'prepaid' || tx.type === 'change_in' || tx.type === 'change_use') {
+                all.push({
+                    type: tx.type,
+                    date: tx.createdAt || tx.date,
+                    amount: tx.amount,
+                    note: tx.note || '',
+                    transactionId: tx.id,
+                    items: tx.items || []
+                });
+            } else if (tx.type === 'debt_payment') {
+                var txTime = new Date(tx.createdAt || tx.date).getTime();
+                for (var j = 0; j < all.length; j++) {
+                    var hTime = new Date(all[j].date).getTime();
+                    if (Math.abs(txTime - hTime) < 60000 && all[j].transactionId === null) {
+                        all[j].transactionId = tx.id;
+                        all[j].items = tx.items || [];
+                        break;
+                    }
                 }
             }
         }
@@ -522,7 +619,8 @@ function toggleCustomerHistory(customerId) {
     var listEl = document.getElementById('customerHistoryList');
     var btnEl = document.getElementById('btnExpandHistory');
     if (listEl) {
-        listEl.innerHTML = _renderCustomerHistoryHtml(all, _customerHistoryExpanded, customerId) || '<div class="empty-state">Chưa có giao dịch</div>';
+        var histResult = _renderCustomerHistoryHtml(all, _customerHistoryExpanded, customerId);
+        listEl.innerHTML = (histResult && histResult.html) || '<div class="empty-state">Chưa có giao dịch</div>';
     }
     if (btnEl) {
         btnEl.innerText = _customerHistoryExpanded ? '📋 Thu gọn' : '📋 Xem thêm';
@@ -538,61 +636,94 @@ function confirmInlineDebtPayment(customerId, method) {
     if (!customer) return;
     
     var methodLabel = method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
-    var creditBalance = customer.creditBalance || 0;
     
-    // Tự động trừ tiền dư trước khi thanh toán
+    // Tính tổng nợ thực tế từ debtHistory (chính xác hơn totalDebt)
+    var totalFromHistory = 0;
+    if (customer.debtHistory) {
+        for (var hi = 0; hi < customer.debtHistory.length; hi++) {
+            totalFromHistory += customer.debtHistory[hi].amount || 0;
+        }
+    }
+    // Tính tổng đã trả
+    var totalPayment = 0;
+    if (customer.paymentHistory) {
+        for (var pi = 0; pi < customer.paymentHistory.length; pi++) {
+            totalPayment += customer.paymentHistory[pi].amount || 0;
+        }
+    }
+    // Nợ còn lại = tổng nợ - tổng đã trả
+    var outstandingDebt = Math.max(0, totalFromHistory - totalPayment);
+    
+    // FIX: Gộp tiền dư và tiền đưa trước thành 1 loại (prepaidBalance)
+    var prepaidBalance = customer.prepaidBalance || 0;
     var creditUsed = 0;
-    var actualPayment = amount; // số tiền thực tế khách đưa
-    if (creditBalance > 0) {
-        creditUsed = Math.min(creditBalance, amount);
-        actualPayment = amount - creditUsed; // số tiền khách cần trả sau khi đã dùng tiền dư
-        customer.creditBalance = creditBalance - creditUsed;
-        customer.creditHistory = customer.creditHistory || [];
-        customer.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -creditUsed, note: 'Dùng tiền dư khi thanh toán trả sau' });
+    var actualPayment = amount;
+    
+    if (prepaidBalance > 0) {
+        // Hỏi khách có muốn dùng tiền này không
+        var msg = '💰 ' + customer.name + ' có ' + formatMoney(prepaidBalance) + ' tiền.\nDùng số tiền này để thanh toán?';
+        
+        if (confirm(msg)) {
+            creditUsed = Math.min(prepaidBalance, amount);
+            actualPayment = amount - creditUsed;
+            customer.prepaidBalance = prepaidBalance - creditUsed;
+            customer.creditHistory = customer.creditHistory || [];
+            customer.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -creditUsed, note: 'Dùng tiền khi thanh toán trả sau' });
+        }
     }
     
-    // Xử lý: nếu trả nhiều hơn số cần, phần dư thành credit
-    var payment = Math.min(actualPayment, customer.totalDebt || 0);
+    // FIX: Dùng outstandingDebt (nợ còn lại) thay vì totalFromHistory (tổng nợ lịch sử)
+    // để phát hiện trả dư chính xác. Ví dụ: nợ 100k, đã trả 60k, còn 40k.
+    // Nếu khách trả 50k -> actualPayment=50k, outstandingDebt=40k -> payment=40k, overpay=10k (đúng)
+    var payment = Math.min(actualPayment, outstandingDebt);
     var overpay = actualPayment - payment;
     
-    customer.totalDebt = (customer.totalDebt || 0) - payment;
+    customer.totalDebt = outstandingDebt - payment;
     customer.paymentHistory = customer.paymentHistory || [];
     var now = new Date();
     var y = now.getFullYear();
     var m = ('0' + (now.getMonth() + 1)).slice(-2);
     var d = ('0' + now.getDate()).slice(-2);
     var dateKey = y + '-' + m + '-' + d;
-    customer.paymentHistory.unshift({ id: Date.now(), date: now.toISOString(), dateKey: dateKey, amount: actualPayment, method: method, note: 'Thanh toán trả sau ' + formatMoney(actualPayment) + ' (' + methodLabel + ')' + (creditUsed > 0 ? ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)' : '') });
-    
-    // Nếu có tiền dư (trả hơn số cần sau khi đã trừ credit), lưu thêm vào creditBalance
+    // FIX: Lưu note chi tiết để refund có thể parse chính xác
+    var payNote = 'Thanh toán trả sau ' + formatMoney(actualPayment) + ' (' + methodLabel + ')';
+    if (creditUsed > 0) {
+        payNote += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư/trước)';
+    }
     if (overpay > 0) {
-        customer.creditBalance = (customer.creditBalance || 0) + overpay;
+        payNote += ' (dư ' + formatMoney(overpay) + ')';
+    }
+    customer.paymentHistory.unshift({ id: Date.now(), date: now.toISOString(), dateKey: dateKey, amount: actualPayment, method: method, note: payNote });
+    
+    // FIX: Nếu trả dư, lưu vào prepaidBalance (gộp chung tiền dư và tiền đưa trước)
+    if (overpay > 0) {
+        customer.prepaidBalance = (customer.prepaidBalance || 0) + overpay;
         customer.creditHistory = customer.creditHistory || [];
         customer.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: overpay, note: 'Trả dư khi thanh toán trả sau +' + formatMoney(overpay) });
     }
     
-    // OPTIMIZE: Cập nhật DB trước, không cần DB.getAll('transactions') để tìm items
-    DB.update('customers', customer.id, {
+    // OPTIMIZE: Cập nhật DB
+    var updateData = {
         totalDebt: customer.totalDebt,
         paymentHistory: customer.paymentHistory,
-        creditBalance: customer.creditBalance || 0,
+        prepaidBalance: customer.prepaidBalance || 0,
+        creditBalance: customer.prepaidBalance || 0,
         creditHistory: customer.creditHistory || []
-    }).then(function() {
+    };
+    DB.update('customers', customer.id, updateData).then(function() {
         var historyNote = 'Thanh toán trả sau (' + methodLabel + ')';
-        if (creditUsed > 0) historyNote += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)';
+        if (creditUsed > 0) historyNote += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư/trước)';
         if (overpay > 0) historyNote += ' (dư ' + formatMoney(overpay) + ')';
-        // FIX: Ghi actualPayment (tổng tiền khách đưa) thay vì payment (chỉ phần thanh toán)
-        // vì tiền đã vào quỹ nên phải tính đủ doanh thu
+        // FIX: Lưu creditUsed vào note để refund có thể parse
+        // Format: "đã dùng 20,000 tiền dư/trước"
         return addHistory({ type: 'debt_payment', amount: actualPayment, paymentMethod: method, items: [], customer: { id: customer.id, name: customer.name }, note: historyNote });
     }).then(function() {
-        // AUDIT: Nếu thanh toán trả sau bằng tiền mặt, ghi nhận actualPayment (tổng tiền vào két)
         if (method === 'cash' && actualPayment > 0) {
             handleCashPayment(actualPayment, null, {type: 'debt_payment', tableName: null, customer: {id: customer.id, name: customer.name}}).catch(function(err) {
                 console.error('[AUDIT] handleCashPayment lỗi:', err);
             });
         }
         
-        // Gửi thông báo Telegram giao dịch thanh toán trả sau (cho tất cả phương thức)
         if (typeof notifyPaymentToTelegram === 'function') {
             notifyPaymentToTelegram({
                 type: 'debt_payment',
@@ -606,8 +737,8 @@ function confirmInlineDebtPayment(customerId, method) {
         }
         
         var msg = '✅ Đã thanh toán ' + formatMoney(actualPayment) + ' (' + methodLabel + ')';
-        if (creditUsed > 0) msg += ', đã dùng ' + formatMoney(creditUsed) + ' tiền dư';
-        if (overpay > 0) msg += ', dư ' + formatMoney(overpay) + ' làm tiền trả trước';
+        if (creditUsed > 0) msg += ', đã dùng ' + formatMoney(creditUsed) + ' tiền dư/trước';
+        if (overpay > 0) msg += ', dư ' + formatMoney(overpay) + ' làm tiền dư';
         showToast(msg, 'success');
         renderCustomerList();
         showCustomerDetail(customer.id);
@@ -619,26 +750,31 @@ function addCustomerDebt(customerId, amount, note, items) {
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return Promise.resolve({ debtAmount: amount, creditUsed: 0 });
     
-    // Tự động trừ creditBalance trước khi ghi trả sau
-    var creditBalance = c.creditBalance || 0;
+    // FIX: Gộp tiền dư và tiền đưa trước thành 1 loại (prepaidBalance)
+    // Khi ghi nợ, tự động trừ tiền của khách trước
+    var prepaidBal = c.prepaidBalance || 0;
     var creditUsed = 0;
     var debtAmount = amount;
     
-    if (creditBalance > 0) {
-        creditUsed = Math.min(creditBalance, amount);
-        debtAmount = amount - creditUsed;
-        c.creditBalance = creditBalance - creditUsed;
+    if (prepaidBal > 0) {
+        var useFromPrepaid = Math.min(prepaidBal, debtAmount);
+        creditUsed += useFromPrepaid;
+        debtAmount -= useFromPrepaid;
+        c.prepaidBalance = prepaidBal - useFromPrepaid;
+    }
+    
+    // Ghi nhận lịch sử dùng credit (nếu có)
+    if (creditUsed > 0) {
         c.creditHistory = c.creditHistory || [];
-        c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -creditUsed, note: 'Trừ tiền dư khi ghi trả sau: ' + note });
+        c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -creditUsed, note: 'Tự động trừ khi ghi nợ: ' + note });
     }
     
     if (debtAmount > 0) {
         c.totalDebt = (c.totalDebt || 0) + debtAmount;
         c.debtHistory = c.debtHistory || [];
-        // Lưu items vào debtHistory để hiển thị chi tiết mặt hàng trong tab khách hàng
         var now = new Date();
-        var debtEntry = { id: Date.now(), date: now.toISOString(), amount: debtAmount, note: note, status: 'unpaid' };
-        // Lưu dateKey (local date YYYY-MM-DD) để so sánh ngày chính xác, tránh lệch timezone
+        // FIX: Lưu creditUsed vào debtEntry để editDebtEntry/deleteDebtEntry có thể khôi phục prepaidBalance
+        var debtEntry = { id: Date.now(), date: now.toISOString(), amount: debtAmount, note: note, status: 'unpaid', creditUsed: creditUsed };
         var y = now.getFullYear();
         var m = ('0' + (now.getMonth() + 1)).slice(-2);
         var d = ('0' + now.getDate()).slice(-2);
@@ -649,13 +785,17 @@ function addCustomerDebt(customerId, amount, note, items) {
         c.debtHistory.unshift(debtEntry);
     }
     
-    var updateData = { totalDebt: c.totalDebt || 0, debtHistory: c.debtHistory || [] };
-    if (creditUsed > 0) {
-        updateData.creditBalance = c.creditBalance;
-        updateData.creditHistory = c.creditHistory;
-    }
+    // Cập nhật creditBalance cho backward compatibility
+    c.creditBalance = c.prepaidBalance || 0;
+    
+    var updateData = {
+        totalDebt: c.totalDebt || 0,
+        debtHistory: c.debtHistory || [],
+        prepaidBalance: c.prepaidBalance || 0,
+        creditBalance: c.creditBalance || 0,
+        creditHistory: c.creditHistory || []
+    };
     return DB.update('customers', customerId, updateData).then(function() {
-        // OPTIMIZE: Không cần DB.getAll('customers') - memory cache đã được cập nhật
         return { debtAmount: debtAmount, creditUsed: creditUsed };
     });
 }
@@ -717,17 +857,35 @@ function editDebtEntry(customerId, debtIndex, newAmount, newNote) {
     
     var entry = debtHistory[debtIndex];
     var oldAmount = entry.amount;
+    var oldCreditUsed = entry.creditUsed || 0;
+    
+    // FIX: Khi sửa nợ, nếu entry có creditUsed > 0 (đã auto-deduct từ prepaidBalance)
+    // thì cần khôi phục lại prepaidBalance trước khi tính toán lại
+    if (oldCreditUsed > 0) {
+        c.prepaidBalance = (c.prepaidBalance || 0) + oldCreditUsed;
+        // Ghi nhận vào creditHistory
+        c.creditHistory = c.creditHistory || [];
+        c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: oldCreditUsed, note: 'Hoàn trả credit khi sửa nợ (cũ: ' + formatMoney(oldAmount) + ' → mới: ' + formatMoney(newAmount) + ')' });
+    }
     
     // Cập nhật totalDebt: trừ nợ cũ, cộng nợ mới
     c.totalDebt = (c.totalDebt || 0) - oldAmount + newAmount;
     entry.amount = newAmount;
+    // Reset creditUsed vì đã hoàn trả, nợ mới sẽ không auto-deduct (người dùng tự điều chỉnh)
+    entry.creditUsed = 0;
     if (newNote !== undefined && newNote !== null) {
         entry.note = newNote;
     }
     
+    // Cập nhật creditBalance cho backward compatibility
+    c.creditBalance = c.prepaidBalance || 0;
+    
     return DB.update('customers', customerId, {
         totalDebt: c.totalDebt,
-        debtHistory: debtHistory
+        debtHistory: debtHistory,
+        prepaidBalance: c.prepaidBalance || 0,
+        creditBalance: c.creditBalance || 0,
+        creditHistory: c.creditHistory || []
     }).then(function() {
         showToast('✅ Đã sửa khoản nợ: ' + formatMoney(oldAmount) + ' → ' + formatMoney(newAmount), 'success');
         renderCustomerList();
@@ -751,19 +909,35 @@ function deleteDebtEntry(customerId, debtIndex) {
         return;
     }
     
-    var removedAmount = debtHistory[debtIndex].amount;
+    var entry = debtHistory[debtIndex];
+    var removedAmount = entry.amount;
+    var removedCreditUsed = entry.creditUsed || 0;
     
     if (!confirm('🗑️ Xóa khoản nợ ' + formatMoney(removedAmount) + '?\nHành động này không thể hoàn tác!')) {
         return;
+    }
+    
+    // FIX: Nếu entry có creditUsed > 0 (đã auto-deduct từ prepaidBalance),
+    // cần khôi phục lại prepaidBalance
+    if (removedCreditUsed > 0) {
+        c.prepaidBalance = (c.prepaidBalance || 0) + removedCreditUsed;
+        c.creditHistory = c.creditHistory || [];
+        c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: removedCreditUsed, note: 'Hoàn trả credit khi xóa nợ: ' + formatMoney(removedAmount) });
     }
     
     debtHistory.splice(debtIndex, 1);
     c.totalDebt = (c.totalDebt || 0) - removedAmount;
     if (c.totalDebt < 0) c.totalDebt = 0;
     
+    // Cập nhật creditBalance cho backward compatibility
+    c.creditBalance = c.prepaidBalance || 0;
+    
     return DB.update('customers', customerId, {
         totalDebt: c.totalDebt,
-        debtHistory: debtHistory
+        debtHistory: debtHistory,
+        prepaidBalance: c.prepaidBalance || 0,
+        creditBalance: c.creditBalance || 0,
+        creditHistory: c.creditHistory || []
     }).then(function() {
         showToast('✅ Đã xóa khoản nợ: ' + formatMoney(removedAmount), 'success');
         renderCustomerList();
@@ -771,30 +945,52 @@ function deleteDebtEntry(customerId, debtIndex) {
     });
 }
 
-// ========== CẬP NHẬT CREDIT CHO KHÁCH ==========
+// ========== CẬP NHẬT TIỀN CỦA KHÁCH ==========
+// FIX: Gộp changeBalance và prepaidBalance thành 1 loại duy nhất (prepaidBalance)
+// Giữ addCustomerCredit và useCustomerCredit cho tương thích ngược
+
 function addCustomerCredit(customerId, amount, note) {
+    return addPrepaidBalance(customerId, amount, note);
+}
+
+function useCustomerCredit(customerId, amount, note) {
+    return usePrepaidBalance(customerId, amount, note);
+}
+
+// Thêm tiền cho khách (dư/trước - gộp chung)
+function addPrepaidBalance(customerId, amount, note) {
     var c = null;
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return Promise.resolve();
-    c.creditBalance = (c.creditBalance || 0) + amount;
+    c.prepaidBalance = (c.prepaidBalance || 0) + amount;
+    c.creditBalance = (c.creditBalance || 0) + amount; // Giữ tương thích
     c.creditHistory = c.creditHistory || [];
     c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: amount, note: note });
-    return DB.update('customers', customerId, { creditBalance: c.creditBalance, creditHistory: c.creditHistory }).then(function() {
+    return DB.update('customers', customerId, { prepaidBalance: c.prepaidBalance, creditBalance: c.creditBalance, creditHistory: c.creditHistory }).then(function() {
         // OPTIMIZE: Không cần DB.getAll('customers') - memory cache đã được cập nhật
     });
 }
 
-function useCustomerCredit(customerId, amount, note) {
+// Dùng tiền của khách (chỉ 1 loại prepaidBalance)
+function usePrepaidBalance(customerId, amount, note) {
     var c = null;
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) return Promise.resolve(0);
-    var used = Math.min(amount, c.creditBalance || 0);
+    
+    var prepaidBal = c.prepaidBalance || 0;
+    var used = Math.min(amount, prepaidBal);
     if (used <= 0) return Promise.resolve(0);
-    c.creditBalance = (c.creditBalance || 0) - used;
+    
+    c.prepaidBalance = prepaidBal - used;
+    c.creditBalance = c.prepaidBalance; // Giữ tương thích
     c.creditHistory = c.creditHistory || [];
     c.creditHistory.unshift({ id: Date.now(), date: new Date().toISOString(), amount: -used, note: note });
-    return DB.update('customers', customerId, { creditBalance: c.creditBalance, creditHistory: c.creditHistory }).then(function() {
-        // OPTIMIZE: Không cần DB.getAll('customers') - memory cache đã được cập nhật
+    
+    return DB.update('customers', customerId, {
+        prepaidBalance: c.prepaidBalance,
+        creditBalance: c.creditBalance,
+        creditHistory: c.creditHistory
+    }).then(function() {
         return used;
     });
 }
@@ -831,13 +1027,33 @@ function renderCustomerSelectorList(searchTerm) {
     var html = '';
     for (var i = 0; i < filtered.length; i++) {
         var c = filtered[i];
-        var netBalance = (c.creditBalance || 0) - (c.totalDebt || 0);
-        var balanceClass = netBalance > 0 ? 'cus-grid-pos' : (netBalance < 0 ? 'cus-grid-neg' : '');
+        // FIX: Tính toán rõ ràng nợ, dư, đưa trước
+        var totalFromHistory = 0;
+        if (c.debtHistory) {
+            for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                totalFromHistory += c.debtHistory[hi].amount || 0;
+            }
+        }
+        var totalPayment = 0;
+        if (c.paymentHistory) {
+            for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                totalPayment += c.paymentHistory[pi].amount || 0;
+            }
+        }
+        var outstandingDebt = Math.max(0, totalFromHistory - totalPayment);
+        var prepaidBal = c.prepaidBalance || 0;
+        var totalCredit = prepaidBal;
+        
+        var balanceClass = totalCredit > 0 ? 'cus-grid-pos' : (outstandingDebt > 0 ? 'cus-grid-neg' : '');
         var balanceText = '';
-        if (netBalance > 0) {
-            balanceText = '<span class="cus-grid-bal cus-grid-pos">+ ' + formatMoney(netBalance) + '</span>';
-        } else if (netBalance < 0) {
-            balanceText = '<span class="cus-grid-bal cus-grid-neg">- ' + formatMoney(Math.abs(netBalance)) + '</span>';
+        if (outstandingDebt > 0) {
+            balanceText = '<span class="cus-grid-bal cus-grid-neg">💢 ' + formatMoney(outstandingDebt) + '</span>';
+        }
+        if (totalCredit > 0) {
+            balanceText += '<span class="cus-grid-bal cus-grid-pos" style="margin-left:4px;">💰 ' + formatMoney(totalCredit) + '</span>';
+        }
+        if (!balanceText) {
+            balanceText = '<span class="cus-grid-bal" style="color:#94a3b8;">✅ 0</span>';
         }
         html += '<div class="cus-grid-item ' + balanceClass + '" onclick="selectCustomer(\'' + c.id + '\')"><span class="cus-grid-name">' + escapeHtml(c.name) + '</span>' + balanceText + '</div>';
     }
@@ -990,30 +1206,36 @@ function printCustomerDebtHistory(customerId, mode) {
             all.push({ type: 'credit', date: c.creditHistory[i].date, amount: c.creditHistory[i].amount, note: c.creditHistory[i].note, transactionId: null });
         }
     }
-    // Map transactionId cho debt records
+    // FIX: Thêm các giao dịch mới từ transactions collection
     for (var i = 0; i < allTransactions.length; i++) {
         var tx = allTransactions[i];
-        if (tx.type === 'debt_payment' && tx.customer && tx.customer.id === customerId) {
-            var txTime = new Date(tx.createdAt || tx.date).getTime();
-            for (var j = 0; j < all.length; j++) {
-                var hTime = new Date(all[j].date).getTime();
-                if (Math.abs(txTime - hTime) < 60000 && all[j].transactionId === null) {
-                    all[j].transactionId = tx.id;
-                    all[j].items = tx.items || [];
-                    break;
+        if (tx.customer && tx.customer.id === customerId) {
+            if (tx.type === 'prepaid' || tx.type === 'change_in' || tx.type === 'change_use') {
+                all.push({
+                    type: tx.type,
+                    date: tx.createdAt || tx.date,
+                    amount: tx.amount,
+                    note: tx.note || '',
+                    transactionId: tx.id,
+                    items: tx.items || []
+                });
+            } else if (tx.type === 'debt_payment') {
+                var txTime = new Date(tx.createdAt || tx.date).getTime();
+                for (var j = 0; j < all.length; j++) {
+                    var hTime = new Date(all[j].date).getTime();
+                    if (Math.abs(txTime - hTime) < 60000 && all[j].transactionId === null) {
+                        all[j].transactionId = tx.id;
+                        all[j].items = tx.items || [];
+                        break;
+                    }
                 }
             }
         }
     }
     all.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
     
-    // Lọc: chỉ lấy debt và payment, bỏ credit (giống _renderCustomerHistoryHtml)
-    var filtered = [];
-    for (var idx = 0; idx < all.length; idx++) {
-        if (all[idx].type !== 'credit') {
-            filtered.push(all[idx]);
-        }
-    }
+    // FIX: KHÔNG lọc bỏ credit - hiển thị tất cả giao dịch
+    var filtered = all;
     
     // Tính dư nợ lũy kế (giống _renderCustomerHistoryHtml)
     var balances = {};
@@ -1061,6 +1283,7 @@ function printCustomerDebtHistory(customerId, mode) {
         history: historyData,
         totalDebt: c.totalDebt || 0,
         creditBalance: c.creditBalance || 0,
+        prepaidBalance: c.prepaidBalance || 0,
         initialBalance: 0
     };
     
@@ -1094,12 +1317,25 @@ function _showPrintPreview(printData, mode) {
             
             var label = '';
             var amountColor = '';
+            var isCreditTx = false;
             if (h.type === 'debt') {
                 label = 'Ghi trả sau';
                 amountColor = '#dc2626';
             } else if (h.type === 'payment') {
                 label = 'Thanh toán';
                 amountColor = '#16a34a';
+            } else if (h.type === 'credit' || h.type === 'change_in') {
+                label = (h.amount >= 0) ? '💰 Tiền dư +' : '💰 Dùng tiền dư';
+                amountColor = '#16a34a';
+                isCreditTx = true;
+            } else if (h.type === 'prepaid') {
+                label = '💳 Đưa trước';
+                amountColor = '#8b5cf6';
+                isCreditTx = true;
+            } else if (h.type === 'change_use') {
+                label = '💰 Dùng tiền dư';
+                amountColor = '#f59e0b';
+                isCreditTx = true;
             }
             
             var balanceText = '';
@@ -1118,8 +1354,10 @@ function _showPrintPreview(printData, mode) {
             previewHtml += '<div style="border-bottom:1px solid #e2e8f0;padding:8px 0;">';
             previewHtml += '<div style="font-size:12px;color:#64748b;margin-bottom:4px;">ngày ' + h.dateStr + '</div>';
             previewHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-            previewHtml += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(h.amount) + '</span>';
-            previewHtml += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
+            previewHtml += '  <span style="font-size:14px;font-weight:600;color:' + amountColor + ';">' + label + ': ' + formatMoney(Math.abs(h.amount)) + '</span>';
+            if (!isCreditTx) {
+                previewHtml += '  <span style="font-size:14px;font-weight:700;color:' + balanceColor + ';">Tổng tiền: ' + balanceText + '</span>';
+            }
             previewHtml += '</div>';
             
             if (h.note) {
@@ -1330,24 +1568,27 @@ function confirmAddPrepaid(customerId) {
     for (var i = 0; i < customers.length; i++) { if (customers[i].id === customerId) { c = customers[i]; break; } }
     if (!c) { showToast('⚠️ Không tìm thấy khách hàng', 'error'); return; }
     
+    // FIX: Dùng prepaidBalance riêng thay vì creditBalance chung
     // Ghi nhận tiền đưa trước:
-    // 1. Cộng vào creditBalance (tiền dư/tiền trả trước) của khách
-    // 2. Ghi vào creditHistory
-    // 3. Ghi addHistory với type='debt_payment' để tính doanh thu
+    // 1. Cộng vào prepaidBalance (tiền đưa trước) của khách
+    // 2. Ghi vào creditHistory (giữ để tương thích)
+    // 3. Ghi addHistory với type='prepaid' (riêng biệt)
     // 4. Nếu là TM, gọi handleCashPayment để ghi vào két
     
-    c.creditBalance = (c.creditBalance || 0) + amount;
+    c.prepaidBalance = (c.prepaidBalance || 0) + amount;
+    c.creditBalance = (c.creditBalance || 0) + amount; // Giữ tương thích
     c.creditHistory = c.creditHistory || [];
     var now = new Date();
     c.creditHistory.unshift({ id: Date.now(), date: now.toISOString(), amount: amount, note: 'Khách đưa trước: ' + note + ' (' + methodLabel + ')' });
     
     DB.update('customers', customerId, {
+        prepaidBalance: c.prepaidBalance,
         creditBalance: c.creditBalance,
         creditHistory: c.creditHistory
     }).then(function() {
-        // Ghi vào lịch sử giao dịch (doanh thu) với type debt_payment
+        // FIX: Dùng type 'prepaid' riêng thay vì 'debt_payment'
         return addHistory({
-            type: 'debt_payment',
+            type: 'prepaid',
             amount: amount,
             paymentMethod: method,
             items: [],
@@ -1358,7 +1599,7 @@ function confirmAddPrepaid(customerId) {
         // Nếu là tiền mặt, ghi vào két
         if (method === 'cash') {
             if (typeof handleCashPayment === 'function') {
-                handleCashPayment(amount, null, {type: 'debt_payment', tableName: null, customer: {id: c.id, name: c.name}}).catch(function(err) {
+                handleCashPayment(amount, null, {type: 'prepaid', tableName: null, customer: {id: c.id, name: c.name}}).catch(function(err) {
                     console.error('[AUDIT] handleCashPayment lỗi:', err);
                 });
             }
@@ -1367,7 +1608,7 @@ function confirmAddPrepaid(customerId) {
         // Gửi thông báo Telegram
         if (typeof notifyPaymentToTelegram === 'function') {
             notifyPaymentToTelegram({
-                type: 'debt_payment',
+                type: 'prepaid',
                 amount: amount,
                 paymentMethod: method,
                 items: [],
@@ -1446,6 +1687,31 @@ function confirmEditDebt(customerId, debtIndex) {
     editDebtEntry(customerId, debtIndex, newAmount, newNote);
 }
 
+// ========== MIGRATION: GỘP changeBalance VÀO prepaidBalance ==========
+// Hàm này migrate dữ liệu cũ: nếu customer có changeBalance > 0 thì cộng vào prepaidBalance
+// và xoá changeBalance. Gọi sau khi load customers từ DB.
+function _migrateCustomerChangeBalance() {
+    if (!customers) return;
+    var changed = false;
+    for (var i = 0; i < customers.length; i++) {
+        var c = customers[i];
+        var oldChange = c.changeBalance || 0;
+        if (oldChange > 0) {
+            c.prepaidBalance = (c.prepaidBalance || 0) + oldChange;
+            c.creditBalance = c.prepaidBalance;
+            delete c.changeBalance;
+            changed = true;
+        }
+        // Đảm bảo creditBalance luôn đồng bộ với prepaidBalance
+        if (c.prepaidBalance) {
+            c.creditBalance = c.prepaidBalance;
+        }
+    }
+    if (changed) {
+        console.log('[MIGRATE] Đã gộp changeBalance vào prepaidBalance cho ' + customers.length + ' khách hàng');
+    }
+}
+
 // Export global
 window.showCustomerDetail = showCustomerDetail;
 window.printCustomerDebtHistory = printCustomerDebtHistory;
@@ -1467,3 +1733,4 @@ window.confirmEditDebt = confirmEditDebt;
 window.deleteDebtEntry = deleteDebtEntry;
 window.showAddPrepaidForm = showAddPrepaidForm;
 window.confirmAddPrepaid = confirmAddPrepaid;
+window._migrateCustomerChangeBalance = _migrateCustomerChangeBalance;

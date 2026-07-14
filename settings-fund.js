@@ -41,10 +41,41 @@ function initFundListener() {
             var data = snapshot.val() || {};
             _fundData = data;
             _renderFundUI();
+
+            // Dọn dẹp daily_fund_edited entries cũ (nếu còn sót)
+            _cleanupFundEditedEntries();
         });
     } catch (e) {
         // Firebase chưa sẵn sàng
     }
+}
+
+// ============================================================
+// Dọn dẹp daily_fund_edited entries cũ trên Firebase
+// ============================================================
+function _cleanupFundEditedEntries() {
+    try {
+        if (!_fundData || !_fundData.history) return;
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = _getFundDb().ref(shopId + '/responsibility_fund');
+        var hasEdited = false;
+        var cleanupUpdates = {};
+
+        for (var hk in _fundData.history) {
+            var hEntry = _fundData.history[hk];
+            if (hEntry && hEntry.type === 'daily_fund_edited') {
+                cleanupUpdates['history/' + hk] = null;
+                hasEdited = true;
+            }
+        }
+
+        if (hasEdited) {
+            fundRef.update(cleanupUpdates).then(function() {
+                // Đã xóa, cần tính lại balance
+                _recalculateFundBalance();
+            }).catch(function() {});
+        }
+    } catch (e) {}
 }
 
 // ============================================================
@@ -380,12 +411,12 @@ function _recalculateFundBalance() {
                 }
             }
 
-            // Cộng tất cả history entries (trừ 'daily_fund' vì đã tính qua dailyFund.balanceChange)
+            // Cộng tất cả history entries (trừ 'daily_fund' và 'daily_fund_edited' vì đã tính qua dailyFund.balanceChange)
             // Bao gồm: withdrawal (âm), refund (dương), initial_deposit (dương),
             //          deficit (âm), daily_fund_removed (âm)
             for (var hk in history) {
                 var hEntry = history[hk];
-                if (hEntry && hEntry.type !== 'daily_fund' && hEntry.amount) {
+                if (hEntry && hEntry.type !== 'daily_fund' && hEntry.type !== 'daily_fund_edited' && hEntry.amount) {
                     balance += hEntry.amount;
                 }
             }
@@ -414,10 +445,10 @@ function _calculateBalanceRealtime() {
             }
         }
 
-        // Cộng tất cả history entries (trừ 'daily_fund' vì đã tính qua dailyFund.balanceChange)
+        // Cộng tất cả history entries (trừ 'daily_fund' và 'daily_fund_edited' vì đã tính qua dailyFund.balanceChange)
         for (var hk in history) {
             var hEntry = history[hk];
-            if (hEntry && hEntry.type !== 'daily_fund' && hEntry.amount) {
+            if (hEntry && hEntry.type !== 'daily_fund' && hEntry.type !== 'daily_fund_edited' && hEntry.amount) {
                 balance += hEntry.amount;
             }
         }
@@ -496,6 +527,15 @@ function processFundForClose(closeDate, difference, action) {
                     };
                 }
 
+                // Xóa daily_fund_removed cũ (nếu có) để cho phép đóng lại sau khi hủy
+                var history = fundData.history || {};
+                for (var hk in history) {
+                    var h = history[hk];
+                    if (h && h.type === 'daily_fund_removed' && h.date === closeDate) {
+                        updates['history/' + hk] = null;
+                    }
+                }
+
                 return fundRef.update(updates).then(function() {
                     _recalculateFundBalance();
                 });
@@ -539,6 +579,16 @@ function processFundForClose(closeDate, difference, action) {
                         createdAt: now
                     };
                 }
+
+                // Đánh dấu ngày này đã bị hủy chốt để _autoContributeTodayFund()
+                // và _autoContributeAllDays() không tự động tạo lại contribution
+                var removedHistRef = fundRef.child('history').push();
+                updates['history/' + removedHistRef.key] = {
+                    type: 'daily_fund_removed',
+                    amount: 0,
+                    date: closeDate,
+                    createdAt: now - 1
+                };
 
                 return fundRef.update(updates).then(function() {
                     _recalculateFundBalance();
@@ -928,8 +978,9 @@ function _renderFundLog() {
             html += '    </div>';
             html += '  </div>';
             html += '  <div class="fund-log-amount" style="color:' + color + ';">' + sign + formatMoney(Math.abs(item.amount)) + '</div>';
-            // Nút xóa cho admin (chỉ daily_fund)
+            // Nút xóa/sửa cho admin (chỉ daily_fund)
             if (isAdmin && item.canDelete && item.dateKey && item.type === 'daily_fund') {
+                html += '  <button class="fund-log-delete" onclick="editFundDailyEntry(\'' + item.dateKey + '\')" title="Sửa doanh thu ngày này">✏️</button>';
                 html += '  <button class="fund-log-delete" onclick="deleteFundDailyEntry(\'' + item.dateKey + '\')" title="Xóa giao dịch này">🗑️</button>';
             }
             html += '</div>';
@@ -1119,6 +1170,9 @@ function _buildFundLogEntries() {
                     dateKey: hDateKey,
                     canDelete: false
                 });
+            } else if (h.type === 'daily_fund_edited') {
+                // Không hiển thị entry này trong log để tránh rối UI
+                // Dữ liệu đã được cập nhật trực tiếp trong dailyFund
             }
         }
     }
@@ -1166,7 +1220,8 @@ function _updateFundInCashCounter() {
         html += '  </div>';
         // Nội dung chi tiết (ẩn/hiện theo collapse)
         if (!isCollapsed) {
-            if (todayContribution > 0) {
+            // FIX: Chỉ admin mới thấy dòng "Hôm nay +1%" - ẩn với nhân viên
+            if (todayContribution > 0 && DB.isAdmin && DB.isAdmin()) {
                 html += '  <div style="display:flex;justify-content:space-between;align-items:center;">';
                 html += '    <span style="font-size:11px;color:#64748b;">Hôm nay +1%</span>';
                 html += '    <span style="font-size:12px;color:#22c55e;">+' + formatMoney(todayContribution) + '</span>';
@@ -1177,6 +1232,104 @@ function _updateFundInCashCounter() {
 
         fundInfoDiv.innerHTML = html;
     } catch (e) {}
+}
+
+// ============================================================
+// SỬA DOANH THU NGÀY (Admin)
+// ============================================================
+function editFundDailyEntry(dateKey) {
+    if (!dateKey) return;
+    if (!DB.isAdmin || !DB.isAdmin()) {
+        showToast('❌ Chỉ admin mới có quyền sửa', 'error');
+        return;
+    }
+
+    // Lấy dữ liệu hiện tại
+    var currentRevenue = 0;
+    var currentContribution = 0;
+    if (_fundData && _fundData.dailyFund && _fundData.dailyFund[dateKey]) {
+        var df = _fundData.dailyFund[dateKey];
+        currentRevenue = df.revenue || 0;
+        currentContribution = df.contribution || 0;
+    }
+
+    var dateLabel = typeof formatDateDisplay === 'function' ? formatDateDisplay(dateKey) : dateKey;
+    var newRevenue = prompt(
+        '✏️ Sửa doanh thu ngày ' + dateLabel + '\n' +
+        'Doanh thu hiện tại: ' + formatMoney(currentRevenue) + '\n' +
+        '1% hiện tại: ' + formatMoney(currentContribution) + '\n\n' +
+        'Nhập doanh thu đúng (VNĐ):',
+        currentRevenue > 0 ? String(currentRevenue) : ''
+    );
+
+    if (newRevenue === null) return; // Hủy
+    newRevenue = parseInt(newRevenue.replace(/[^0-9]/g, '')) || 0;
+    if (newRevenue <= 0) {
+        showToast('❌ Doanh thu không hợp lệ', 'error');
+        return;
+    }
+    if (newRevenue === currentRevenue) {
+        showToast('ℹ️ Doanh thu không thay đổi', 'info');
+        return;
+    }
+
+    var newContribution = Math.round(newRevenue * 0.01);
+    if (isNaN(newContribution) || newContribution <= 0) {
+        showToast('❌ Doanh thu quá nhỏ, không đủ 1%', 'error');
+        return;
+    }
+
+    if (!confirm('📊 Xác nhận sửa doanh thu ngày ' + dateLabel + ':\n' +
+        'Doanh thu: ' + formatMoney(currentRevenue) + ' → ' + formatMoney(newRevenue) + '\n' +
+        '1%: ' + formatMoney(currentContribution) + ' → ' + formatMoney(newContribution) + '\n\n' +
+        'Số dư quỹ sẽ được cập nhật tự động.')) return;
+
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        var fundRef = _getFundDb().ref(shopId + '/responsibility_fund');
+        var now = Date.now();
+        var updates = {};
+
+        // Cập nhật dailyFund entry
+        var deficit = 0;
+        if (_fundData && _fundData.dailyFund && _fundData.dailyFund[dateKey]) {
+            deficit = _fundData.dailyFund[dateKey].deficitCompensation || 0;
+        }
+        var balanceChange = newContribution - deficit;
+
+        updates['dailyFund/' + dateKey + '/contribution'] = newContribution;
+        updates['dailyFund/' + dateKey + '/revenue'] = newRevenue;
+        updates['dailyFund/' + dateKey + '/balanceChange'] = balanceChange;
+        updates['dailyFund/' + dateKey + '/updatedAt'] = now;
+
+        // Xóa daily_fund_edited entry cũ (nếu có) để tránh ảnh hưởng balance
+        if (_fundData && _fundData.history) {
+            for (var hk in _fundData.history) {
+                var hEntry = _fundData.history[hk];
+                if (hEntry && hEntry.type === 'daily_fund_edited' && hEntry.dateKey === dateKey) {
+                    updates['history/' + hk] = null; // Xóa entry cũ
+                }
+            }
+        }
+
+        // Cập nhật daily_revenue trên Firebase để đồng bộ
+        try {
+            var revRef = _getFundDb().ref(shopId + '/daily_revenue/' + dateKey);
+            revRef.update({
+                total: newRevenue,
+                updatedAt: now
+            }).catch(function() {});
+        } catch (e) {}
+
+        return fundRef.update(updates).then(function() {
+            _recalculateFundBalance();
+            showToast('✅ Đã cập nhật doanh thu ngày ' + dateLabel + ': ' + formatMoney(newRevenue) + ' (1%: ' + formatMoney(newContribution) + ')', 'success');
+        }).catch(function(err) {
+            showToast('❌ Lỗi khi cập nhật: ' + (err.message || ''), 'error');
+        });
+    } catch (e) {
+        showToast('❌ Lỗi: ' + e.message, 'error');
+    }
 }
 
 // ========== TOGGLE COLLAPSE CHO FUND TRONG CASH COUNTER ==========

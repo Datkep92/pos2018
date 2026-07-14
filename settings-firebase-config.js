@@ -9,12 +9,6 @@ function _initFirebaseConfigSection() {
     var fbSection = document.getElementById('settingsFirebaseSection');
     if (!fbSection) return;
     
-    // ẨN HOÀN TOÀN: Việc cấu hình Firebase riêng đã được chuyển sang Admin Master Dashboard
-    // POS admin thường KHÔNG được tự cấu hình Firebase - chỉ Master Admin mới có quyền này
-    fbSection.style.display = 'none';
-    return;
-    
-    // Code cũ được giữ lại để tham khảo:
     // Chỉ hiển thị nếu user là admin
     var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
     if (!isAdmin) {
@@ -129,9 +123,7 @@ function saveFirebaseConfig() {
                 statusEl.innerHTML = '<span style="color:#22c55e;">✅ Đã lưu cấu hình Firebase! Vui lòng đăng nhập lại để áp dụng.</span>';
                 
                 // Cập nhật hasCustomConfig trong shop_registry
-                var _curUser = (typeof DB !== 'undefined' && DB.getCurrentUser) ? DB.getCurrentUser() : null;
-                var _shopCode = (_curUser && _curUser.shopCode) ? _curUser.shopCode : shopId.replace('shop_', '');
-                masterDb.ref('shop_registry/' + _shopCode).update({
+                masterDb.ref('shop_registry/' + shopId.replace('shop_', '')).update({
                     hasCustomConfig: true
                 }).catch(function() {});
             }).catch(function(err) {
@@ -168,9 +160,7 @@ function clearFirebaseConfig() {
                 statusEl.innerHTML = '<span style="color:#22c55e;">✅ Đã xóa cấu hình Firebase! Vui lòng đăng nhập lại để dùng Firebase mặc định.</span>';
                 
                 // Cập nhật hasCustomConfig trong shop_registry
-                var _curUser = (typeof DB !== 'undefined' && DB.getCurrentUser) ? DB.getCurrentUser() : null;
-                var _shopCode = (_curUser && _curUser.shopCode) ? _curUser.shopCode : shopId.replace('shop_', '');
-                masterDb.ref('shop_registry/' + _shopCode).update({
+                masterDb.ref('shop_registry/' + shopId.replace('shop_', '')).update({
                     hasCustomConfig: false
                 }).catch(function() {});
             }).catch(function(err) {

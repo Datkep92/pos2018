@@ -313,7 +313,7 @@ function printReceipt(data) {
 function printAfterPayment(paymentData) {
     var shop = (typeof shopInfo !== 'undefined' && shopInfo) ? shopInfo : null;
     var printData = {
-        storeName: paymentData.shopName || (shop ? shop.name : null) || 'Hệ Thống Bán Hàng',
+        storeName: paymentData.shopName || (shop ? shop.name : null) || 'MILANO COFFEE 259',
         storeAddress: paymentData.shopAddress || (shop ? shop.address : null) || null,
         storePhone: shop ? shop.phone : null,
         qrCode: shop ? shop.qrCode : null,
@@ -471,7 +471,7 @@ function printDebtHistoryThermal(data) {
 // ========== XUẤT PDF LỊCH SỬ NỢ ==========
 function exportDebtHistoryPdf(data) {
     // Tạo HTML để in / xuất PDF
-    var shopName = data.storeName || 'Hệ Thống Bán Hàng';
+    var shopName = data.storeName || 'MILANO COFFEE 259';
     var customerName = data.customerName || '';
     var customerPhone = data.customerPhone || '';
     var printDate = data.printDate || '';
@@ -559,7 +559,7 @@ function exportDebtHistoryPdf(data) {
         html += '<div class="summary-item summary-total">Còn lại: ' + formatPrice(remaining) + 'đ</div>';
     }
     html += '</div>';
-    html += '<div class="footer">Phần mềm quản lý bán hàng</div>';
+    html += '<div class="footer">Phần mềm quản lý bán hàng MILANO COFFEE 259</div>';
     html += '</body></html>';
     
     // Mở cửa sổ in mới
@@ -579,7 +579,7 @@ function exportDebtHistoryPdf(data) {
 // ========== XUẤT PDF HÓA ĐƠN BÀN ==========
 function exportBillPDF(paymentData) {
 var shop = (typeof shopInfo !== 'undefined' && shopInfo) ? shopInfo : null;
-var storeName = paymentData.shopName || (shop ? shop.name : null) || 'Hệ Thống Bán Hàng';
+var storeName = paymentData.shopName || (shop ? shop.name : null) || 'MILANO COFFEE 259';
 var storeAddress = paymentData.shopAddress || (shop ? shop.address : null) || '';
 var storePhone = shop ? shop.phone : '';
 
