@@ -3937,6 +3937,16 @@ body.modal-open {
     line-height: 1.2;
     text-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
+.change-toast .change-return {
+    color: #fef3c7;
+    font-size: 15px;
+    font-weight: 700;
+    margin-top: 6px;
+    padding: 6px 12px;
+    background: rgba(251, 191, 36, 0.15);
+    border-radius: 10px;
+    display: inline-block;
+}
 .change-toast .change-hint {
     color: #a7f3d0;
     font-size: 12px;
@@ -4266,6 +4276,251 @@ body.modal-open {
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
+}
+
+/* Settings collapsible: khi thu gọn chỉ để lại title với padding nhỏ */
+.collapsible-section:not(.expanded) {
+    padding: 8px 14px !important;
+    margin-bottom: 6px !important;
+}
+.collapsible-section.expanded {
+    padding: 12px 14px !important;
+    margin-bottom: 8px !important;
+}
+
+/* Settings collapsible sections - toggle on title click */
+.collapsible-section {
+    margin-bottom: 8px;
+}
+.collapsible-section .settings-title {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+.collapsible-section .settings-title:hover {
+    opacity: 0.8;
+}
+.settings-toggle-icon {
+    font-size: 12px;
+    color: #94a3b8;
+    transition: transform 0.2s ease;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+.collapsible-section.expanded .settings-toggle-icon {
+    transform: rotate(90deg);
+}
+.settings-section-body {
+    overflow: hidden;
+    transition: max-height 0.3s ease, margin-top 0.3s ease, padding-top 0.3s ease;
+}
+.collapsible-section:not(.expanded) .settings-section-body {
+    max-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    border-top: none !important;
+}
+.collapsible-section.expanded .settings-section-body {
+    max-height: 2000px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* ===== BONUS FUND - Quỹ thưởng trách nhiệm ===== */
+.bonus-fund-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #1a3a2a, #0d2818);
+    border: 1px solid #2d6a4f;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.bonus-fund-summary:hover {
+    border-color: #40916c;
+    box-shadow: 0 0 12px rgba(45, 106, 79, 0.4);
+}
+.bonus-fund-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: #95d5b2;
+}
+.bonus-fund-total {
+    font-size: 22px;
+    font-weight: 700;
+    color: #52b788;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+.bonus-fund-total:hover {
+    color: #74c69d;
+    text-decoration: underline;
+}
+
+/* Modal chi tiết quỹ thưởng */
+.bonus-fund-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+.bonus-fund-nav-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background 0.2s;
+}
+.bonus-fund-nav-btn:hover {
+    background: var(--accent);
+    color: #fff;
+}
+.bonus-fund-nav-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+#bonusFundDateRange {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Mỗi ngày trong modal */
+.bonus-fund-day {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.bonus-fund-day-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--surface2);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+.bonus-fund-day-total {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* Mỗi giao dịch trong ngày */
+.bonus-fund-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    transition: background 0.15s;
+}
+.bonus-fund-item:last-child {
+    border-bottom: none;
+}
+.bonus-fund-item:hover {
+    background: rgba(255,255,255,0.03);
+}
+.bonus-fund-item-icon {
+    width: 28px;
+    text-align: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+.bonus-fund-item-info {
+    flex: 1;
+    padding: 0 8px;
+    min-width: 0;
+}
+.bonus-fund-item-desc {
+    color: var(--text);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bonus-fund-item-revenue {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+.bonus-fund-item-amount {
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+.bonus-fund-revenue-detail {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-right: 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.bonus-fund-item-amount.positive {
+    color: #52b788;
+}
+.bonus-fund-item-amount.negative {
+    color: #ef4444;
+}
+.bonus-fund-item-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.bonus-fund-item-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+}
+.bonus-fund-item-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.bonus-fund-item-btn.edit:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+}
+.bonus-fund-item-btn.delete:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
+
+/* Empty state */
+.bonus-fund-empty {
+    text-align: center;
+    padding: 24px 16px;
+    color: var(--text-secondary);
+    font-size: 14px;
 }
 
 .settings-info {
@@ -5142,6 +5397,190 @@ body.modal-open {
     .cash-counter-total {
         font-size: 16px;
     }
+}
+
+/* ========== MODAL DANH SÁCH GIAO DỊCH THEO PHƯƠNG THỨC ========== */
+.pmtx-header {
+    display: flex;
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    border-bottom: 2px solid #e2e8f0;
+    background: #f8fafc;
+    border-radius: 8px 8px 0 0;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.pmtx-row {
+    display: flex;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    align-items: center;
+}
+.pmtx-row:hover {
+    background: #f1f5f9;
+}
+.pmtx-row:active {
+    background: #e2e8f0;
+}
+.pmtx-footer {
+    display: flex;
+    padding: 10px 14px;
+    border-top: 2px solid #e2e8f0;
+    margin-top: 4px;
+    background: #f8fafc;
+    border-radius: 0 0 8px 8px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #1e293b;
+    align-items: center;
+}
+.pmtx-col-stt {
+    width: 36px;
+    flex-shrink: 0;
+    color: #94a3b8;
+    font-size: 12px;
+}
+.pmtx-col-time {
+    width: 56px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #1e40af;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: #dbeafe;
+    padding: 3px 8px;
+    border-radius: 5px;
+    text-align: center;
+    letter-spacing: 0.8px;
+    border: 1px solid #bfdbfe;
+}
+.pmtx-col-items {
+    flex: 1;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 6px;
+    color: #334155;
+}
+.pmtx-col-qty {
+    width: 36px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 500;
+}
+.pmtx-col-amount {
+    width: 110px;
+    text-align: right;
+    flex-shrink: 0;
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+.pmtx-footer .pmtx-col-amount {
+    color: #e74c3c;
+    font-size: 14px;
+}
+.pmtx-footer .pmtx-col-items {
+    color: #1e293b;
+    font-weight: 700;
+}
+
+/* ========== MODAL BÀN ĐANG HOẠT ĐỘNG (dạng lưới) ========== */
+.atm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.atm-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    display: flex;
+    flex-direction: column;
+}
+.atm-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.atm-card-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: #1e293b;
+}
+.atm-card-total {
+    font-weight: 700;
+    font-size: 13px;
+    color: #e74c3c;
+}
+.atm-card-meta {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.4;
+}
+.atm-items {
+    border-top: 1px dashed #e2e8f0;
+    padding-top: 4px;
+    margin-top: 4px;
+    flex: 1;
+}
+.atm-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    font-size: 12px;
+}
+.atm-item-name {
+    flex: 1;
+    color: #334155;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+.atm-item-qty {
+    color: #64748b;
+    margin: 0 6px;
+    white-space: nowrap;
+    font-size: 11px;
+    min-width: 24px;
+    text-align: center;
+}
+.atm-item-total {
+    color: #0f172a;
+    font-weight: 500;
+    white-space: nowrap;
+    font-size: 12px;
+    min-width: 65px;
+    text-align: right;
+}
+.atm-grand-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    margin-top: 8px;
+    font-weight: 700;
+    font-size: 14px;
+    background: #f1f5f9;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    color: #0f172a;
 }
 
 /* ========== TIỀN MẶT TẠI POS (Cash Counter + Đối soát) ========== */
@@ -7297,4 +7736,67 @@ html, body, .app, .main-content {
 .fund-log-delete:hover {
     opacity: 1;
     background: rgba(239,68,68,0.15);
+}
+
+/* ========== LOADING SCREEN ========== */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #0f172a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    transition: opacity 0.4s ease;
+}
+
+.loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 20px;
+    max-width: 90vw;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(249, 115, 22, 0.2);
+    border-top-color: #f97316;
+    border-radius: 50%;
+    animation: loadingSpin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes loadingSpin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-title {
+    font-size: 16px;
+    color: #e2e8f0;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.3;
+    max-width: 280px;
+    min-height: 1.3em;
+}
+
+.loading-text {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 400;
+    text-align: center;
+    line-height: 1.4;
+    max-width: 280px;
 }

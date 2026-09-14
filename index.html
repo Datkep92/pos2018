@@ -17,6 +17,15 @@
     <link rel="stylesheet" href="css/manager-detail.css">
 </head>
 <body>
+    <!-- ========== LOADING SCREEN ========== -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <div class="loading-title" id="loadingTitle"></div>
+            <div class="loading-text" id="loadingText">Đang khởi tạo...</div>
+        </div>
+    </div>
+
     <!-- ========== MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ ========== -->
     <div class="auth-overlay" id="authOverlay">
         <div class="auth-container">
@@ -37,6 +46,11 @@
                 <div class="auth-field">
                     <label>Mật khẩu</label>
                     <input type="password" id="loginPassword" class="form-input" placeholder="Mật khẩu">
+                </div>
+                
+                <div class="auth-remember" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:#64748b;">
+                    <input type="checkbox" id="loginRemember" checked style="width:16px;height:16px;cursor:pointer;">
+                    <label for="loginRemember" style="cursor:pointer;">Ghi nhớ đăng nhập</label>
                 </div>
                 
                 <div class="auth-error" id="loginError"></div>
@@ -98,10 +112,11 @@
             <div class="tab-btn active" data-tab="tables">🍽️ Bàn</div>
             <div class="tab-btn" data-tab="customers">👥 Khách</div>
             <div class="tab-btn" data-tab="history">📜 Lịch sử</div>
-            <div class="tab-btn" data-tab="inventory" style="display:none;">📋 Menu - Tồn kho</div>
             <div class="tab-btn" data-tab="cost">💰 Chi phí</div>
-            <div class="tab-btn" data-tab="manager" style="display:none;">⚙️ Quản lý</div>
             <div class="tab-btn" data-tab="settings">⚙️</div>
+            <div class="tab-btn" data-tab="manager" style="display:none;">⚙️ Quản lý</div>
+            <div class="tab-btn" data-tab="inventory" style="display:none;">📋 Menu - Tồn kho</div>
+            <div class="tab-btn" data-tab="master" style="display:none;">👑 Master</div>
         </div>
 
         <div class="main-content">
@@ -134,7 +149,10 @@
             <div id="historyView" class="tab-content">
                 <div class="history-controls">
                     <button class="nav-btn" id="prevDayBtn">◀</button>
-                    <div class="date-display">📅 <span id="historyDate">--/--/----</span></div>
+                    <div class="date-display" style="cursor:pointer;position:relative;" onclick="document.getElementById('historyDatePicker').showPicker()">
+                        📅 <span id="historyDate">--/--/----</span>
+                        <input type="date" id="historyDatePicker" style="width:0;height:0;padding:0;border:none;opacity:0;position:absolute;" onchange="jumpHistoryDate(this.value)">
+                    </div>
                     <button class="nav-btn" id="nextDayBtn">▶</button>
                 </div>
                 <div class="history-filter-chips" id="historyFilterChips">
@@ -348,6 +366,11 @@
                             <div class="big-value" id="managerRevenue">0đ</div>
                             <div class="summary-hint">Click chi tiết</div>
                         </div>
+                        <div class="manager-box" id="bonusBox" style="cursor:pointer;" onclick="showManagerBonusDetail()">
+                            <label>🎯 1% Quỹ thưởng</label>
+                            <div class="big-value" id="managerBonus">0đ</div>
+                            <div class="summary-hint">1% doanh thu</div>
+                        </div>
                         <div class="manager-box" id="grabBox" style="cursor:pointer;" onclick="showManagerGrabDetail()">
                             <label>🚕 Grab</label>
                             <div class="big-value" id="managerGrab">0đ</div>
@@ -476,24 +499,23 @@
                         <div id="quickCashContainer"></div>
                     </div>
 
-                    <!-- PHẦN QUỸ THƯỞNG TRÁCH NHIỆM -->
-                    <div class="settings-section collapsible-section" id="settingsBonusFundSection">
+                    <!-- PHẦN ĐỒNG BỘ DỮ LIỆU (CHỦ QUÁN) -->
+                    <div class="settings-section collapsible-section" id="settingsSyncDataSection">
                         <h3 class="settings-title" onclick="toggleSettingsSection(this)">
-                            🎯 Quỹ thưởng trách nhiệm
+                            📦 Đồng bộ dữ liệu
                             <span class="settings-toggle-icon">▶</span>
                         </h3>
                         <div class="settings-section-body">
                         <div class="settings-field">
-                            <div class="bonus-fund-summary">
-                                <span class="bonus-fund-label">💰 Quỹ thưởng trách nhiệm:</span>
-                                <span class="bonus-fund-total" id="bonusFundTotal" onclick="openBonusFundModal()">0đ</span>
-                            </div>
+                            <label class="settings-label">Tải toàn bộ dữ liệu từ Firebase</label>
+                            <p style="font-size:12px;color:#999;margin:4px 0 8px 0;line-height:1.4;">
+                                Tải lại tất cả dữ liệu từ Firebase (master + 31 ngày gần nhất). Dùng khi nghi ngờ dữ liệu local bị thiếu hoặc lỗi.
+                            </p>
+                            <button class="settings-btn settings-btn-primary" id="btnLoadAllData" onclick="handleLoadAllData()">
+                                📥 Tải toàn bộ dữ liệu
+                            </button>
+                            <div id="loadAllDataStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
                         </div>
-                        <div class="settings-actions" style="margin-top:8px;">
-                            <button class="settings-btn settings-btn-primary" onclick="withdrawBonusFund()">🏧 Rút quỹ</button>
-                            <button class="settings-btn settings-btn-primary" onclick="addBonusFund()" style="background:#22c55e;">🎁 Thưởng thêm</button>
-                        </div>
-                        <div id="bonusFundStatus" style="margin-top:6px;font-size:12px;color:#888;"></div>
                         </div>
                     </div>
 
@@ -856,6 +878,17 @@
                     </div>
 
                 </div>
+            </div>
+        </div>
+
+        <!-- TAB MASTER (ADMIN MASTER ONLY) -->
+        <div id="masterView" class="tab-content">
+            <div class="master-container" id="masterContainer">
+                <div class="master-header">
+                    <h2>👑 Quản lý POS</h2>
+                    <button class="btn-add-pos" onclick="showAddPosForm()">+ Thêm POS</button>
+                </div>
+                <div id="masterPosList" class="master-pos-list"></div>
             </div>
         </div>
 
@@ -1278,24 +1311,6 @@
         </div>
     </div>
 
-    <!-- MODAL CHI TIẾT QUỸ THƯỞNG -->
-    <div class="modal" id="bonusFundModal">
-        <div class="modal-content" style="max-width:600px;">
-            <div class="modal-header">
-                <span>🎯 Chi tiết Quỹ thưởng trách nhiệm</span>
-                <button class="modal-close-btn" onclick="closeModal('bonusFundModal')">✕ Đóng</button>
-            </div>
-            <div class="modal-body">
-                <div class="bonus-fund-nav">
-                    <button class="bonus-fund-nav-btn" onclick="bonusFundPrevPage()">◀</button>
-                    <span id="bonusFundDateRange">5 ngày gần nhất</span>
-                    <button class="bonus-fund-nav-btn" onclick="bonusFundNextPage()">▶</button>
-                </div>
-                <div id="bonusFundDayList"></div>
-            </div>
-        </div>
-    </div>
-
     <div id="recentToast" class="recent-toast">
         <div class="recent-toast-header" onclick="toggleRecentToast()">
             <span>🔄 GIAO DỊCH GẦN ĐÂY</span>
@@ -1352,8 +1367,6 @@
     <script src="print.js"></script>
     <script src="draft-orders.js"></script>
     <script src="fund-reconciliation.js"></script>
-    <!-- Bonus Fund - Quỹ thưởng trách nhiệm -->
-    <script src="bonus_fund.js"></script>
     <!-- Manager Detail - click vào manager-grid items + tab quản lý -->
     <script src="manager-detail.js"></script>
     <!-- Inventory / Menu management -->
@@ -1389,6 +1402,10 @@
     
     <!-- Settings + Đếm tiền nhanh -->
     <script src="settings.js"></script>
+    
+    <!-- Master Config & User Management (Multi-tenant) -->
+    <script src="master-config.js"></script>
+    <script src="master-user-manager.js"></script>
     
     <!-- HEADER DƯỚI ĐÁY -->
     <div class="header">

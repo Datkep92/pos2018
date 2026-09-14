@@ -174,8 +174,7 @@ function _syncChatLockUI() {
     
     if (!inputRow) return;
     
-    var currentUser = DB.getCurrentUser();
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isAdmin = DB.isAdmin();
     
     if (locked && !isAdmin) {
         // Staff bị khóa: ẩn hoàn toàn ô nhập + nút gửi, hiện thông báo
@@ -271,7 +270,7 @@ function renderChatMessages() {
         
         var html = '';
         var currentUser = DB.getCurrentUser();
-        var isAdmin = currentUser && currentUser.role === 'admin';
+        var isAdmin = DB.isAdmin();
         
         for (var i = 0; i < messages.length; i++) {
             var msg = messages[i];
@@ -308,7 +307,7 @@ function _renderMessageHtml(msg, isAdmin, currentUser) {
     }
     
     // Icon theo role
-    var roleIcon = (fromRole === 'admin') ? '👑 ' : '👤 ';
+    var roleIcon = (fromRole === 'admin' || fromRole === 'master_admin' || fromRole === 'pos_admin') ? '👑 ' : '👤 ';
     
     // Header
     var html = '<div class="chat-message ' + priorityClass + '" data-msg-id="' + escapeHtml(msg.id) + '">';
@@ -628,28 +627,37 @@ function updateChatBadge() {
 }
 
 function getUnreadCount() {
+    // OPTIMIZE: Đọc từ memory cache trước (nhanh, không block UI)
+    var cached = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('messages') : null;
+    if (cached) {
+        return Promise.resolve(_calcUnreadCount(cached));
+    }
     return DB.getAll('messages').then(function(messages) {
-        if (!messages || messages.length === 0) return 0;
-        
-        var currentUser = DB.getCurrentUser();
-        if (!currentUser) return 0;
-        
-        var count = 0;
-        for (var i = 0; i < messages.length; i++) {
-            var msg = messages[i];
-            if (!msg || msg.status === 'archived') continue;
-            
-            // Bỏ qua tin nhắn do chính mình gửi
-            if (msg.from && msg.from.id === currentUser.id) continue;
-            
-            // Kiểm tra đã đọc chưa
-            var read = msg.readBy && msg.readBy[currentUser.id];
-            if (!read) {
-                count++;
-            }
-        }
-        return count;
+        return _calcUnreadCount(messages);
     });
+}
+
+function _calcUnreadCount(messages) {
+    if (!messages || messages.length === 0) return 0;
+    
+    var currentUser = DB.getCurrentUser();
+    if (!currentUser) return 0;
+    
+    var count = 0;
+    for (var i = 0; i < messages.length; i++) {
+        var msg = messages[i];
+        if (!msg || msg.status === 'archived') continue;
+        
+        // Bỏ qua tin nhắn do chính mình gửi
+        if (msg.from && msg.from.id === currentUser.id) continue;
+        
+        // Kiểm tra đã đọc chưa
+        var read = msg.readBy && msg.readBy[currentUser.id];
+        if (!read) {
+            count++;
+        }
+    }
+    return count;
 }
 
 function markAllAsRead() {
@@ -725,7 +733,7 @@ function checkNewMessages() {
         // - Popup chưa mở
         // - Auto popup được bật trong settings
         // - Tin nhắn từ admin (hoặc là urgent)
-        var isFromAdmin = latestMsg.from && latestMsg.from.role === 'admin';
+        var isFromAdmin = latestMsg.from && (latestMsg.from.role === 'admin' || latestMsg.from.role === 'master_admin' || latestMsg.from.role === 'pos_admin');
         if (autoPopupEnabled && !_chatPopupVisible && (isFromAdmin || latestMsg.priority === 'urgent')) {
             showAutoChatPopup(latestMsg);
         }
@@ -749,7 +757,7 @@ function showAutoChatPopup(msg) {
     popup.className = 'auto-chat-popup';
     
     var fromName = msg.from ? (msg.from.name || msg.from.id || 'Unknown') : 'Unknown';
-    var isFromAdmin = msg.from && msg.from.role === 'admin';
+    var isFromAdmin = msg.from && (msg.from.role === 'admin' || msg.from.role === 'master_admin' || msg.from.role === 'pos_admin');
     var priorityText = msg.priority === 'urgent' ? '🔴 URGENT' : (isFromAdmin ? '👑 Admin' : '💬 Tin nhắn mới');
     
     // Màu viền theo priority

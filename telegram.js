@@ -87,33 +87,23 @@
         });
     }
 
-    function _tgType(transaction) {
-        if (transaction.type === "dinein") return "🍽️ Tại chỗ";
-        if (transaction.type === "takeaway") return "🛵 Mang đi";
-        if (transaction.type === "grab") return "🚕 Grab";
-        if (transaction.type === "debt_payment") return "💵 Trả nợ";
-        if (transaction.type === "draft") return "📋 Nháp";
-        if (transaction.type === "cancelled") return "❌ Hủy";
-        return "💳 Giao dịch";
-    }
-
     function _tgMethod(transaction) {
-        if (transaction.paymentMethod === "cash") return "💰 Tiền mặt";
-        if (transaction.paymentMethod === "transfer") return "💳 Chuyển khoản";
-        if (transaction.paymentMethod === "debt") return "💢 Ghi nợ";
-        if (transaction.paymentMethod === "grab") return "🚕 Grab";
+        if (transaction.paymentMethod === "cash") return "TM";
+        if (transaction.paymentMethod === "transfer") return "CK";
+        if (transaction.paymentMethod === "debt") return "Nợ";
+        if (transaction.paymentMethod === "grab") return "Grab";
         return "";
     }
 
     function _tgLocation(transaction) {
-        if (transaction.tableName) return "🪑 " + transaction.tableName;
-        if (transaction.type === "takeaway") return "🛵 Mang đi";
-        if (transaction.type === "grab") return "🚕 Grab";
-        return "🍽️ Tại chỗ";
+        if (transaction.tableName) return transaction.tableName;
+        if (transaction.type === "takeaway") return "Mang đi";
+        if (transaction.type === "grab") return "Grab";
+        return "Tại chỗ";
     }
 
     function _tgCustomer(transaction) {
-        if (transaction.customer && transaction.customer.name) return "👤 " + transaction.customer.name;
+        if (transaction.customer && transaction.customer.name) return transaction.customer.name;
         return "";
     }
 
@@ -122,6 +112,11 @@
         var count = 0;
         for (var i = 0; i < transaction.items.length; i++) count += transaction.items[i].qty;
         return count;
+    }
+
+    function _tgFirstItemName(transaction) {
+        if (!transaction.items || !transaction.items.length) return "";
+        return transaction.items[0].name || "";
     }
 
     function formatMoney(amount) {
@@ -135,74 +130,45 @@
         return res + 'đ';
     }
 
-    // Định dạng giao dịch
+    // Định dạng giao dịch - 1 dòng, ngắn gọn
+    // Format: {method} - {số món} +{amount} - {tên món} - {location}
     window.formatTelegramTransaction = function(transaction) {
         if (!transaction) return "";
-        var timeStr = _tgTime();
-        var typeStr = _tgType(transaction);
-        var methodStr = _tgMethod(transaction);
-        var locationStr = _tgLocation(transaction);
-        var customerStr = _tgCustomer(transaction);
-        var itemCount = _tgItemCount(transaction);
+        var m = _tgMethod(transaction) || "TM";
+        var count = _tgItemCount(transaction);
         var amountStr = formatMoney(transaction.amount);
-        var msg = "<b>🛒 ĐƠN MỚI +" + amountStr + "</b>\n";
-        msg += "────────────────\n";
-        msg += "🕐 " + timeStr + "\n";
-        msg += typeStr + "\n";
-        msg += locationStr + "\n";
-        if (customerStr) msg += customerStr + "\n";
-        msg += "📦 " + itemCount + " món\n";
-        if (methodStr) msg += methodStr + "\n";
-        msg += "💰 <b>" + amountStr + "</b>\n";
+        var itemName = _tgFirstItemName(transaction);
+        var loc = _tgLocation(transaction);
+        var msg = m + " - " + count + " món +" + amountStr;
+        if (itemName) msg += " - " + itemName;
+        msg += " - " + loc;
         return msg;
     };
 
     window.formatTelegramExpense = function(expenseData) {
         if (!expenseData) return "";
-        var typeIcon = expenseData.type === "ingredient" ? "🧂" : "📦";
         var typeName = expenseData.type === "ingredient" ? "Nguyên liệu" : "Hao phí";
-        var fundIcon = expenseData.fundSource === "pos_cash" ? "🏦" : "👔";
         var fundName = expenseData.fundSource === "pos_cash" ? "Két POS" : "QL Thanh toán";
-        var msg = "<b>📊 CHI PHÍ</b>\n";
-        msg += "────────────────\n";
-        msg += "🕐 " + _tgTime() + "\n";
-        msg += typeIcon + " " + typeName + "\n";
-        msg += "📝 " + (expenseData.categoryName || expenseData.name || "") + "\n";
-        msg += fundIcon + " " + fundName + "\n";
-        msg += "💰 <b>" + formatMoney(expenseData.amount) + "</b>\n";
-        return msg;
+        var parts = ["CHI PHÍ", _tgTime(), typeName, (expenseData.categoryName || expenseData.name || ""), fundName, formatMoney(expenseData.amount)];
+        return parts.join(" - ");
     };
 
     window.formatTelegramCustom = function(message) {
-        var msg = "<b>📢 THÔNG BÁO</b>\n";
-        msg += "────────────────\n";
-        msg += "🕐 " + _tgTime() + "\n";
-        msg += message + "\n";
-        return msg;
+        return "THÔNG BÁO - " + _tgTime() + " - " + message;
     };
 
     window.formatTelegramRefund = function(transaction, reason, needPassword) {
         if (!transaction) return "";
-        var timeStr = _tgTime();
-        var typeStr = _tgType(transaction);
-        var methodStr = _tgMethod(transaction);
-        var locationStr = _tgLocation(transaction);
-        var customerStr = _tgCustomer(transaction);
-        var itemCount = _tgItemCount(transaction);
+        var m = _tgMethod(transaction) || "TM";
+        var count = _tgItemCount(transaction);
         var amountStr = formatMoney(transaction.amount);
-        var lockIcon = needPassword ? "🔒" : "🔓";
-        var lockText = needPassword ? "Có mật khẩu" : "Không mật khẩu";
-        var msg = "<b>❌ HOÀN TÁC -" + amountStr + "</b>\n";
-        msg += "────────────────\n";
-        msg += "🕐 " + timeStr + "\n";
-        msg += typeStr + "\n";
-        msg += locationStr + "\n";
-        if (customerStr) msg += customerStr + "\n";
-        msg += "📦 " + itemCount + " món\n";
-        if (methodStr) msg += methodStr + "\n";
-        msg += "💰 <b>" + amountStr + "</b>\n";
-        msg += "📝 Lý do: " + reason + "\n";
-        msg += lockIcon + " " + lockText + "\n";
+        var itemName = _tgFirstItemName(transaction);
+        var loc = _tgLocation(transaction);
+        var msg = m + " - " + count + " món -" + amountStr;
+        if (itemName) msg += " - " + itemName;
+        msg += " - " + loc;
+        msg += " - " + reason;
+        if (needPassword) msg += " - 🔒";
         return msg;
     };
 

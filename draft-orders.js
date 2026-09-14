@@ -222,56 +222,7 @@ function resumeDraftOrder(draftId) {
     openOrderModal();
 }
 
-// ========== THU NHỎ THÀNH BONG BÓNG (MINIMIZE) ==========
-function minimizeCurrentOrderToDraft() {
-    if (!tempOrder || tempOrder.length === 0) {
-        showToast('Chưa có món nào để lưu nháp!', 'warning');
-        return false;
-    }
-
-    var draftId = currentDraftId;
-    var draft = null;
-
-    if (draftId) {
-        draft = getDraft(draftId);
-    }
-
-    if (!draft) {
-        // Tạo draft mới
-        draft = createDraftOrder('takeaway', 'Khách lẻ');
-        draftId = draft.id;
-    }
-
-    // Cập nhật items từ tempOrder
-    draft.items = [];
-    for (var i = 0; i < tempOrder.length; i++) {
-        var item = tempOrder[i];
-        draft.items.push({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            qty: item.qty,
-            addedTime: item.addedTime,
-            variantName: item.variantName || null
-        });
-    }
-    draft.total = tempOrder.reduce(function(sum, item) { return sum + (item.price * item.qty); }, 0);
-    draft.customerId = selectedCustomer ? selectedCustomer.id : null;
-    draft.customerName = selectedCustomer ? selectedCustomer.name : null;
-    draft.updatedAt = new Date().toISOString();
-
-    // Lưu draft
-    saveDraft(draft);
-
-    // Reset trạng thái
-    tempOrder = [];
-    selectedCustomer = null;
-    currentDraftId = null;
-    closeModal('orderModal');
-
-    showToast('💬 Đã lưu đơn nháp', 'info');
-    return true;
-}
+// ========== (ĐÃ XÓA: minimizeCurrentOrderToDraft - ko còn nút Lưu nháp trên UI) ==========
 
 // ========== XÁC NHẬN DRAFT -> TẠO ORDER THẬT ==========
 function confirmDraftOrder(draftId, options) {
@@ -452,6 +403,5 @@ window.getDraft = getDraft;
 window.loadDraftOrders = loadDraftOrders;
 window.renderDraftBubbles = renderDraftBubbles;
 window.resumeDraftOrder = resumeDraftOrder;
-window.minimizeCurrentOrderToDraft = minimizeCurrentOrderToDraft;
 window.confirmDraftOrder = confirmDraftOrder;
 window.showDraftConfirmModal = showDraftConfirmModal;

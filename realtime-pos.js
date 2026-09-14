@@ -8,6 +8,50 @@ var _tableTimerId = null;
 // P0: Cache DOM references cho timer - tránh querySelectorAll mỗi giây
 var _tableCardCache = {};
 var _tableCardCacheDirty = false;
+// PHASE 4: Periodic cleanup cho table caches - tránh memory leak
+var _tableCacheCleanupId = null;
+var _TABLE_CACHE_CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 phút
+
+function _startTableCacheCleanup() {
+    if (_tableCacheCleanupId) return;
+    _tableCacheCleanupId = setInterval(function() {
+        var grid = document.getElementById('tablesGrid');
+        if (!grid) return;
+        var existingCards = grid.querySelectorAll('.table-card:not(.table-create-btn)');
+        var existingIds = {};
+        for (var i = 0; i < existingCards.length; i++) {
+            existingIds[existingCards[i].getAttribute('data-id')] = true;
+        }
+        // Dọn _tableVersionCache - xóa entries không còn trong DOM
+        var removed = 0;
+        for (var id in _tableVersionCache) {
+            if (_tableVersionCache.hasOwnProperty(id) && !existingIds[id]) {
+                delete _tableVersionCache[id];
+                removed++;
+            }
+        }
+        // Dọn _tableCardCache và _tableCardElCache - xóa entries không còn trong DOM
+        for (var id in _tableCardCache) {
+            if (_tableCardCache.hasOwnProperty(id) && !existingIds[id]) {
+                delete _tableCardCache[id];
+                delete _tableCardElCache[id];
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            console.log('[Realtime] 🧹 Table cache cleanup: đã xóa ' + removed + ' entries không còn trong DOM');
+        }
+    }, _TABLE_CACHE_CLEANUP_INTERVAL);
+}
+
+// Helper: rút gọn tên hiển thị - "Master Admin - Milano 259" => "Master"
+function _displayName(name) {
+    if (!name) return '';
+    if (name.indexOf('Master Admin') === 0) {
+        return 'Master';
+    }
+    return name;
+}
 
 function _debounceRealtime(key, fn, delay) {
     delay = delay || 100;
@@ -127,7 +171,7 @@ function updateRecentToast() {
             }
             var itemInfo = totalItems > 0 ? totalItems + ' món' : '';
             
-            var staffHtml = tx.createdByName ? ' <span class="toast-staff">👤 ' + escapeHtml(tx.createdByName) + '</span>' : '';
+            var staffHtml = tx.createdByName ? ' <span class="toast-staff">👤 ' + escapeHtml(_displayName(tx.createdByName)) + '</span>' : '';
             
             // Gom các phần tử lại: icon + nhãn + số món + staff
             var infoParts = [];
@@ -240,7 +284,7 @@ function createTableCard(table) {
         actionBtnsHtml = '<span class="table-act-row">' + actionBtnsHtml + '</span>';
     }
     
-    var creatorHtml = table.createdByName ? '<span class="table-creator">👤 ' + escapeHtml(table.createdByName) + '</span>' : '';
+    var creatorHtml = table.createdByName ? '<span class="table-creator">👤 ' + escapeHtml(_displayName(table.createdByName)) + '</span>' : '';
     
     div.innerHTML =
         '<div class="table-header">' +
@@ -309,7 +353,7 @@ function updateTableCard(card, table) {
     // Cập nhật creator
     var creatorSpan = card.querySelector('.table-creator');
     if (creatorSpan) {
-        creatorSpan.innerHTML = table.createdByName ? '👤 ' + escapeHtml(table.createdByName) : '';
+        creatorSpan.innerHTML = table.createdByName ? '👤 ' + escapeHtml(_displayName(table.createdByName)) : '';
     }
     
     // FIX: Cập nhật action buttons động
@@ -367,6 +411,77 @@ function updateTableCard(card, table) {
 }
 
 // ========== UPDATE TABLES DIFF (optimized) ==========
+// P2: Cache _version của mỗi table card để tránh update không cần thiết
+var _tableVersionCache = {};
+// FIX ĐỒNG BỘ: lưu id các bàn đã bị XÓA THẬT SỰ (sự kiện 'removed' từ Firebase),
+// kể cả khi lúc đó không đứng ở tab Bàn -> mở tab là thẻ bàn được gỡ ngay.
+var _tablesRemovedIds = {};
+
+// Tránh xác minh trùng cùng một bàn (2 luồng cùng gọi updateTablesDiff)
+var _pendingRemovalChecks = {};
+function _clearPendingRemovalChecks(list) {
+    for (var i = 0; i < list.length; i++) delete _pendingRemovalChecks[list[i]];
+}
+
+// Xác minh các bàn đang hiển thị nhưng KHÔNG còn trong danh sách mới.
+// Chỉ gỡ thẻ khi có đủ bằng chứng bàn đã bị xóa thật:
+//   - lần đọc lại toàn bộ (getAll) vẫn không có bàn, VÀ
+//   - tra cứu trực tiếp theo id (get) cũng không có.
+// Nhờ vậy: bàn thanh toán xong / bị thiết bị khác xóa sẽ tự biến mất,
+// còn trường hợp IndexedDB đọc thiếu (lỗi Android 6) thì thẻ bàn được giữ lại.
+function _confirmRemovedTables(ids) {
+    if (!ids || !ids.length) return;
+    var toCheck = [];
+    for (var i = 0; i < ids.length; i++) {
+        var idKey = String(ids[i]);
+        if (_pendingRemovalChecks[idKey]) continue; // đang xác minh rồi -> bỏ qua
+        _pendingRemovalChecks[idKey] = true;
+        toCheck.push(idKey);
+    }
+    if (!toCheck.length) return;
+    console.log('[Realtime] Đang xác minh ' + toCheck.length + ' bàn (chờ 0.5s rồi đọc lại): ' + toCheck.join(', '));
+    setTimeout(function() {
+        DB.getAll('tables').then(function(allTables) {
+            var present = {};
+            for (var i = 0; i < allTables.length; i++) present[String(allTables[i].id)] = true;
+            var gone = [];
+            for (var j = 0; j < toCheck.length; j++) {
+                if (!present[toCheck[j]]) gone.push(toCheck[j]);
+            }
+            if (!gone.length) {
+                console.warn('[Realtime] Giữ thẻ bàn (lần đọc lại vẫn còn): ' + toCheck.join(', '));
+                _clearPendingRemovalChecks(toCheck);
+                return;
+            }
+            return Promise.all(gone.map(function(id) {
+                return Promise.resolve(DB.get('tables', id)).then(function(row) {
+                    return row ? null : id;
+                }).catch(function() { return null; });
+            })).then(function(confirmed) {
+                var grid = document.getElementById('tablesGrid');
+                var removed = [], kept = [];
+                for (var k = 0; k < confirmed.length; k++) {
+                    if (!confirmed[k]) { kept.push(gone[k]); continue; } // vẫn còn trong DB -> giữ thẻ
+                    var goneId = confirmed[k];
+                    delete _tableVersionCache[goneId];
+                    var card = grid ? grid.querySelector('.table-card[data-id="' + goneId + '"]') : null;
+                    if (card && card.parentNode) {
+                        card.remove();
+                        _tableCardCacheDirty = true;
+                        removed.push(goneId);
+                    }
+                }
+                if (removed.length) console.log('[Realtime] ✅ Đã gỡ thẻ bàn đã bị xóa (xác minh 2 lần): ' + removed.join(', '));
+                if (kept.length) console.warn('[Realtime] Giữ thẻ bàn vì vẫn còn trong DB (IndexedDB đọc thiếu): ' + kept.join(', '));
+                _clearPendingRemovalChecks(toCheck);
+            });
+        }).catch(function(e) {
+            _clearPendingRemovalChecks(toCheck);
+            console.warn('[Realtime] Xác minh bàn bị xóa lỗi:', e);
+        });
+    }, 500);
+}
+
 function updateTablesDiff(newTables) {
     // FIX: Hiển thị TẤT CẢ bàn, kể cả bàn trống (không có items)
     // Bàn trống vẫn cần hiển thị để người dùng có thể thêm món
@@ -385,6 +500,26 @@ function updateTablesDiff(newTables) {
     }
     
     var existingCards = grid.querySelectorAll('.table-card:not(.table-create-btn)');
+    
+    // FIX ĐỒNG BỘ: gỡ ngay các bàn đã bị xóa thật sự ở thiết bị khác.
+    // Nguồn tin cậy là sự kiện 'removed' từ Firebase (đã ghi nhận ở trên, kể cả khi lúc đó
+    // đang ở tab khác), nên xử lý TRƯỚC lớp bảo vệ chống đọc thiếu của IndexedDB bên dưới.
+    var _trackedRemoved = Object.keys(_tablesRemovedIds);
+    if (_trackedRemoved.length > 0) {
+        var _incomingIds = {};
+        for (var _ai = 0; _ai < activeTables.length; _ai++) _incomingIds[String(activeTables[_ai].id)] = true;
+        for (var _ri = 0; _ri < _trackedRemoved.length; _ri++) {
+            var _rid = _trackedRemoved[_ri];
+            if (_incomingIds[_rid]) { delete _tablesRemovedIds[_rid]; continue; }
+            var _rcard = grid.querySelector('.table-card[data-id="' + _rid + '"]');
+            if (_rcard && _rcard.parentNode) _rcard.remove();
+            delete _tableVersionCache[_rid];
+            delete _tablesRemovedIds[_rid];
+        }
+        _tableCardCacheDirty = true;
+        existingCards = grid.querySelectorAll('.table-card:not(.table-create-btn)');
+    }
+    
     var existingIds = {};
     for (var i = 0; i < existingCards.length; i++) {
         existingIds[existingCards[i].getAttribute('data-id')] = existingCards[i];
@@ -395,12 +530,28 @@ function updateTablesDiff(newTables) {
         newIds[activeTables[i].id] = activeTables[i];
     }
     
+    // FIX Android 6 + ĐỒNG BỘ: danh sách mới ít hơn số thẻ đang hiển thị thì KHÔNG bỏ qua
+    // toàn bộ nữa (trước đây làm vậy nên bàn đã thanh toán / bị máy khác xóa vẫn nằm lại).
+    // Giờ xác minh từng thẻ "mất tích": có bằng chứng bàn đã bị xóa thật thì gỡ thẻ,
+    // nếu IndexedDB chỉ đọc thiếu thì giữ nguyên.
+    if (activeTables.length < existingCards.length) {
+        var _missingIds = [];
+        for (var _mid in existingIds) {
+            if (_mid && !newIds[_mid]) _missingIds.push(_mid);
+        }
+        if (!_missingIds.length) return;
+        console.warn('[Realtime] Tables count giảm từ ' + existingCards.length + ' xuống ' + activeTables.length + ' - xác minh ' + _missingIds.length + ' bàn trước khi gỡ');
+        _confirmRemovedTables(_missingIds);
+        return;
+    }
+    
     // Xóa bàn không còn
     for (var id in existingIds) {
         if (!newIds[id]) {
             existingIds[id].remove();
             // P1: Đánh dấu cache dirty
             _tableCardCacheDirty = true;
+            delete _tableVersionCache[id];
         }
     }
     
@@ -410,12 +561,21 @@ function updateTablesDiff(newTables) {
         var table = activeTables[i];
         var existingCard = existingIds[table.id];
         if (existingCard) {
-            updateTableCard(existingCard, table);
+            // P2: Chỉ update nếu _version thay đổi (tránh update không cần thiết)
+            var oldVersion = _tableVersionCache[table.id];
+            var newVersion = table._version || table.updatedAt || 0;
+            if (oldVersion !== newVersion) {
+                updateTableCard(existingCard, table);
+                _tableVersionCache[table.id] = newVersion;
+            }
         } else {
             if (!fragment) fragment = document.createDocumentFragment();
-            fragment.appendChild(createTableCard(table));
+            var newCard = createTableCard(table);
+            fragment.appendChild(newCard);
             // P1: Đánh dấu cache dirty
             _tableCardCacheDirty = true;
+            // P2: Cache version cho card mới
+            _tableVersionCache[table.id] = table._version || table.updatedAt || 0;
         }
     }
     if (fragment) grid.appendChild(fragment);
@@ -600,6 +760,10 @@ function initRealtime() {
         if (!event || !event.data) return;
         var item = event.data.item;
         if (!item) return;
+        // FIX ĐỒNG BỘ: ghi nhận bàn bị xóa ở thiết bị khác TRƯỚC khi lọc theo tab.
+        // Trước đây thoát sớm khi không ở tab Bàn -> thẻ bàn cũ nằm lại trên màn hình.
+        if (event.type === 'removed') _tablesRemovedIds[String(item.id)] = true;
+        else delete _tablesRemovedIds[String(item.id)];
         if (currentTab !== 'tables') return;
         var grid = document.getElementById('tablesGrid');
         if (!grid) return;
@@ -608,16 +772,26 @@ function initRealtime() {
             if (!existingCard) {
                 grid.appendChild(createTableCard(item));
                 _tableCardCacheDirty = true;
+                // P2: Cache version cho card mới
+                _tableVersionCache[item.id] = item._version || item.updatedAt || 0;
             }
         } else if (event.type === 'changed') {
+            // P2: Kiểm tra version trước khi update
+            var oldVersion = _tableVersionCache[item.id];
+            var newVersion = item._version || item.updatedAt || 0;
+            if (oldVersion === newVersion) return;
             var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
             if (existingCard) {
                 updateTableCard(existingCard, item);
+                _tableVersionCache[item.id] = newVersion;
             } else {
                 grid.appendChild(createTableCard(item));
                 _tableCardCacheDirty = true;
+                _tableVersionCache[item.id] = newVersion;
             }
         } else if (event.type === 'removed') {
+            delete _tableVersionCache[item.id];
+            delete _tablesRemovedIds[String(item.id)];
             var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
             if (existingCard && existingCard.parentNode) {
                 existingCard.remove();
@@ -644,53 +818,70 @@ function initRealtime() {
     DB.subscribe('customers', function(data) {
         if (!data) return;
         _debounceRealtime('customers', function() {
-            DB.getAll('customers').then(function(list) {
-                customers = list;
+            // FIX: Dùng memory cache trước để ko block UI
+            var cached = DB.getMemoryCache('customers');
+            // FIX REALTIME: dữ liệu khách vừa thay đổi -> xóa cache tính nợ NGAY,
+            // để tab Khách/Bàn hiện số đúng mà không phải tải lại trang.
+            if (typeof _invalidateCustomerCalcCache === 'function') _invalidateCustomerCalcCache();
+            if (cached && cached.length > 0) {
+                customers = cached;
                 window.customers = customers;
-            });
+            } else {
+                DB.getAll('customers').then(function(list) {
+                    customers = list;
+                    window.customers = customers;
+                });
+            }
         }, 200);
     });
     // NÂNG CẤP: Event Bus handler cho customers
     DB.on('customers:*', function(event) {
         if (!event || !event.data) return;
-        if (currentTab !== 'customers') return;
+        // FIX REALTIME: xóa cache tính nợ BẤT KỂ đang ở tab nào.
+        // Trước đây thoát sớm khi không ở tab Khách -> số nợ ở tab Khách/Bàn bị cũ
+        // cho tới khi tải lại trang.
+        if (typeof _invalidateCustomerCalcCache === 'function') _invalidateCustomerCalcCache();
         _debounceRealtime('customers_ui', function() {
-            DB.getAll('customers').then(function(list) {
+            // FIX: Dùng memory cache trước để ko block UI, fallback sang IndexedDB nếu cần
+            var cached = DB.getMemoryCache('customers');
+            var applyCustomers = function(list) {
                 customers = list;
                 window.customers = customers;
-                renderCustomerList();
-            });
+                // Chỉ vẽ lại danh sách khi tab Khách đang mở; dữ liệu đã cập nhật ở trên
+                if (currentTab === 'customers') renderCustomerList();
+                // Modal chọn khách (dùng từ tab Bàn / đơn mang đi): vẽ lại số nợ đang hiển thị
+                var selModal = document.getElementById('customerSelectorModal');
+                if (selModal && selModal.style.display === 'flex' && typeof renderCustomerSelectorList === 'function') {
+                    var selSearch = document.getElementById('customerSelectorSearch');
+                    renderCustomerSelectorList(selSearch ? selSearch.value : '');
+                }
+            };
+            if (cached && cached.length > 0) applyCustomers(cached);
+            else DB.getAll('customers').then(applyCustomers);
         }, 100);
     });
     // NÂNG CẤP: Khi fullSync hoàn thành, re-render customers
     DB.on('customers:synced', function() {
         if (currentTab !== 'customers') return;
-        DB.getAll('customers').then(function(list) {
-            customers = list;
+        // FIX: Dùng memory cache trước để ko block UI
+        var cached = DB.getMemoryCache('customers');
+        if (cached && cached.length > 0) {
+            customers = cached;
             window.customers = customers;
             renderCustomerList();
-        });
+        } else {
+            DB.getAll('customers').then(function(list) {
+                customers = list;
+                window.customers = customers;
+                renderCustomerList();
+            });
+        }
     });
 
     // ============================================================
-    // MENU (polling 60s)
+    // MENU (Event Bus)
     // ============================================================
-    // Subscribe cũ: cập nhật menuItems
-    DB.subscribeWithPolling('menu', function(data) {
-        if (!data) return;
-        _debounceRealtime('menu', function() {
-            DB.getAll('menu').then(function(list) {
-                menuItems = list;
-                menuItems.sort(function(a, b) {
-                    var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
-                    var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
-                    return orderA - orderB;
-                });
-                window.menuItems = menuItems;
-            });
-        }, 200);
-    }, 60);
-    // NÂNG CẤP: Event Bus handler cho menu
+    // Event Bus handler cho menu
     DB.on('menu:*', function(event) {
         if (!event || !event.data) return;
         _debounceRealtime('menu_ui', function() {
@@ -728,18 +919,9 @@ function initRealtime() {
     });
 
     // ============================================================
-    // MENU CATEGORIES (polling 60s)
+    // MENU CATEGORIES (Event Bus)
     // ============================================================
-    // Subscribe cũ: cập nhật menuCategories
-    DB.subscribeWithPolling('menu_categories', function(data) {
-        if (!data) return;
-        _debounceRealtime('menu_categories', function() {
-            DB.getAll('menu_categories').then(function(list) {
-                menuCategories = list;
-            });
-        }, 200);
-    }, 60);
-    // NÂNG CẤP: Event Bus handler cho menu_categories
+    // Event Bus handler cho menu_categories
     DB.on('menu_categories:*', function(event) {
         if (!event || !event.data) return;
         _debounceRealtime('menu_categories_ui', function() {
@@ -809,7 +991,20 @@ function initRealtime() {
                     } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
                         managerApplyFilter();
                     }
+                    // FIX: Cập nhật Két POS realtime - dispatch event để settings.js load lại pos-cash data
+                    try {
+                        var evt = document.createEvent('CustomEvent');
+                        evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'cost_transactions_sub' } });
+                        window.dispatchEvent(evt);
+                    } catch(e) {}
                 });
+            } else {
+                // Fallback: nếu loadExpenseData chưa có, vẫn dispatch để settings.js xử lý
+                try {
+                    var evt = document.createEvent('CustomEvent');
+                    evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'cost_transactions_sub' } });
+                    window.dispatchEvent(evt);
+                } catch(e) {}
             }
         }, 100);
     });
@@ -825,7 +1020,19 @@ function initRealtime() {
                     } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
                         managerApplyFilter();
                     }
+                    // FIX: Cập nhật Két POS realtime - dispatch event để settings.js load lại pos-cash data
+                    try {
+                        var evt = document.createEvent('CustomEvent');
+                        evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'cost_transactions_eventbus' } });
+                        window.dispatchEvent(evt);
+                    } catch(e) {}
                 });
+            } else {
+                try {
+                    var evt = document.createEvent('CustomEvent');
+                    evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'cost_transactions_eventbus' } });
+                    window.dispatchEvent(evt);
+                } catch(e) {}
             }
         }, 100);
     });
@@ -874,19 +1081,9 @@ function initRealtime() {
     });
 
     // ============================================================
-    // INGREDIENTS (polling 60s)
+    // INGREDIENTS (Event Bus)
     // ============================================================
-    // Subscribe cũ: cập nhật window.ingredients
-    DB.subscribeWithPolling('ingredients', function(data) {
-        if (!data) return;
-        _debounceRealtime('ingredients', function() {
-            DB.getAll('ingredients').then(function(list) {
-                window.ingredients = list;
-                if (typeof _invalidateLookups === 'function') _invalidateLookups();
-            });
-        }, 200);
-    }, 60);
-    // NÂNG CẤP: Event Bus handler cho ingredients
+    // Event Bus handler cho ingredients
     DB.on('ingredients:*', function(event) {
         if (!event || !event.data) return;
         _debounceRealtime('ingredients_ui', function() {
@@ -1037,26 +1234,9 @@ function initRealtime() {
     });
 
     // ============================================================
-    // MESSAGES (polling 30s)
+    // MESSAGES (Event Bus)
     // ============================================================
-    // Subscribe cũ: cập nhật messages
-    DB.subscribeWithPolling('messages', function(data) {
-        if (!data) return;
-        _debounceRealtime('messages', function() {
-            if (typeof updateChatBadge === 'function') {
-                updateChatBadge();
-            }
-            if (_chatPopupVisible) {
-                if (typeof renderChatMessages === 'function') {
-                    renderChatMessages();
-                }
-            }
-            if (typeof checkNewMessages === 'function') {
-                checkNewMessages();
-            }
-        }, 200);
-    }, 30);
-    // NÂNG CẤP: Event Bus handler cho messages
+    // Event Bus handler cho messages
     DB.on('messages:*', function(event) {
         if (!event || !event.data) return;
         _debounceRealtime('messages_ui', function() {
@@ -1210,8 +1390,119 @@ function initRealtime() {
         }
     });
 
+    // ============================================================
+    // RECONCILED HANDLERS: Khi reconcileCollection hoàn tất
+    // reconcileCollection so sánh keys Firebase vs local, thêm thiếu, xóa dư
+    // ============================================================
+
+    // NÂNG CẤP: Khi tables được reconcile (có thể có thêm hoặc xóa bàn)
+    DB.on('tables:reconciled', function(data) {
+        console.log('[Realtime] Tables reconciled:', data);
+        if (currentTab !== 'tables') return;
+        DB.getAll('tables').then(function(allTables) {
+            cachedTables = allTables;
+            tablesCacheTime = Date.now();
+            updateTablesDiff(allTables);
+            if (typeof startTableTimer === 'function') startTableTimer();
+        });
+    });
+
+    // NÂNG CẤP: Khi customers được reconcile
+    DB.on('customers:reconciled', function() {
+        if (currentTab !== 'customers') return;
+        var cached = DB.getMemoryCache('customers');
+        if (cached && cached.length > 0) {
+            customers = cached;
+            window.customers = customers;
+            renderCustomerList();
+        } else {
+            DB.getAll('customers').then(function(list) {
+                customers = list;
+                window.customers = customers;
+                renderCustomerList();
+            });
+        }
+    });
+
+    // NÂNG CẤP: Khi menu được reconcile
+    DB.on('menu:reconciled', function() {
+        DB.getAll('menu').then(function(list) {
+            menuItems = list;
+            menuItems.sort(function(a, b) {
+                var orderA = (a.sortOrder !== undefined && a.sortOrder !== null) ? a.sortOrder : 9999;
+                var orderB = (b.sortOrder !== undefined && b.sortOrder !== null) ? b.sortOrder : 9999;
+                return orderA - orderB;
+            });
+            window.menuItems = menuItems;
+            var orderModal = document.getElementById('orderModal');
+            if (orderModal && orderModal.style.display === 'flex') {
+                renderMenuByCategory(currentMenuCategory);
+            }
+        });
+    });
+
+    // NÂNG CẤP: Khi menu_categories được reconcile
+    DB.on('menu_categories:reconciled', function() {
+        DB.getAll('menu_categories').then(function(list) {
+            menuCategories = list;
+            var orderModal = document.getElementById('orderModal');
+            if (orderModal && orderModal.style.display === 'flex') {
+                renderOrderCategoriesColumn();
+            }
+        });
+    });
+
+    // NÂNG CẤP: Khi staffs được reconcile
+    DB.on('staffs:reconciled', function() {
+        if (typeof getStaffs === 'function') {
+            getStaffs();
+        }
+    });
+
+    // NÂNG CẤP: Khi info được reconcile
+    DB.on('info:reconciled', function() {
+        DB.getAll('info').then(function(data) {
+            if (!data || data.length === 0) return;
+            var infoItem = null;
+            for (var i = 0; i < data.length; i++) {
+                if (data[i].id === 'shop_config') {
+                    infoItem = data[i];
+                    break;
+                }
+            }
+            if (!infoItem) return;
+            var hasLockData = (infoItem.lockStartHour !== undefined ||
+                               infoItem.lockEndHour !== undefined ||
+                               infoItem.lockEndMinute !== undefined ||
+                               infoItem.tableLockHours !== undefined ||
+                               infoItem.lockPassword !== undefined);
+            var oldConfig = window.shopConfig || {};
+            window.shopConfig = {
+                telegramBotToken: infoItem.telegramBotToken || oldConfig.telegramBotToken || '8813111415:AAHjX0-vXMM0dVgVqDSSZNbHtiQ2wiVsFrc',
+                telegramChatId: infoItem.telegramChatId || oldConfig.telegramChatId || '6372876364',
+                telegramShiftCloseToken: infoItem.telegramShiftCloseToken || oldConfig.telegramShiftCloseToken || '',
+                telegramWarningToken: infoItem.telegramWarningToken || oldConfig.telegramWarningToken || '',
+                telegramExpenseToken: infoItem.telegramExpenseToken || oldConfig.telegramExpenseToken || '',
+                lockPassword: hasLockData && infoItem.lockPassword ? infoItem.lockPassword : (oldConfig.lockPassword || '28122020'),
+                lockStartHour: hasLockData && infoItem.lockStartHour !== undefined ? infoItem.lockStartHour : (oldConfig.lockStartHour !== undefined ? oldConfig.lockStartHour : 22),
+                lockEndHour: hasLockData && infoItem.lockEndHour !== undefined ? infoItem.lockEndHour : (oldConfig.lockEndHour !== undefined ? oldConfig.lockEndHour : 5),
+                lockEndMinute: hasLockData && infoItem.lockEndMinute !== undefined ? infoItem.lockEndMinute : (oldConfig.lockEndMinute !== undefined ? oldConfig.lockEndMinute : 30),
+                tableLockHours: hasLockData && infoItem.tableLockHours !== undefined ? infoItem.tableLockHours : (oldConfig.tableLockHours !== undefined ? oldConfig.tableLockHours : 5)
+            };
+            if (infoItem.name) {
+                window.shopInfo = window.shopInfo || {};
+                window.shopInfo.name = infoItem.name;
+                var shopNameEl = document.getElementById('shopNameHeader');
+                if (shopNameEl) shopNameEl.textContent = infoItem.name;
+            }
+        });
+    });
+
     // FIX: Gọi updateRecentToast() ngay khi khởi tạo để hiển thị 5 giao dịch gần nhất
     setTimeout(function() {
         updateRecentToast();
     }, 500);
+
+    // PHASE 4: Khởi động periodic cleanup cho table caches
+    _startTableCacheCleanup();
 }

@@ -117,8 +117,7 @@ function getTableLockInfo(table) {
 // ========== YÊU CẦU MẬT KHẨU ==========
 function requirePassword(action, callback) {
     // NÂNG CẤP: Admin không cần nhập mật khẩu
-    var currentUser = DB.getCurrentUser();
-    if (currentUser && currentUser.role === 'admin') {
+    if (DB.isAdmin()) {
         callback();
         return;
     }
@@ -595,20 +594,21 @@ function paymentAtTableWithCredit(tableId, method) {
     });
 }
 
-// OPTIMIZE: _processPaymentDirect - đóng modal ngay, song song hóa Promise, dùng _checkAndDeductIngredients
+// FIX Phase 1: _processPaymentDirect - Optimistic UI, ingredient chạy background
 function _processPaymentDirect(tableId, method) {
     _getTableFromCache(tableId).then(function(table) {
         if (!table || !table.items || !table.items.length) return;
         
-        // OPTIMIZE: Đóng modal ngay lập tức để UI không bị đơ
+        // Clone items trước khi xóa
+        var items = _cloneArr(table.items);
+        
+        // Đóng modal ngay lập tức
         if (currentTableDetailId === tableId) closeModal('tableDetailModal');
         _paymentToastId = showToast('⏳ Đang xử lý thanh toán...', 'info', 0);
         
-        // OPTIMIZE: Suppress realtime notifications trong quá trình batch operations
         DB.suppressRealtime();
         
         var now = new Date();
-        var items = table.items;
         var total = table.total;
         var tableName = table.name;
         var customerId = table.customerId;
@@ -616,7 +616,7 @@ function _processPaymentDirect(tableId, method) {
         var startTime = table.startTime;
         var endTime = now.toISOString();
         
-        // Tính thời gian khách ngồi (có thể tính song song)
+        // Tính thời gian khách ngồi
         var tableTime = '';
         if (startTime) {
             var st = new Date(startTime);
@@ -626,8 +626,6 @@ function _processPaymentDirect(tableId, method) {
             tableTime = hours > 0 ? hours + 'h' + (mins > 0 ? mins + 'p' : '') : mins + 'p';
         }
         
-        // FIX: Kiểm tra credit của khách - chỉ kiểm tra nếu chưa qua _changeToastPay
-        // (vì _changeToastPay đã lưu tiền dư và set _skipCreditCheck = true)
         var finalAmount = total;
         var creditUsed = 0;
         var customerInfo = customerName ? { name: customerName } : null;
@@ -646,89 +644,75 @@ function _processPaymentDirect(tableId, method) {
                 }
             }
         }
-        // Reset flag sau khi đã xử lý
         _skipCreditCheck = false;
         
-        // OPTIMIZE: Gộp checkStock + deductIngredients thành 1 lần duyệt
-        // Cho phép âm kho - không chặn giao dịch khi hết nguyên liệu
-        var stockAndDeductPromise = _checkAndDeductIngredients(items).then(function() {
-            return true;
-        }).catch(function(err) {
-            console.warn('⚠️ Nguyên liệu không đủ (cho phép âm kho):', err.message);
-            return true; // Vẫn cho phép giao dịch tiếp tục
+        // FIX Phase 1: Lưu transaction NGAY, không chờ ingredient
+        var creditPromise = Promise.resolve();
+        if (creditUsed > 0 && customerId) {
+            creditPromise = useCustomerCredit(customerId, creditUsed, 'Trừ tiền dư khi thanh toán bàn ' + tableName);
+        }
+        
+        // Chạy credit + addHistory + remove song song
+        var historyPromise = addHistory({
+            type: 'dinein',
+            amount: finalAmount,
+            paymentMethod: method,
+            items: items,
+            customer: customerInfo,
+            tableName: tableName,
+            tableId: tableId,
+            note: creditUsed > 0 ? 'Đã dùng ' + formatMoney(creditUsed) + ' tiền dư' : '',
+            createdAt: now.toISOString(),
+            tableTime: tableTime,
+            startTime: startTime,
+            endTime: endTime
         });
         
-        stockAndDeductPromise.then(function(stockOk) {
-            if (!stockOk) {
-                hideToast(_paymentToastId);
-                DB.flushRealtime();
-                return;
+        var removePromise = DB.remove('tables', String(tableId));
+        
+        Promise.all([creditPromise, historyPromise, removePromise]).then(function() {
+            DB.flushRealtime();
+            
+            if (method === 'cash') {
+                handleCashPayment(finalAmount, null, {type: 'dinein', tableName: tableName, customer: customerInfo}).catch(function(err) {
+                    console.error('[AUDIT] handleCashPayment lỗi:', err);
+                });
             }
             
-            // OPTIMIZE: Chạy song song creditUpdate + addHistory + remove
-            var creditPromise = Promise.resolve();
-            if (creditUsed > 0 && customerId) {
-                creditPromise = useCustomerCredit(customerId, creditUsed, 'Trừ tiền dư khi thanh toán bàn ' + tableName);
-            }
-            
-            // OPTIMIZE: Chạy song song deduct và credit
-            Promise.all([stockAndDeductPromise, creditPromise]).then(function() {
-                // addHistory và DB.remove có thể chạy song song
-                var historyPromise = addHistory({
+            if (typeof notifyPaymentToTelegram === 'function') {
+                notifyPaymentToTelegram({
                     type: 'dinein',
                     amount: finalAmount,
                     paymentMethod: method,
                     items: items,
-                    customer: customerInfo,
                     tableName: tableName,
-                    tableId: tableId,
-                    note: creditUsed > 0 ? 'Đã dùng ' + formatMoney(creditUsed) + ' tiền dư' : '',
-                    createdAt: now.toISOString(),
-                    tableTime: tableTime,
-                    startTime: startTime,
-                    endTime: endTime
+                    customer: customerInfo,
+                    createdAt: now.toISOString()
                 });
-                
-                var removePromise = DB.remove('tables', String(tableId));
-                
-                Promise.all([historyPromise, removePromise]).then(function() {
-                    // OPTIMIZE: Flush realtime sau khi tất cả operations hoàn tất
-                    DB.flushRealtime();
-                    
-                    // AUDIT: Nếu thanh toán tiền mặt, kiểm tra két
-                    // handleCashPayment luôn tồn tại (định nghĩa trong pos.html)
-                    if (method === 'cash') {
-                        handleCashPayment(finalAmount, null, {type: 'dinein', tableName: tableName, customer: customerInfo}).catch(function(err) {
-                            console.error('[AUDIT] handleCashPayment lỗi:', err);
-                        });
-                    }
-                    
-                    // Gửi thông báo Telegram (fire-and-forget, không chờ)
-                    if (typeof notifyPaymentToTelegram === 'function') {
-                        notifyPaymentToTelegram({
-                            type: 'dinein',
-                            amount: finalAmount,
-                            paymentMethod: method,
-                            items: items,
-                            tableName: tableName,
-                            customer: customerInfo,
-                            createdAt: now.toISOString()
-                        });
-                    }
-                    
-                    hideToast(_paymentToastId);
-                    var msg = '✅ Thanh toán ' + formatMoney(finalAmount) + ' thành công';
-                    if (creditUsed > 0) msg += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)';
-                    showToast(msg, 'success');
-                    // Cập nhật doanh thu pos-cash-info realtime
-                    _dispatchPosCashUpdate();
-                });
-            }).catch(function(err) {
-                hideToast(_paymentToastId);
-                DB.flushRealtime();
-                showToast('❌ Lỗi thanh toán: ' + (err.message || err), 'error');
-            });
+            }
+            
+            hideToast(_paymentToastId);
+            var msg = '✅ Thanh toán ' + formatMoney(finalAmount) + ' thành công';
+            if (creditUsed > 0) msg += ' (đã dùng ' + formatMoney(creditUsed) + ' tiền dư)';
+            showToast(msg, 'success');
+            _dispatchPosCashUpdate();
+            // FIX Android 6: Gọi renderTables() để đồng bộ UI sau thanh toán
+            // Tránh trường hợp IndexedDB đọc lỗi làm mất bàn trên Android 6
+            if (typeof renderTables === 'function') {
+                renderTables();
+            }
+        }).catch(function(err) {
+            hideToast(_paymentToastId);
+            DB.flushRealtime();
+            showToast('❌ Lỗi thanh toán: ' + (err.message || err), 'error');
         });
+        
+        // FIX Phase 1: Ingredient deduction chạy background
+        setTimeout(function() {
+            _checkAndDeductIngredients(items).then(function() {
+                console.log('[INGREDIENT] Đã trừ nguyên liệu cho bàn:', tableName);
+            });
+        }, 0);
     });
 }
 
@@ -755,13 +739,7 @@ function cashPayWithDenom(tableId, givenAmount) {
         _changeToastTableId = tableId;
         _changeToastGivenAmount = givenAmount;
         
-        // Kiểm tra nếu bàn có gán khách hàng và có tiền dư
-        var creditNote = '';
-        if (change > 0 && table.customerId) {
-            creditNote = '<div style="font-size:12px;color:#d97706;margin-top:6px;">💡 Khách có ' + formatMoney(change) + ' tiền dư sẽ được lưu làm tiền trả trước</div>';
-        }
-        
-        // Tạo toast đặc biệt to, nổi bật
+        // Tạo toast đặc biệt to, nổi bật - chỉ hiển thị tiền dư trả lại khách
         var toast = document.createElement('div');
         toast.className = 'change-toast';
         toast.id = 'changeToast';
@@ -769,7 +747,7 @@ function cashPayWithDenom(tableId, givenAmount) {
             '<div class="change-label">💵 TIỀN DƯ</div>' +
             '<div class="change-given">Khách đưa: ' + formatMoney(givenAmount) + '</div>' +
             '<div class="change-amount">' + formatMoney(change) + '</div>' +
-            creditNote +
+            '<div class="change-return">🔄 Trả lại khách: <strong>' + formatMoney(change) + '</strong></div>' +
             '<div style="display:flex;gap:8px;margin-top:10px;">' +
                 '<button onclick="_changeToastPay()" style="flex:1;padding:10px;border-radius:40px;border:none;background:#f97316;color:#fff;font-weight:700;font-size:14px;cursor:pointer;-webkit-appearance:none;">✅ Thanh toán</button>' +
                 '<button onclick="_hideChangeToast()" style="padding:10px 16px;border-radius:40px;border:none;background:#475569;color:#fff;font-size:13px;cursor:pointer;-webkit-appearance:none;">✕</button>' +
@@ -857,38 +835,10 @@ function confirmCustomDenom(tableId) {
 
 function _changeToastPay() {
     var tid = _changeToastTableId;
-    var givenAmount = _changeToastGivenAmount;
     _hideChangeToast();
     if (tid) {
-        // Lưu tiền dư vào credit của khách nếu bàn có gán khách
-        _getTableFromCache(tid).then(function(table) {
-            if (!table) {
-                paymentAtTableWithCredit(tid, 'cash');
-                return;
-            }
-            var change = givenAmount - (table.total || 0);
-            if (change > 0 && table.customerId) {
-                // Có tiền dư và bàn có gán khách -> lưu credit trước
-                var customer = null;
-                for (var i = 0; i < customers.length; i++) {
-                    if (customers[i].id === table.customerId) {
-                        customer = customers[i];
-                        break;
-                    }
-                }
-                if (customer) {
-                    addCustomerCredit(customer.id, change, 'Trả dư khi thanh toán bàn ' + table.name).then(function() {
-                        showToast('💰 Đã lưu ' + formatMoney(change) + ' tiền dư cho ' + customer.name, 'success');
-                        // FIX: Đánh dấu đã qua _changeToastPay để paymentAtTableWithCredit
-                        // và _processPaymentDirect không kiểm tra credit thêm lần nữa
-                        _skipCreditCheck = true;
-                        paymentAtTableWithCredit(tid, 'cash');
-                    });
-                    return;
-                }
-            }
-            paymentAtTableWithCredit(tid, 'cash');
-        });
+        // Đơn giản: chỉ thanh toán tiền mặt, không lưu tiền dư vào credit
+        paymentAtTableWithCredit(tid, 'cash');
     }
 }
 
@@ -1025,6 +975,11 @@ function debtAtTable(tableId) {
                         var msg = '💰 Đã ghi nợ ' + formatMoney(debtAmount) + ' cho ' + customer.name;
                         if (creditUsed > 0) msg += ' (đã trừ ' + formatMoney(creditUsed) + ' tiền dư)';
                         showToast(msg, 'success');
+                        
+                        // FIX Android 6: Gọi renderTables() để đồng bộ UI sau ghi nợ
+                        if (typeof renderTables === 'function') {
+                            renderTables();
+                        }
                         
                         // In hóa đơn (fire-and-forget, không chờ)
                         var printCheck = document.getElementById('printAfterPaymentCheck');

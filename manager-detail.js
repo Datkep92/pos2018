@@ -1,6 +1,140 @@
 // manager-detail.js - Chi tiết Manager Grid khi click vào item
 // ES5, tương thích Android 6, iOS 12
 
+// ========== MANAGER CACHE LAYER ==========
+// Cache dữ liệu manager để tránh IndexedDB reads lặp lại nhiều lần
+// _managerTxCache: cache transactions theo range (startStr|endStr)
+// _managerMasterCache: cache customers, staffs, pickups từ memory cache
+// _managerCacheRange: range hiện tại đã cache
+var _managerTxCache = null;       // { transactions: [], range: 'start|end', timestamp: 0 }
+var _managerMasterCache = null;   // { customers: [], staffs: [], pickups: [], timestamp: 0 }
+var _MANAGER_CACHE_TTL = 60000;   // 60 giây - đủ cho các thao tác click qua lại
+
+// Biến lưu range hiện tại của manager filter - dùng chung cho tất cả box
+// Được cập nhật bởi managerApplyFilter(), dùng bởi showManagerXxxDetail()
+// Khởi tạo _managerCurrentRange với giá trị mặc định (Kỳ hiện tại)
+// để tránh hiển thị sai khi load trang lần đầu mà chưa kịp gọi managerApplyFilter()
+var _managerCurrentRange = (function() {
+    var now = new Date();
+    var day = now.getDate();
+    var startDate, endDate;
+    if (day >= 20) {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 20);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 19, 23, 59, 59);
+    } else {
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 20);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 19, 23, 59, 59);
+    }
+    function _toDateKey(d) {
+        var y = d.getFullYear();
+        var m = ('0' + (d.getMonth() + 1)).slice(-2);
+        var day = ('0' + d.getDate()).slice(-2);
+        return y + '-' + m + '-' + day;
+    }
+    return {
+        startStr: _toDateKey(startDate),
+        endStr: _toDateKey(endDate),
+        mode: 'period',
+        label: 'Kỳ ' + _toDateKey(startDate) + ' → ' + _toDateKey(endDate)
+    };
+})();
+window._managerCurrentRange = _managerCurrentRange; // Export global để các file khác dùng chung
+
+// Lấy transactions từ cache hoặc DB
+function _getManagerTransactions(startStr, endStr) {
+    var cacheKey = startStr + '|' + endStr;
+    var now = Date.now();
+    
+    // Nếu cache còn hạn và cùng range, trả về từ cache
+    if (_managerTxCache && _managerTxCache.range === cacheKey && (now - _managerTxCache.timestamp) < _MANAGER_CACHE_TTL) {
+        return Promise.resolve(_managerTxCache.transactions);
+    }
+    
+    // Ưu tiên memory cache (nhanh, không block UI)
+    // memoryCache.transactions là object {id: tx} - đọc từ DB.getMemoryCache('transactions')
+    var memTxs = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('transactions') : null;
+    if (memTxs && memTxs.length > 0) {
+        // Lọc transactions theo date range từ memory cache
+        var filtered = [];
+        for (var i = 0; i < memTxs.length; i++) {
+            var tx = memTxs[i];
+            var dk = tx.dateKey || (tx.date ? tx.date.slice(0, 10) : '');
+            if (dk >= startStr && dk <= endStr) {
+                filtered.push(tx);
+            }
+        }
+        // Nếu memory cache có đủ dữ liệu (có ít nhất 1 transaction trong range), dùng luôn
+        if (filtered.length > 0) {
+            _managerTxCache = {
+                transactions: filtered,
+                range: cacheKey,
+                timestamp: Date.now()
+            };
+            return Promise.resolve(filtered);
+        }
+    }
+    
+    // Fetch từ DB (IndexedDB + auto-fetch Firebase nếu cần)
+    return DB.getTransactionsByDateRange(startStr, endStr).then(function(transactions) {
+        _managerTxCache = {
+            transactions: transactions,
+            range: cacheKey,
+            timestamp: Date.now()
+        };
+        return transactions;
+    });
+}
+
+// Lấy master data (customers, staffs, pickups) từ memory cache hoặc IndexedDB
+function _getManagerMasterData() {
+    var now = Date.now();
+    
+    // Nếu cache còn hạn, trả về từ cache
+    if (_managerMasterCache && (now - _managerMasterCache.timestamp) < _MANAGER_CACHE_TTL) {
+        return Promise.resolve(_managerMasterCache);
+    }
+    
+    // Ưu tiên memory cache (nhanh, không block UI)
+    var customers = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('customers') : null;
+    var staffs = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('staffs') : null;
+    var pickups = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('manager_cash_pickups') : null;
+    
+    // Nếu memory cache có đủ, dùng luôn
+    if (customers && customers.length > 0) {
+        var result = {
+            customers: customers,
+            staffs: staffs || [],
+            pickups: pickups || [],
+            timestamp: Date.now()
+        };
+        _managerMasterCache = result;
+        return Promise.resolve(result);
+    }
+    
+    // Fallback: đọc từ IndexedDB
+    return Promise.all([
+        DB.getAll('customers'),
+        DB.getAll('staffs'),
+        DB.getAll('manager_cash_pickups')
+    ]).then(function(results) {
+        var data = {
+            customers: results[0] || [],
+            staffs: results[1] || [],
+            pickups: results[2] || [],
+            timestamp: Date.now()
+        };
+        _managerMasterCache = data;
+        return data;
+    });
+}
+
+// Xóa cache manager (gọi khi có realtime update)
+function _invalidateManagerCache() {
+    _managerTxCache = null;
+    _managerMasterCache = null;
+}
+window._invalidateManagerCache = _invalidateManagerCache;
+
 // ========== HÀM TIỆN ÍCH ==========
 // Hàm chuyển Date -> YYYY-MM-DD dùng local time, tránh lỗi timezone UTC
 function _toDateKey(d) {
@@ -11,6 +145,12 @@ function _toDateKey(d) {
 }
 
 function _getManagerDateRange() {
+    // Nếu đã có _managerCurrentRange (được cập nhật bởi managerApplyFilter), dùng luôn
+    // để đảm bảo tất cả box đều dùng chung một range
+    if (_managerCurrentRange) {
+        return _managerCurrentRange;
+    }
+
     var modeSelect = document.getElementById('managerViewModeSelect');
     var mode = modeSelect ? modeSelect.value : 'period';
     var offset = window.managerPeriodOffset || 0;
@@ -38,12 +178,17 @@ function _getManagerDateRange() {
         }
     }
 
-    return {
+    var range = {
         startStr: _toDateKey(startDate),
         endStr: _toDateKey(endDate),
         mode: mode,
         label: _getManagerPeriodLabel(mode, startDate, endDate)
     };
+
+    // Lưu vào _managerCurrentRange để các lần gọi sau dùng chung
+    _managerCurrentRange = range;
+    window._managerCurrentRange = range; // Đồng bộ global
+    return range;
 }
 
 function _getManagerPeriodLabel(mode, startDate, endDate) {
@@ -136,7 +281,9 @@ function _openManagerDetail(title, filterFn, summaryFn, showFilters, updateBigVa
     var oldModal = document.getElementById('managerDetailModal');
     if (oldModal) oldModal.parentNode.removeChild(oldModal);
 
-    var range = _getManagerDateRange();
+    // Dùng _managerCurrentRange nếu có (được cập nhật bởi managerApplyFilter)
+    // để đảm bảo tất cả box dùng chung range, tránh hiển thị sai lệch
+    var range = _managerCurrentRange || _getManagerDateRange();
 
     var modal = document.createElement('div');
     modal.className = 'manager-detail-modal active';
@@ -335,11 +482,11 @@ function _toggleMDAccordion(header) {
 
 // 1. DOANH THU
 function showManagerRevenueDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83D\uDCB0 Doanh thu - ' + range.label,
         function(filter) {
-            return DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+            return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                 // Chỉ tính doanh thu cho cash, transfer, grab (giống settings.js)
                 // - Ghi nợ (mua chịu): paymentMethod='debt' -> loại bỏ
                 // - Thanh toán nợ (trả nợ): type='debt_payment', paymentMethod='cash'|'transfer'|'grab' -> giữ lại
@@ -370,7 +517,7 @@ function showManagerRevenueDetail() {
             var el = document.getElementById('managerRevenue');
             if (!el) return;
             var fn = function(f) {
-                return DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+                return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                     // Chỉ tính doanh thu cho cash, transfer, grab (giống settings.js)
                     var filteredTx = transactions.filter(function(tx) {
                         if (tx.refunded) return false;
@@ -395,11 +542,11 @@ function showManagerRevenueDetail() {
 
 // 2. GRAB
 function showManagerGrabDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83D\uDE95 Grab - ' + range.label,
         function(filter) {
-            return DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+            return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                 // Lọc bỏ ghi nợ (mua chịu) - paymentMethod === 'debt'
                 var filteredTx = transactions.filter(function(tx) {
                     if (tx.refunded) return false;
@@ -442,7 +589,7 @@ function showManagerGrabDetail() {
         function(filter) {
             var el = document.getElementById('managerGrab');
             if (!el) return;
-            DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+            _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                 var filteredTx = transactions.filter(function(tx) {
                     if (tx.refunded) return false;
                     if (tx.paymentMethod === 'debt') return false;
@@ -467,11 +614,11 @@ function showManagerGrabDetail() {
 
 // 3. CHUYỂN KHOẢN
 function showManagerBankDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83C\uDFE6 Chuy\u1EC3n kho\u1EA3n - ' + range.label,
         function(filter) {
-            return DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+            return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                 // Lọc bỏ ghi nợ (mua chịu) - paymentMethod === 'debt'
                 var filteredTx = transactions.filter(function(tx) {
                     if (tx.refunded) return false;
@@ -514,7 +661,7 @@ function showManagerBankDetail() {
         function(filter) {
             var el = document.getElementById('managerBank');
             if (!el) return;
-            DB.getTransactionsByDateRange(range.startStr, range.endStr).then(function(transactions) {
+            _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
                 var filteredTx = transactions.filter(function(tx) {
                     if (tx.refunded) return false;
                     if (tx.paymentMethod === 'debt') return false;
@@ -539,11 +686,12 @@ function showManagerBankDetail() {
 
 // 4. THỰC NHẬN (CASH) - lấy từ manager_cash_pickups (tiền QL nhận tại POS)
 function showManagerCashDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83D\uDCB5 Th\u1EF1c nh\u1EADn (Ti\u1EC1n m\u1EB7t) - ' + range.label,
         function(filter) {
-            return DB.getAll('manager_cash_pickups').then(function(pickups) {
+            return _getManagerMasterData().then(function(masterData) {
+                var pickups = masterData.pickups || [];
                 // Lọc pickups trong date range
                 var filtered = [];
                 for (var p = 0; p < pickups.length; p++) {
@@ -594,7 +742,8 @@ function showManagerCashDetail() {
         function(filter) {
             var el = document.getElementById('managerCash');
             if (!el) return;
-            DB.getAll('manager_cash_pickups').then(function(pickups) {
+            _getManagerMasterData().then(function(masterData) {
+                var pickups = masterData.pickups || [];
                 var total = 0;
                 for (var p = 0; p < pickups.length; p++) {
                     var pk = pickups[p];
@@ -610,7 +759,7 @@ function showManagerCashDetail() {
 
 // 5. CHI PHÍ TỪ KÉT POS
 function showManagerExpenseDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83C\uDFE6 Chi ph\u00ED t\u1EEB K\u00E9t POS - ' + range.label,
         function(filter) {
@@ -677,11 +826,12 @@ function showManagerExpenseDetail() {
 
 // 6. CÔNG NỢ PHÁT SINH
 function showManagerDebtOccurDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83D\uDCCA C\u00F4ng n\u1EE3 ph\u00E1t sinh - ' + range.label,
         function(filter) {
-            return DB.getAll('customers').then(function(allCustomers) {
+            return _getManagerMasterData().then(function(masterData) {
+                var allCustomers = masterData.customers || [];
                 var dayMap = {};
                 var grandTotal = 0;
                 for (var ci = 0; ci < allCustomers.length; ci++) {
@@ -738,7 +888,8 @@ function showManagerDebtOccurDetail() {
         function(filter) {
             var el = document.getElementById('managerDebt');
             if (!el) return;
-            DB.getAll('customers').then(function(allCustomers) {
+            _getManagerMasterData().then(function(masterData) {
+                var allCustomers = masterData.customers || [];
                 var total = 0;
                 for (var ci = 0; ci < allCustomers.length; ci++) {
                     var cust = allCustomers[ci];
@@ -760,7 +911,7 @@ function showManagerDebtOccurDetail() {
 
 // 7. TỔNG CP QUẢN LÝ
 function showManagerAdminExpenseDetail() {
-    var range = _getManagerDateRange();
+    var range = _managerCurrentRange || _getManagerDateRange();
     _openManagerDetail(
         '\uD83D\uDCCB T\u1ED5ng CP Qu\u1EA3n l\u00FD - ' + range.label,
         function(filter) {
@@ -830,7 +981,8 @@ function showManagerTotalDebtDetail() {
     _openManagerDetail(
         '\uD83C\uDFE6 T\u1ED4NG C\u00D4NG N\u1EE2',
         function(filter) {
-            return DB.getAll('customers').then(function(allCustomers) {
+            return _getManagerMasterData().then(function(masterData) {
+                var allCustomers = masterData.customers || [];
                 var debtCustomers = allCustomers.filter(function(c) { return (c.totalDebt || 0) > 0; });
                 var items = [];
                 var total = 0;
@@ -861,7 +1013,8 @@ function showManagerTotalDebtDetail() {
         function(filter) {
             var el = document.getElementById('managerTotalDebt');
             if (!el) return;
-            DB.getAll('customers').then(function(allCustomers) {
+            _getManagerMasterData().then(function(masterData) {
+                var allCustomers = masterData.customers || [];
                 var total = 0;
                 for (var i = 0; i < allCustomers.length; i++) {
                     total += allCustomers[i].totalDebt || 0;
@@ -886,7 +1039,9 @@ function showManagerEmployeeDetail() {
 // ========== QUỸ POS - CHI TIẾT ==========
 // Hiển thị daily_balances theo ngày với bộ lọc +/- và tổng số tiền âm/dương
 function showManagerPosFundDetail() {
-    var range = _getManagerDateRange();
+    // Dùng _managerCurrentRange nếu có (được cập nhật bởi managerApplyFilter)
+    // để đảm bảo tất cả box dùng chung range, tránh hiển thị sai lệch
+    var range = _managerCurrentRange || _getManagerDateRange();
     var title = '\uD83C\uDFE6 QU\u1EF8 POS - ' + range.label;
 
     // Xóa modal cũ nếu có
@@ -940,7 +1095,8 @@ function _switchPosFundFilter(btn) {
     var filter = btn.getAttribute('data-posfund-filter');
     // Dùng range đã lưu trong modal, không gọi _getManagerDateRange() lại
     var range = modal._posFundRange;
-    if (!range) range = _getManagerDateRange();
+    // Fallback: dùng _managerCurrentRange (đã được đồng bộ với filter chính)
+    if (!range) range = _managerCurrentRange || _getManagerDateRange();
     _loadPosFundData(modal, range, filter);
 }
 
@@ -1054,8 +1210,52 @@ function _loadPosFundData(modal, range, filter) {
     });
 }
 
+// 11. 1% QUỸ THƯỞNG (hiển thị đơn giản, không lưu Firebase)
+function showManagerBonusDetail() {
+    var range = _managerCurrentRange || _getManagerDateRange();
+    _openManagerDetail(
+        '\uD83C\uDFAF 1% Qu\u1EF9 th\u01B0\u1EDFng - ' + range.label,
+        function(filter) {
+            return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
+                // Tính doanh thu = cash + transfer + grab + debtPayment + prepayment (không gồm debt)
+                var totalRevenue = 0;
+                for (var i = 0; i < transactions.length; i++) {
+                    var tx = transactions[i];
+                    if (tx.refunded) continue;
+                    if (tx.paymentMethod === 'debt') continue;
+                    if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab' && tx.paymentMethod !== 'debt_payment' && tx.paymentMethod !== 'prepayment') continue;
+                    totalRevenue += tx.amount || 0;
+                }
+                var bonus = Math.round(totalRevenue * 0.01);
+                return { days: [{ dateKey: range.startStr, methods: {}, items: [], total: totalRevenue }], total: totalRevenue, bonus: bonus };
+            });
+        },
+        function(data) {
+            return { 'T\u1ED5ng doanh thu': data.total, '1% Qu\u1EF9 th\u01B0\u1EDFng': data.bonus };
+        },
+        false,
+        function(filter) {
+            var el = document.getElementById('managerBonus');
+            if (!el) return;
+            _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
+                var totalRevenue = 0;
+                for (var i = 0; i < transactions.length; i++) {
+                    var tx = transactions[i];
+                    if (tx.refunded) continue;
+                    if (tx.paymentMethod === 'debt') continue;
+                    if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab' && tx.paymentMethod !== 'debt_payment' && tx.paymentMethod !== 'prepayment') continue;
+                    totalRevenue += tx.amount || 0;
+                }
+                var bonus = Math.round(totalRevenue * 0.01);
+                el.textContent = formatMoney(bonus);
+            });
+        }
+    );
+}
+
 // Export global
 window.showManagerRevenueDetail = showManagerRevenueDetail;
+window.showManagerBonusDetail = showManagerBonusDetail;
 window.showManagerGrabDetail = showManagerGrabDetail;
 window.showManagerBankDetail = showManagerBankDetail;
 window.showManagerCashDetail = showManagerCashDetail;
@@ -1070,28 +1270,23 @@ window._closeManagerDetail = _closeManagerDetail;
 // ========== CẬP NHẬT BIG-VALUE TRÊN TRANG CHÍNH ==========
 // Hàm này query transactions, customers, staffs và cập nhật tất cả 10 big-value
 function updateManagerBigValues(startStr, endStr) {
-    // Query transactions trong date range
-    var txPromise = DB.getTransactionsByDateRange(startStr, endStr);
-    // Query customers để tính công nợ
-    var custPromise = DB.getAll('customers');
-    // Query staffs để đếm nhân viên
-    var staffPromise = DB.getAll('staffs');
-    // Query manager_cash_pickups (tiền QL nhận)
-    var pickupPromise = DB.getAll('manager_cash_pickups');
+    // Sử dụng cache để tránh đọc IndexedDB nhiều lần
+    var txPromise = _getManagerTransactions(startStr, endStr);
+    var masterPromise = _getManagerMasterData();
 
-    Promise.all([txPromise, custPromise, staffPromise, pickupPromise]).then(function(results) {
+    Promise.all([txPromise, masterPromise]).then(function(results) {
         var transactions = results[0] || [];
-        var allCustomers = results[1] || [];
-        var allStaffs = results[2] || [];
-        var allPickups = results[3] || [];
+        var masterData = results[1] || {};
+        var allCustomers = masterData.customers || [];
+        var allStaffs = masterData.staffs || [];
+        var allPickups = masterData.pickups || [];
 
         // Lọc transactions không bị refund
         var validTx = transactions.filter(function(t) { return !t.refunded; });
 
-        // Tính tổng doanh thu = cash + transfer + grab + thanh toán nợ (giống settings.js)
+        // Tính tổng doanh thu = cash + transfer + grab + debtPayment + prepayment (không gồm debt)
         // - paymentMethod === 'debt': ghi nợ (mua chịu) -> loại bỏ
-        // - paymentMethod !== 'cash'|'transfer'|'grab': các phương thức khác (credit, v.v.) -> bỏ qua
-        // - Thanh toán nợ (type='debt_payment', paymentMethod='cash'|'transfer'|'grab'): giữ lại
+        // - Thanh toán nợ (debt_payment) và thanh toán trước (prepayment): giữ lại
         var totalRevenue = 0;
         var totalGrab = 0;
         var totalBank = 0;
@@ -1099,7 +1294,7 @@ function updateManagerBigValues(startStr, endStr) {
         for (var i = 0; i < validTx.length; i++) {
             var tx = validTx[i];
             if (tx.paymentMethod === 'debt') continue;
-            if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab') continue;
+            if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab' && tx.paymentMethod !== 'debt_payment' && tx.paymentMethod !== 'prepayment') continue;
             totalRevenue += tx.amount || 0;
             if (tx.paymentMethod === 'grab') totalGrab += tx.amount || 0;
             else if (tx.paymentMethod === 'transfer') totalBank += tx.amount || 0;
@@ -1159,8 +1354,12 @@ function updateManagerBigValues(startStr, endStr) {
             if (el) el.textContent = formatMoney(value);
         }
 
+        // Tính 1% Quỹ thưởng (dùng totalRevenue đã tính ở trên = cash+transfer+grab+debtPayment+prepayment)
+        var bonus = Math.round(totalRevenue * 0.01);
+
         // Cập nhật tất cả big-value
         _setBigValue('managerRevenue', totalRevenue);
+        _setBigValue('managerBonus', bonus);
         _setBigValue('managerGrab', totalGrab);
         _setBigValue('managerBank', totalBank);
         _setBigValue('managerCash', totalCash);
@@ -1242,10 +1441,18 @@ function _initManagerFilters() {
 }
 
 // Tự động gắn khi DOM sẵn sàng
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _initManagerFilters);
-} else {
+function _onDOMReady() {
     _initManagerFilters();
+    // Gọi managerApplyFilter() ngay để đồng bộ _managerCurrentRange với filter mặc định
+    // Đảm bảo các box dùng chung range ngay từ đầu, tránh hiển thị sai lệch
+    if (typeof managerApplyFilter === 'function') {
+        managerApplyFilter();
+    }
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _onDOMReady);
+} else {
+    _onDOMReady();
 }
 
 // ========== MANAGER TAB: LỌC & HIỂN THỊ CHI PHÍ ==========
@@ -1326,6 +1533,15 @@ function managerApplyFilter() {
     }
     var startStr = _toDateKey(startDate);
     var endStr = _toDateKey(endDate);
+
+    // Cập nhật _managerCurrentRange để tất cả box dùng chung range này
+    _managerCurrentRange = {
+        startStr: startStr,
+        endStr: endStr,
+        mode: mode,
+        label: _getManagerPeriodLabel(mode, startDate, endDate)
+    };
+    window._managerCurrentRange = _managerCurrentRange; // Đồng bộ global
 
     // Cập nhật label cho tất cả option
     if (modeSelect) {

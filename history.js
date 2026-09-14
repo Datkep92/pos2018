@@ -160,7 +160,7 @@ function _renderTxItem(tx, index) {
     // Vuốt phải: nút Xóa (chỉ admin, mọi giao dịch)
     var swipeHtml = '';
     var currentUser = DB.getCurrentUser();
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isAdmin = currentUser && isAdminUser();
     
     // Nút hoàn tác (vuốt trái) - cho giao dịch chưa hoàn tác
     if (!isRefunded) {
@@ -349,18 +349,18 @@ function _renderHistoryCore(dateStr) {
         // FIX: Cập nhật staff chips vào #historyStaffChips thay vì <select> options
         // Các chip này sẽ xử lý click qua event delegation (xem pos-app.js)
         var staffChipsContainer = document.getElementById('historyStaffChips');
-        if (staffChipsContainer) {
-            staffChipsContainer.innerHTML = '';
-            if (staffNames.length > 0) {
-                for (var i = 0; i < staffNames.length; i++) {
-                    var chip = document.createElement('button');
-                    chip.className = 'filter-chip staff-chip';
-                    chip.setAttribute('data-filter', 'staff:' + staffNames[i]);
-                    chip.textContent = '👤 ' + staffNames[i];
-                    staffChipsContainer.appendChild(chip);
-                }
-            }
+if (staffChipsContainer) {
+    staffChipsContainer.innerHTML = '';
+    if (staffNames.length > 0) {
+        for (var i = 0; i < staffNames.length; i++) {
+            var chip = document.createElement('button');
+            chip.className = 'filter-chip staff-chip';
+            chip.setAttribute('data-filter', 'staff:' + staffNames[i]);
+            chip.textContent = '👤'; // chỉ icon
+            staffChipsContainer.appendChild(chip);
         }
+    }
+}
         
         // FIX: Không cần khôi phục giá trị select, dùng filter từ active chip
         
@@ -382,6 +382,18 @@ function _renderHistoryCore(dateStr) {
                 return true;
             });
         }
+
+        // FIX Phase 1: Chỉ dedup theo id (trùng record do load nhiều lần)
+        // Đã loại bỏ dedup 5s theo nội dung - mỗi giao dịch là duy nhất
+        var seenIds = {};
+        transactions = transactions.filter(function(t) {
+            if (seenIds[t.id]) {
+                console.warn('⚠️ [DEDUP-ID] Loại bỏ giao dịch trùng id:', t.id, t.amount, t.type);
+                return false;
+            }
+            seenIds[t.id] = true;
+            return true;
+        });
 
         // SẮP XẾP: GIAO DỊCH GẦN NHẤT LÊN TRÊN CÙNG
         transactions.sort(function(a, b) {
@@ -417,7 +429,7 @@ function _renderHistoryCore(dateStr) {
         }
         // Phân quyền: admin thấy tổng tiền, staff chỉ thấy số lượng
         var currentUser = DB.getCurrentUser();
-        var isAdmin = currentUser && currentUser.role === 'admin';
+        var isAdmin = currentUser && isAdminUser();
         var summaryHtml = '';
         if (isAdmin) {
             summaryHtml = '<div class="history-summary">📊 Tổng: <strong>' + totalCount + ' giao dịch</strong> - <strong>' + formatMoney(totalAmount) + '</strong></div>';
@@ -794,6 +806,74 @@ function refundTransaction(transactionId) {
     });
 }
 
+// ========== KHÔI PHỤC PREPAIDBALANCE KHI HOÀN TÁC ==========
+// creditUsed: số tiền đã dùng từ prepaidBalance (cần cộng lại)
+// prepaidChange: số tiền dư được thêm vào prepaidBalance (cần trừ đi)
+function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
+    return new Promise(function(resolve) {
+        if (!customerId || (!creditUsed && !prepaidChange)) { resolve(); return; }
+        var c = null;
+        for (var i = 0; i < customers.length; i++) {
+            if (customers[i].id === customerId) { c = customers[i]; break; }
+        }
+        function doRestore(cust) {
+            var updateData = {};
+            var changed = false;
+            
+            // 1. Khôi phục prepaidBalance nếu đã dùng credit (creditUsed > 0)
+            if (creditUsed > 0) {
+                cust.prepaidBalance = (cust.prepaidBalance || 0) + creditUsed;
+                updateData.prepaidBalance = cust.prepaidBalance;
+                // Xóa creditHistory entry tương ứng (entry có amount = -creditUsed)
+                if (cust.creditHistory) {
+                    for (var k = 0; k < cust.creditHistory.length; k++) {
+                        if (cust.creditHistory[k].amount === -creditUsed) {
+                            cust.creditHistory.splice(k, 1);
+                            break;
+                        }
+                    }
+                }
+                updateData.creditHistory = cust.creditHistory || [];
+                changed = true;
+            }
+            
+            // 2. Trừ prepaidBalance nếu có overpay (prepaidChange > 0)
+            if (prepaidChange > 0) {
+                cust.prepaidBalance = Math.max(0, (cust.prepaidBalance || 0) - prepaidChange);
+                updateData.prepaidBalance = cust.prepaidBalance;
+                // Xóa creditHistory entry tương ứng (entry có amount = prepaidChange)
+                if (cust.creditHistory) {
+                    for (var k = 0; k < cust.creditHistory.length; k++) {
+                        if (cust.creditHistory[k].amount === prepaidChange) {
+                            cust.creditHistory.splice(k, 1);
+                            break;
+                        }
+                    }
+                }
+                updateData.creditHistory = cust.creditHistory || [];
+                changed = true;
+            }
+            
+            if (changed) {
+                updateData.creditBalance = cust.prepaidBalance || 0;
+                DB.update('customers', cust.id, updateData).then(function() { resolve(); });
+            } else {
+                resolve();
+            }
+        }
+        if (c) {
+            doRestore(c);
+        } else {
+            DB.getAll('customers').then(function(allC) {
+                for (var i = 0; i < allC.length; i++) {
+                    if (allC[i].id === customerId) { c = allC[i]; break; }
+                }
+                if (c) { doRestore(c); } else { resolve(); }
+            });
+        }
+    });
+}
+
 function proceedRefund(trans, needPassword) {
     var transactionId = trans.id;
     function doRefund() {
@@ -933,8 +1013,15 @@ function proceedRefund(trans, needPassword) {
                     }
                 }
                 
-                // Đợi xử lý trả sau + khôi phục bàn xong mới update transaction
-                Promise.all([debtPromise, tablePromise]).then(function() {
+                // Khôi phục prepaidBalance và creditHistory nếu giao dịch có dùng tiền dư/trả dư
+                var creditPromise = restoreCustomerCredit(
+                    trans.customer ? trans.customer.id : null,
+                    trans.creditUsed || 0,
+                    trans.prepaidChange || 0
+                );
+                
+                // Đợi xử lý trả sau + khôi phục bàn + khôi phục credit xong mới update transaction
+                Promise.all([debtPromise, tablePromise, creditPromise]).then(function() {
                     // FIX TIMEZONE: KHÔNG ghi đè trans.createdAt để giữ nguyên ngày gốc của giao dịch
                     // Thay vào đó, dùng refundedAt để sort nếu cần
                     trans.refunded = true;
@@ -1045,6 +1132,15 @@ function changeHistoryDate(delta) {
     renderHistoryByDate(currentHistoryDate);
 }
 
+// Nhảy đến ngày được chọn từ date picker (lịch)
+function jumpHistoryDate(dateStr) {
+    if (!dateStr) return;
+    var parts = dateStr.split('-');
+    var nd = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    currentHistoryDate = nd;
+    renderHistoryByDate(currentHistoryDate);
+}
+
 // ========== THÊM GIAO DỊCH ==========
 function addHistory(transaction) {
     var now = new Date();
@@ -1064,7 +1160,9 @@ function addHistory(transaction) {
         refunded: false,
         tableTime: transaction.tableTime || '', // Thời gian khách ngồi (vd: "2h15p")
         startTime: transaction.startTime || null, // Thời gian bắt đầu ngồi
-        endTime: transaction.endTime || null      // Thời gian kết thúc (thanh toán)
+        endTime: transaction.endTime || null,      // Thời gian kết thúc (thanh toán)
+        creditUsed: transaction.creditUsed || 0,   // Số tiền đã dùng từ prepaidBalance khi ghi nợ/thanh toán
+        prepaidChange: transaction.prepaidChange || 0 // Số tiền dư được thêm vào prepaidBalance (overpay)
     };
     // Bổ sung tên nhân viên thực hiện
     var user = DB.getCurrentUser();
@@ -1137,7 +1235,7 @@ function deleteTransaction(transactionId) {
     
     // Kiểm tra quyền admin
     var currentUser = DB.getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser || !isAdminUser()) {
         showToast('👑 Chỉ quản lý mới có thể xóa giao dịch', 'warning');
         return;
     }

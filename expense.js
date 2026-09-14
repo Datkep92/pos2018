@@ -93,8 +93,8 @@ function openExpenseModal() {
 
         // Mặc định nguồn tiền: Admin = QLTT, Staff = Két POS
         var currentUser = DB.getCurrentUser();
-        var isAdminUser = currentUser && currentUser.role === 'admin';
-        _expenseSelectedFundSource = isAdminUser ? 'management' : 'pos_cash';
+        var _isAdmin = isAdminUser();
+        _expenseSelectedFundSource = _isAdmin ? 'management' : 'pos_cash';
         switchFundSource(_expenseSelectedFundSource);
 
 
@@ -123,8 +123,8 @@ function openExpenseModal() {
 // ========== PHÂN QUYỀN CHI PHÍ ==========
 function applyExpenseRoleRestrictions() {
     var currentUser = DB.getCurrentUser();
-    var isStaff = currentUser && currentUser.role !== 'admin';
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isStaff = currentUser && !isAdminUser();
+    var isAdmin = isAdminUser();
     // Selector hỗ trợ cả .fund-source-row (pos.html) và .cost-fund-source (index.html)
     var fundSourceRow = document.querySelector('.fund-source-row, .cost-fund-source');
     if (fundSourceRow) {
@@ -310,7 +310,7 @@ function _renderIngredientGrid(container, list) {
     }
 
     var currentUser = DB.getCurrentUser();
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isAdmin = isAdminUser();
 
     var html = '';
     for (var i = 0; i < list.length; i++) {
@@ -407,7 +407,7 @@ function renderWasteTypeList() {
     }
 
     var currentUser = DB.getCurrentUser();
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isAdmin = isAdminUser();
 
     var html = '';
     for (var i = 0; i < wasteCats.length; i++) {
@@ -483,8 +483,8 @@ function saveExpense() {
 
     // Cảnh báo admin khi dùng Két POS
     var currentUser = DB.getCurrentUser();
-    var isAdminUser = currentUser && currentUser.role === 'admin';
-    if (isAdminUser && fundSource === 'pos_cash') {
+    var _isAdmin = isAdminUser();
+    if (_isAdmin && fundSource === 'pos_cash') {
         var self = this;
         _showConfirmModal(
             '⚠️ Bạn đang dùng <strong>Két POS</strong> (tiền tại quầy).<br><br>Nhấn OK để xác nhận, hoặc Hủy để chuyển sang Quản lý thanh toán.',
@@ -884,6 +884,12 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
                 createdAt: new Date().toISOString()
             });
         }
+        // FIX: Dispatch pos_cash_update để cập nhật realtime Két POS ngay lập tức
+        try {
+            var evt = document.createEvent('CustomEvent');
+            evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'expense', fundSource: fundSource } });
+            window.dispatchEvent(evt);
+        } catch(e) {}
         return loadExpenseData();
     }).then(function() {
         showToast('✅ Đã thêm chi phí nguyên liệu ' + formatMoney(amount), 'success');
@@ -987,6 +993,12 @@ function saveWasteExpense(categoryName, amount, fundSource) {
                     createdAt: new Date().toISOString()
                 });
             }
+            // FIX: Dispatch pos_cash_update để cập nhật realtime Két POS ngay lập tức
+            try {
+                var evt = document.createEvent('CustomEvent');
+                evt.initCustomEvent('pos_cash_update', true, true, { detail: { source: 'expense', fundSource: fundSource } });
+                window.dispatchEvent(evt);
+            } catch(e) {}
             return loadExpenseData();
         }).then(function() {
             showToast('✅ Đã thêm chi phí ' + formatMoney(amount), 'success');
@@ -1066,7 +1078,7 @@ function renderExpensesByDate(dateKey) {
 
     var allTx = expenseData.transactions || [];
     var currentUser = DB.getCurrentUser();
-    var isAdminUser = currentUser && currentUser.role === 'admin';
+    var _isAdmin = isAdminUser();
     var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
 
     var filtered = [];
@@ -1074,7 +1086,7 @@ function renderExpensesByDate(dateKey) {
         var tx = allTx[i];
         if (tx && tx.dateKey === dateKey && !tx.deleted) {
             // Nhân viên: chỉ thấy giao dịch dùng Két POS (pos_cash)
-            if (!isAdminUser && tx.fundSource !== 'pos_cash') continue;
+            if (!_isAdmin && tx.fundSource !== 'pos_cash') continue;
             filtered.push(tx);
         }
     }
@@ -1124,7 +1136,7 @@ function renderExpensesByDate(dateKey) {
         // Phân quyền:
         // - Admin: sửa/xóa được tất cả, có long-press context menu
         // - Staff: chỉ sửa/xóa được chi phí hôm nay (dateKey === today)
-        var canEdit = isAdminUser || (dateKey === today);
+        var canEdit = _isAdmin || (dateKey === today);
         var actionsHtml = '';
         if (canEdit) {
             // Cả admin và staff đều dùng context menu (click để mở)
@@ -1434,7 +1446,7 @@ function _showAdminContextMenu(txId, event) {
     if (!tx) return;
 
     var currentUser = DB.getCurrentUser();
-    var isAdmin = currentUser && currentUser.role === 'admin';
+    var isAdmin = isAdminUser();
 
     _adminContextTxId = txId;
     _adminContextMode = 'single';
@@ -1676,7 +1688,7 @@ var _adminIngredientMergeMode = false;
 
 function _adminShowIngredientContext(ingredientId, event) {
     var currentUser = DB.getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || !isAdminUser()) return;
 
     _adminIngredientContextId = ingredientId;
     _adminIngredientSelectedIds = [ingredientId];
@@ -2099,7 +2111,7 @@ var _adminWasteMergeMode = false;
 
 function _adminShowWasteContext(wasteId, event) {
     var currentUser = DB.getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!currentUser || !isAdminUser()) return;
 
     _adminWasteContextId = wasteId;
     _adminWasteSelectedIds = [wasteId];
@@ -2496,7 +2508,7 @@ function renderMonthExpenseTotal() {
 
     var allTx = expenseData.transactions || [];
     var currentUser = DB.getCurrentUser();
-    var isAdminUser = currentUser && currentUser.role === 'admin';
+    var _isAdmin = isAdminUser();
     var now = new Date();
     // Dùng Date.UTC để tính start/end tháng đúng VN timezone
     var start = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1)).toISOString().slice(0, 10);
@@ -2508,7 +2520,7 @@ function renderMonthExpenseTotal() {
         var tx = allTx[i];
         if (tx && !tx.deleted && tx.dateKey >= start && tx.dateKey <= end) {
             // Nhân viên: chỉ thấy giao dịch dùng Két POS (pos_cash)
-            if (!isAdminUser && tx.fundSource !== 'pos_cash') continue;
+            if (!_isAdmin && tx.fundSource !== 'pos_cash') continue;
             monthTxs.push(tx);
         }
     }
@@ -2642,8 +2654,8 @@ function editExpense(id) {
 
     // Phân quyền: admin sửa được tất cả, staff chỉ sửa được chi phí hôm nay
     var currentUser = DB.getCurrentUser();
-    var isAdminUser = currentUser && currentUser.role === 'admin';
-    if (!isAdminUser) {
+    var _isAdmin = isAdminUser();
+    if (!_isAdmin) {
         var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
         if (tx.dateKey !== today) {
             showToast('Bạn chỉ được sửa chi phí trong ngày hôm nay!', 'warning');
@@ -2764,8 +2776,8 @@ function deleteExpense(id) {
 
     // Phân quyền: admin xóa được tất cả, staff chỉ xóa được chi phí hôm nay
     var currentUser = DB.getCurrentUser();
-    var isAdminUser = currentUser && currentUser.role === 'admin';
-    if (!isAdminUser) {
+    var _isAdmin = isAdminUser();
+    if (!_isAdmin) {
         var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
         if (tx.dateKey !== today) {
             showToast('Bạn chỉ được xóa chi phí trong ngày hôm nay!', 'warning');

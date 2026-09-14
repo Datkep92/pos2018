@@ -144,7 +144,10 @@
             var detail = e.detail;
             if (!detail || !detail.collection) return;
             if (_selectedCloseDate) return;
-            if (detail.collection === 'transactions' || detail.collection === 'tables' || detail.collection === 'cost_transactions') {
+            // Lắng nghe tất cả collection liên quan đến POS cash:
+            // transactions, tables, cost_transactions, manager_cash_pickups
+            if (detail.collection === 'transactions' || detail.collection === 'tables' ||
+                detail.collection === 'cost_transactions' || detail.collection === 'manager_cash_pickups') {
                 loadPosCashData();
             }
         } catch (e) {
@@ -165,6 +168,99 @@
     window.addEventListener('db_update', _onPosCashDbUpdate);
     window.removeEventListener('pos_cash_update', _onPosCashLocalUpdate);
     window.addEventListener('pos_cash_update', _onPosCashLocalUpdate);
+})();
+
+// ============================================================
+// LẮNG NGHE REALTIME: cost_transactions + manager_cash_pickups
+// Đăng ký NGAY KHI LOAD, không phụ thuộc vào tab Settings
+// Đảm bảo thiết bị khác nhận được realtime khi có thay đổi
+// ============================================================
+(function _initGlobalRealtime() {
+    // Đợi Firebase sẵn sàng rồi mới đăng ký listener
+    var _waitForFirebase = setInterval(function() {
+        try {
+            if (typeof firebase === 'undefined' || !firebase.database) return;
+            var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : null;
+            if (!shopId) return;
+            
+            clearInterval(_waitForFirebase);
+            var dbRef = firebase.database().ref(shopId);
+            
+            // Lắng nghe cost_transactions để cập nhật cache realtime
+            dbRef.child('cost_transactions').on('child_added', function(snapshot) {
+                var key = snapshot.key;
+                var val = snapshot.val();
+                if (val) {
+                    if (!_costTxCache) _costTxCache = {};
+                    val.id = key;
+                    _costTxCache[key] = val;
+                    _costTxCacheLoaded = true;
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+            dbRef.child('cost_transactions').on('child_changed', function(snapshot) {
+                var key = snapshot.key;
+                var val = snapshot.val();
+                if (val) {
+                    if (!_costTxCache) _costTxCache = {};
+                    val.id = key;
+                    _costTxCache[key] = val;
+                    _costTxCacheLoaded = true;
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+            dbRef.child('cost_transactions').on('child_removed', function(snapshot) {
+                var key = snapshot.key;
+                if (_costTxCache && _costTxCache[key]) {
+                    delete _costTxCache[key];
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+            
+            // Lắng nghe manager_cash_pickups để cập nhật cache realtime
+            dbRef.child('manager_cash_pickups').on('child_added', function(snapshot) {
+                var key = snapshot.key;
+                var val = snapshot.val();
+                if (val) {
+                    if (!_pickupsCache) _pickupsCache = {};
+                    val.id = key;
+                    _pickupsCache[key] = val;
+                    _pickupsCacheLoaded = true;
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+            dbRef.child('manager_cash_pickups').on('child_changed', function(snapshot) {
+                var key = snapshot.key;
+                var val = snapshot.val();
+                if (val) {
+                    if (!_pickupsCache) _pickupsCache = {};
+                    val.id = key;
+                    _pickupsCache[key] = val;
+                    _pickupsCacheLoaded = true;
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+            dbRef.child('manager_cash_pickups').on('child_removed', function(snapshot) {
+                var key = snapshot.key;
+                if (_pickupsCache && _pickupsCache[key]) {
+                    delete _pickupsCache[key];
+                    if (!_selectedCloseDate) {
+                        loadPosCashData();
+                    }
+                }
+            });
+        } catch(e) {}
+    }, 1000);
 })();
 
 // ============================================================
@@ -252,6 +348,16 @@ function getTodayDateKey() {
 }
 
 function initQuickCashCounter() {
+    var today = getTodayDateKey();
+
+    // TỐI ƯU: Nếu đã có dữ liệu cho ngày hôm nay trong cache, chỉ cần render lại UI
+    // Không cần gọi loadPosCashData() (6 requests Firebase/IndexedDB) và _subscribeDayClosedRealtime() (7 listeners)
+    // Logic realtime vẫn hoạt động: child_* events, db_update, pos_cash_update vẫn gọi loadPosCashData() bình thường
+    if (_posCashData && _posCashData.dateKey === today) {
+        renderCashCounter();
+        return;
+    }
+
     cashCounts = {};
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         cashCounts[CASH_DENOMS[i].value] = 0;
@@ -274,15 +380,24 @@ function initQuickCashCounter() {
 }
 
 // Lắng nghe realtime thay đổi daily_balances (chốt ngày, chênh lệch, hủy chốt...)
+// Biến cache cho cost_transactions và manager_cash_pickups
+// Giúp loadPosCashData không cần tải lại toàn bộ từ Firebase mỗi lần
+var _costTxCache = null; // { id: item, ... }
+var _pickupsCache = null; // { id: item, ... }
+var _costTxCacheLoaded = false;
+var _pickupsCacheLoaded = false;
+
 function _subscribeDayClosedRealtime() {
     try {
         var today = getTodayDateKey();
         var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
         var dbRef = firebase.database().ref(shopId);
 
-        // 1. Lắng nghe thay đổi trên daily_balances hôm nay
+        // Lắng nghe thay đổi trên daily_balances hôm nay
         // Khi nhân viên A chốt ngày (ghi difference + isClosed lên Firebase),
         // nhân viên B và admin sẽ nhận được cập nhật realtime và reload UI
+        // LƯU Ý: cost_transactions và manager_cash_pickups đã được lắng nghe
+        // bởi _initGlobalRealtime() ngay khi settings.js load (xem phần đầu file)
         dbRef.child('daily_balances/' + today).on('value', function(snapshot) {
             var data = snapshot.val();
             if (data) {
@@ -291,18 +406,6 @@ function _subscribeDayClosedRealtime() {
                 _dayClosedCache = newIsClosed;
                 // Chỉ reload nếu không đang xem ngày khác (không có _selectedCloseDate)
                 // Tránh reset về ngày hôm nay khi đang xem ngày trước đó
-                if (!_selectedCloseDate) {
-                    loadPosCashData();
-                }
-            }
-        });
-
-        // 2. Lắng nghe thay đổi trên manager_cash_pickups (Tiền QL nhận)
-        // Khi admin nhập pickup ở máy A, máy B đang mở tab Settings tự động cập nhật
-        dbRef.child('manager_cash_pickups').on('value', function(snapshot) {
-            var data = snapshot.val();
-            if (data) {
-                // Chỉ reload nếu không đang xem ngày khác
                 if (!_selectedCloseDate) {
                     loadPosCashData();
                 }
@@ -335,15 +438,55 @@ function loadPosCashData(targetDate) {
 
     // Đọc trực tiếp từ Firebase Realtime Database vì cost_transactions, daily_balances, manager_cash_pickups
     // KHÔNG được subscribe (đồng bộ) xuống IndexedDB local (xem db.js initDatabase)
+    // TỐI ƯU: Dùng cache (_costTxCache, _pickupsCache) đã được cập nhật realtime qua child_* events
+    // Chỉ tải từ Firebase nếu cache chưa có dữ liệu (lần đầu hoặc chưa có listener)
+    var costTxPromise;
+    if (_costTxCacheLoaded && _costTxCache) {
+        costTxPromise = Promise.resolve(_costTxCache);
+    } else {
+        costTxPromise = dbRef.child('cost_transactions').once('value').then(function(snapshot) {
+            var data = snapshot.val() || {};
+            _costTxCache = {};
+            for (var k in data) {
+                if (data.hasOwnProperty(k)) {
+                    var item = data[k];
+                    item.id = k;
+                    _costTxCache[k] = item;
+                }
+            }
+            _costTxCacheLoaded = true;
+            return _costTxCache;
+        });
+    }
+
+    var pickupsPromise;
+    if (_pickupsCacheLoaded && _pickupsCache) {
+        pickupsPromise = Promise.resolve(_pickupsCache);
+    } else {
+        pickupsPromise = dbRef.child('manager_cash_pickups').once('value').then(function(snapshot) {
+            var data = snapshot.val() || {};
+            _pickupsCache = {};
+            for (var k in data) {
+                if (data.hasOwnProperty(k)) {
+                    var item = data[k];
+                    item.id = k;
+                    _pickupsCache[k] = item;
+                }
+            }
+            _pickupsCacheLoaded = true;
+            return _pickupsCache;
+        });
+    }
+
     Promise.all([
         // Số dư đầu kỳ = cashKept của ngày hôm trước
         dbRef.child('daily_balances/' + prevDateStr).once('value'),
         // Doanh thu tiền mặt trong ngày (từ IndexedDB - transactions đã được subscribe)
         DB.getTransactionsByDate(today),
-        // Chi phí từ Két POS - đọc trực tiếp từ Firebase
-        dbRef.child('cost_transactions').once('value'),
-        // Tiền quản lý nhận - đọc trực tiếp từ Firebase
-        dbRef.child('manager_cash_pickups').once('value'),
+        // Chi phí từ Két POS - dùng cache nếu có, chỉ tải từ Firebase nếu chưa có
+        costTxPromise,
+        // Tiền quản lý nhận - dùng cache nếu có, chỉ tải từ Firebase nếu chưa có
+        pickupsPromise,
         // daily_balances của ngày target (đã lưu) - đọc trực tiếp từ Firebase
         dbRef.child('daily_balances/' + today).once('value'),
         // Bàn đang hoạt động
@@ -351,26 +494,24 @@ function loadPosCashData(targetDate) {
     ]).then(function(results) {
         var prevBalance = results[0].val() || {};
         var transactions = results[1] || [];
-        var allCostsSnapshot = results[2].val() || {};
-        var pickupsSnapshot = results[3].val() || {};
+        var allCostsCache = results[2] || {}; // Đã là object {id: item}
+        var pickupsCache = results[3] || {};  // Đã là object {id: item}
         var savedBalance = results[4].val() || {};
         var allTables = results[5] || [];
 
-        // Chuyển đổi Firebase snapshot object thành array
+        // Chuyển đổi cache object thành array
         var allCosts = [];
-        for (var key in allCostsSnapshot) {
-            if (allCostsSnapshot.hasOwnProperty(key)) {
-                var item = allCostsSnapshot[key];
-                item.id = key;
+        for (var key in allCostsCache) {
+            if (allCostsCache.hasOwnProperty(key)) {
+                var item = allCostsCache[key];
                 allCosts.push(item);
             }
         }
 
         var pickups = [];
-        for (var key2 in pickupsSnapshot) {
-            if (pickupsSnapshot.hasOwnProperty(key2)) {
-                var item2 = pickupsSnapshot[key2];
-                item2.id = key2;
+        for (var key2 in pickupsCache) {
+            if (pickupsCache.hasOwnProperty(key2)) {
+                var item2 = pickupsCache[key2];
                 pickups.push(item2);
             }
         }
@@ -392,6 +533,8 @@ function loadPosCashData(targetDate) {
         var transferCount = 0, transferAmount = 0;
         var grabCount = 0, grabAmount = 0;
         var debtCount = 0, debtAmount = 0;
+        var debtPaymentCount = 0, debtPaymentAmount = 0; // Khách trả nợ bằng tiền mặt/chuyển khoản
+        var prepaidCount = 0, prepaidAmount = 0; // Khách đưa trước bằng tiền mặt/chuyển khoản
         for (var i = 0; i < transactions.length; i++) {
             var tx = transactions[i];
             var amt = tx.amount || 0;
@@ -399,8 +542,17 @@ function loadPosCashData(targetDate) {
                 debtCount++;
                 debtAmount += amt;
             } else if (tx.paymentMethod === 'cash' || tx.paymentMethod === 'transfer' || tx.paymentMethod === 'grab') {
+                // Tất cả giao dịch cash/transfer/grab đều tính vào tổng doanh thu (kể cả trả nợ, prepaid)
                 totalCount++;
                 totalRevenue += amt;
+                // Thống kê riêng theo loại giao dịch
+                if (tx.type === 'debt_payment') {
+                    debtPaymentCount++;
+                    debtPaymentAmount += amt;
+                } else if (tx.type === 'prepaid') {
+                    prepaidCount++;
+                    prepaidAmount += amt;
+                }
                 if (tx.paymentMethod === 'cash') {
                     cashCount++;
                     cashRevenue += amt;
@@ -482,6 +634,10 @@ function loadPosCashData(targetDate) {
             grabAmount: grabAmount,
             debtCount: debtCount,
             debtAmount: debtAmount,
+            debtPaymentCount: debtPaymentCount,
+            debtPaymentAmount: debtPaymentAmount,
+            prepaidCount: prepaidCount,
+            prepaidAmount: prepaidAmount,
             // Bàn đang hoạt động
             activeTables: activeTables,
             activeTableTotal: activeTableTotal,
@@ -557,10 +713,11 @@ function renderCashCounter(isAdmin) {
         html += '    <button class="cash-action-btn" style="padding:4px 8px;font-size:11px;margin-left:auto;" onclick="selectCloseDate(\'' + todayStr + '\')">📅 Hôm nay</button>';
     }
     html += '  </div>';
-    // Date selector: ◀ Ngày ▶
+    // Date selector: ◀ Ngày ▶ + click vào ngày để mở date picker
     html += '  <div class="pos-cash-date-selector" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:#f8f9fa;border-radius:8px;margin-bottom:8px;">';
     html += '    <button class="cash-action-btn" style="padding:6px 10px;font-size:14px;line-height:1;" onclick="changeCloseDate(-1)" ' + (displayDate <= minDate ? 'disabled' : '') + '>◀</button>';
-    html += '    <span style="flex:1;text-align:center;font-size:14px;font-weight:600;color:#2c3e50;">' + formatDateDisplay(displayDate) + '</span>';
+    html += '    <span style="flex:1;text-align:center;font-size:14px;font-weight:600;color:#2c3e50;cursor:pointer;" onclick="document.getElementById(\'posCashDatePicker\').showPicker()">' + formatDateDisplay(displayDate) + '</span>';
+    html += '    <input type="date" id="posCashDatePicker" value="' + displayDate + '" min="' + minDate + '" max="' + todayStr + '" style="width:0;height:0;padding:0;border:none;opacity:0;position:absolute;" onchange="jumpToDate(this.value)">';
     html += '    <button class="cash-action-btn" style="padding:6px 10px;font-size:14px;line-height:1;" onclick="changeCloseDate(1)" ' + (isToday ? 'disabled' : '') + '>▶</button>';
     html += '  </div>';
 
@@ -575,19 +732,28 @@ function renderCashCounter(isAdmin) {
         html += '      <div style="flex:1 1 0;min-width:180px;">';
         html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📈 Doanh thu</div>';
         html += '        <div class="pos-cash-row" style="border-bottom:1px dashed #e2e8f0;padding-bottom:4px;margin-bottom:4px;"><span style="font-weight:600;">📊 Tổng doanh thu</span><span style="font-weight:600;">' + data.totalCount + ' đơn - ' + formatMoney(data.totalRevenue) + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn - ' + formatMoney(data.cashRevenue) + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn - ' + formatMoney(data.transferAmount) + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn - ' + formatMoney(data.grabAmount) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'cash\')" title="Xem danh sách giao dịch tiền mặt"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn - ' + formatMoney(data.cashRevenue) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'transfer\')" title="Xem danh sách giao dịch chuyển khoản"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn - ' + formatMoney(data.transferAmount) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'grab\')" title="Xem danh sách giao dịch Grab"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn - ' + formatMoney(data.grabAmount) + '</span></div>';
+        // Divider: phân cách doanh thu bán hàng và các khoản khác
+        html += '        <div style="border-top:1px dashed #cbd5e1;margin:4px 0;"></div>';
+        if (data.debtPaymentCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'debt_payment\')" title="Xem danh sách khách trả nợ"><span>💳 Khách trả nợ</span><span>' + data.debtPaymentCount + ' đơn - ' + formatMoney(data.debtPaymentAmount) + '</span></div>';
+        }
+        if (data.prepaidCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'prepaid\')" title="Xem danh sách khách đưa trước"><span>💰 Khách đưa trước</span><span>' + data.prepaidCount + ' đơn - ' + formatMoney(data.prepaidAmount) + '</span></div>';
+        }
         if (data.debtCount > 0) {
-            html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'debt\')" title="Xem danh sách giao dịch nợ"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
         }
         html += '      </div>';
 
         // ===== CỘT 2: THÔNG TIN =====
         html += '      <div style="flex:1 1 0;min-width:180px;">';
         html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📋 Thông tin</div>';
-html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span style="color:#ca8a04;font-weight:600;">' + formatMoney(data.activeTableTotal) + '</span></div>';        html += '        <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
-        html += '        <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
+html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span style="color:#ca8a04;font-weight:600;">' + (data.activeTables ? data.activeTables.length : 0) + ' bàn - ' + formatMoney(data.activeTableTotal) + '</span></div>';
+        html += '        <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showPosCostTransactions()" title="Xem danh sách chi phí Két POS"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
         html += '        <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
         html += '        <div class="pos-cash-row pos-cash-formula" style="border-top:1px dashed #e2e8f0;padding-top:4px;margin-top:4px;">';
         html += '          <span>📐 Dự kiến còn:</span>';
@@ -651,20 +817,28 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
         html += '      <div style="flex:1;min-width:180px;">';
         html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📈 Doanh thu</div>';
         html += '        <div class="pos-cash-row" style="border-bottom:1px dashed #e2e8f0;padding-bottom:4px;margin-bottom:4px;"><span style="font-weight:600;">📊 Tổng doanh thu</span><span style="font-weight:600;">' + data.totalCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.totalRevenue) : '') + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.cashRevenue) : '') + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.transferAmount) : '') + '</span></div>';
-        html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.grabAmount) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'cash\')" title="Xem danh sách giao dịch tiền mặt"><span>💵 Tiền mặt</span><span>' + data.cashCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.cashRevenue) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'transfer\')" title="Xem danh sách giao dịch chuyển khoản"><span>💳 Chuyển khoản</span><span>' + data.transferCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.transferAmount) : '') + '</span></div>';
+        html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'grab\')" title="Xem danh sách giao dịch Grab"><span>🛵 Grab</span><span>' + data.grabCount + ' đơn' + (data.isClosed ? ' - ' + formatMoney(data.grabAmount) : '') + '</span></div>';
+        // Divider: phân cách doanh thu bán hàng và các khoản khác
+        html += '        <div style="border-top:1px dashed #cbd5e1;margin:4px 0;"></div>';
+        if (data.debtPaymentCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'debt_payment\')" title="Xem danh sách khách trả nợ"><span>💳 Khách trả nợ</span><span>' + data.debtPaymentCount + ' đơn - ' + formatMoney(data.debtPaymentAmount) + '</span></div>';
+        }
+        if (data.prepaidCount > 0) {
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'prepaid\')" title="Xem danh sách khách đưa trước"><span>💰 Khách đưa trước</span><span>' + data.prepaidCount + ' đơn - ' + formatMoney(data.prepaidAmount) + '</span></div>';
+        }
         if (data.debtCount > 0) {
-            html += '        <div class="pos-cash-row" style="padding-left:8px;"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
+            html += '        <div class="pos-cash-row" style="padding-left:8px;cursor:pointer;" onclick="showPaymentMethodTransactions(\'debt\')" title="Xem danh sách giao dịch nợ"><span>📝 Nợ trong ngày</span><span>' + data.debtCount + ' đơn - ' + formatMoney(data.debtAmount) + '</span></div>';
         }
         html += '      </div>';
 
         // ===== CỘT 2: THÔNG TIN KHÁC =====
         html += '      <div style="flex:1;min-width:180px;">';
         html += '        <div style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px;">📋 Thông tin</div>';
-        html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span>' + formatMoney(data.activeTableTotal) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showActiveTablesModal()"><span>🪑 Bàn đang hoạt động</span><span>' + (data.activeTables ? data.activeTables.length : 0) + ' bàn - ' + formatMoney(data.activeTableTotal) + '</span></div>';
         html += '        <div class="pos-cash-row"><span>📂 Số dư đầu kỳ</span><span>' + formatMoney(data.openingBalance) + '</span></div>';
-        html += '        <div class="pos-cash-row"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
+        html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="showPosCostTransactions()" title="Xem danh sách chi phí Két POS"><span>🏦 Chi phí Két POS</span><span>' + data.posCostCount + ' khoản - ' + formatMoney(data.posCashExpense) + '</span></div>';
         html += '        <div class="pos-cash-row"><span>💰 QL nhận</span><span>' + formatMoney(data.managerPickupTotal) + '</span></div>';
 
         // 💵 Tổng số tiền đếm được - hiển thị khi nhân viên đã nhập mệnh giá (countedTotal > 0)
@@ -1022,6 +1196,12 @@ function saveManagerPickup() {
         remainingPosCash: remainingPosCash
     };
 
+    // Cập nhật cache ngay lập tức để loadPosCashData() thấy dữ liệu mới
+    // (vì child_added từ Firebase có thể chưa kịp gửi về)
+    if (!_pickupsCache) _pickupsCache = {};
+    _pickupsCache[pickupId] = pickupData;
+    _pickupsCacheLoaded = true;
+
     // Bước 1: Lưu vào IndexedDB qua DB.create trước -> memoryCache được cập nhật ngay
     // -> realtime subscription nhận notify -> UI cập nhật
     if (typeof DB !== 'undefined' && typeof DB.create === 'function') {
@@ -1057,6 +1237,12 @@ function deleteManagerPickup(pickupId) {
     }
 
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+
+    // Cập nhật cache ngay lập tức (xóa khỏi _pickupsCache)
+    // để loadPosCashData() không còn thấy item đã xóa
+    if (_pickupsCache && _pickupsCache[pickupId]) {
+        delete _pickupsCache[pickupId];
+    }
 
     // Bước 1: Xóa trên Firebase
     var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
@@ -1101,6 +1287,12 @@ function changeCloseDate(delta) {
     d.setDate(d.getDate() + delta);
     var newDateStr = d.toISOString().slice(0, 10);
     selectCloseDate(newDateStr);
+}
+
+// Nhảy đến ngày được chọn từ date picker
+function jumpToDate(dateStr) {
+    if (!dateStr) return;
+    selectCloseDate(dateStr);
 }
 
 // ========== NHÂN VIÊN: CHỐT NGÀY ==========
@@ -1500,6 +1692,7 @@ function initSettingsTab() {
     var staffNoteSection = document.getElementById('settingsStaffNoteSection');
     var lockSection = document.getElementById('settingsLockSection');
     var bonusFundSection = document.getElementById('settingsBonusFundSection');
+    var syncDataSection = document.getElementById('settingsSyncDataSection');
 
     // Admin: hiển thị TOÀN BỘ các section - chỉ ẩn "Ghi chú nhân viên"
     // Nhân viên: ẩn TOÀN BỘ các section - chỉ hiển thị "Ghi chú nhân viên"
@@ -1512,6 +1705,7 @@ function initSettingsTab() {
         if (chatLockField) chatLockField.style.display = '';
         if (lockSection) lockSection.style.display = '';
         if (bonusFundSection) bonusFundSection.style.display = '';
+        if (syncDataSection) syncDataSection.style.display = '';
         // Staff note section: ẩn với admin
         if (staffNoteSection) staffNoteSection.style.display = 'none';
         // Permission section: luôn ẩn (đã chuyển sang modal employees.js)
@@ -1525,6 +1719,7 @@ function initSettingsTab() {
         if (chatLockField) chatLockField.style.display = 'none';
         if (lockSection) lockSection.style.display = 'none';
         if (bonusFundSection) bonusFundSection.style.display = 'none';
+        if (syncDataSection) syncDataSection.style.display = 'none';
         if (permSection) permSection.style.display = 'none';
         // Staff note section: hiển thị cho nhân viên
         if (staffNoteSection) staffNoteSection.style.display = '';
@@ -1636,11 +1831,6 @@ function initSettingsTab() {
         } catch(e) {}
     }
 
-    // Khởi tạo Quỹ thưởng trách nhiệm (chỉ admin mới thấy)
-    if (isAdmin && typeof initBonusFund === 'function') {
-        initBonusFund();
-    }
-
     } catch(e) {
     }
 }
@@ -1650,6 +1840,54 @@ function saveStaffNote(value) {
     try {
         localStorage.setItem('staff_note', value || '');
     } catch(e) {}
+}
+
+// OPTIMIZE: Xử lý nút "Tải toàn bộ dữ liệu" trong Settings
+// Gọi forceSyncFromFirebase để tải lại tất cả collections từ Firebase
+function handleLoadAllData() {
+    var btn = document.getElementById('btnLoadAllData');
+    var statusEl = document.getElementById('loadAllDataStatus');
+    if (!btn || !statusEl) return;
+    
+    // Chống double-click
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang tải...';
+    statusEl.textContent = 'Đang tải lại dữ liệu từ Firebase...';
+    statusEl.style.color = '#888';
+    
+    if (typeof DB === 'undefined' || typeof DB.forceSyncFromFirebase !== 'function') {
+        statusEl.textContent = '❌ DB chưa sẵn sàng, vui lòng thử lại sau';
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = '📥 Tải toàn bộ dữ liệu';
+        return;
+    }
+    
+    if (typeof DB.isOnline === 'function' && !DB.isOnline()) {
+        statusEl.textContent = '❌ Không có kết nối mạng';
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = '📥 Tải toàn bộ dữ liệu';
+        return;
+    }
+    
+    // Gọi forceSyncFromFirebase - admin sẽ tải 31 ngày, employee tải ngày hiện tại
+    DB.forceSyncFromFirebase().then(function() {
+        statusEl.textContent = '✅ Hoàn tất! Đã tải lại toàn bộ dữ liệu từ Firebase.';
+        statusEl.style.color = '#22c55e';
+        btn.disabled = false;
+        btn.textContent = '📥 Tải toàn bộ dữ liệu';
+    }).catch(function(err) {
+        if (err && err.message === 'Offline') {
+            statusEl.textContent = '❌ Không có kết nối mạng';
+        } else {
+            statusEl.textContent = '❌ Lỗi: ' + (err && err.message ? err.message : 'Không xác định');
+        }
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = '📥 Tải toàn bộ dữ liệu';
+    });
 }
 
 function savePrinterIp() {
@@ -2439,29 +2677,82 @@ function showActiveTablesModal() {
         
         var modalId = 'activeTablesModal_' + Date.now();
         var html = '<div class="modal" id="' + modalId + '">' +
-            '<div class="modal-content">' +
+            '<div class="modal-content" style="max-width:600px;">' +
                 '<div class="modal-header">' +
                     '<span class="modal-title">🪑 Bàn đang hoạt động</span>' +
                     '<span class="modal-close" onclick="closeModal(\'' + modalId + '\')">&times;</span>' +
                 '</div>' +
-                '<div class="modal-body" style="max-height:60vh;overflow-y:auto;">';
+                '<div class="modal-body" style="max-height:70vh;overflow-y:auto;padding:6px 0;">';
         
         if (activeTables.length === 0) {
-            html += '<div class="empty-state">✅ Không có bàn nào đang hoạt động</div>';
+            html += '<div class="empty-state" style="text-align:center;padding:40px 16px;color:#94a3b8;font-size:15px;">✅ Không có bàn nào đang hoạt động</div>';
         } else {
-            var total = 0;
+            var grandTotal = 0;
+            
+            // Bọc trong grid
+            html += '<div class="atm-grid">';
+            
             for (var i = 0; i < activeTables.length; i++) {
                 var t = activeTables[i];
-                total += t.total || 0;
-                var displayName = t.customerName ? t.customerName : ((t.name && t.name.trim()) ? t.name : 'Bàn ' + t.id);
-                html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">' +
-                            '<span>🪑 ' + escapeHtml(displayName) + '</span>' +
-                            '<span>' + formatMoney(t.total || 0) + '</span>' +
-                        '</div>';
+                grandTotal += t.total || 0;
+                
+                var tableName = (t.name && t.name.trim()) ? t.name : 'Bàn ' + t.id;
+                
+                // Thời gian
+                var startTimeStr = '';
+                var durationStr = '';
+                if (t.startTime) {
+                    var st = new Date(t.startTime);
+                    startTimeStr = ('0' + st.getHours()).slice(-2) + ':' + ('0' + st.getMinutes()).slice(-2);
+                    var elapsed = Math.floor((Date.now() - st.getTime()) / 60000);
+                    if (elapsed < 60) {
+                        durationStr = elapsed + 'p';
+                    } else {
+                        durationStr = Math.floor(elapsed / 60) + 'h' + (elapsed % 60) + 'p';
+                    }
+                }
+                
+                var creatorStr = t.createdByName || '';
+                
+                // Card bàn
+                html += '<div class="atm-card">';
+                html += '  <div class="atm-card-header">';
+                html += '    <span class="atm-card-name">🪑 ' + escapeHtml(tableName) + '</span>';
+                html += '    <span class="atm-card-total">' + formatMoney(t.total || 0) + '</span>';
+                html += '  </div>';
+                html += '  <div class="atm-card-meta">🕐 ' + startTimeStr + ' - ' + durationStr + '</div>';
+                if (creatorStr) {
+                    html += '  <div class="atm-card-meta">👤 ' + escapeHtml(creatorStr) + '</div>';
+                }
+                
+                // Danh sách món
+                var items = t.items || [];
+                if (items.length > 0) {
+                    html += '  <div class="atm-items">';
+                    for (var j = 0; j < items.length; j++) {
+                        var item = items[j];
+                        var itemName = item.name || '';
+                        var itemQty = item.qty || 0;
+                        var itemPrice = item.price || 0;
+                        var itemTotal = itemQty * itemPrice;
+                        html += '    <div class="atm-item">';
+                        html += '      <span class="atm-item-name">' + escapeHtml(itemName) + '</span>';
+                        html += '      <span class="atm-item-qty">x' + itemQty + '</span>';
+                        html += '      <span class="atm-item-total">' + formatMoney(itemTotal) + '</span>';
+                        html += '    </div>';
+                    }
+                    html += '  </div>';
+                }
+                
+                html += '</div>';
             }
-            html += '<div style="display:flex;justify-content:space-between;padding:10px 0 0;margin-top:4px;font-weight:700;border-top:2px solid var(--border);">' +
-                        '<span>Tổng tiền bàn</span>' +
-                        '<span>' + formatMoney(total) + '</span>' +
+            
+            html += '</div>'; // end atm-grid
+            
+            // Tổng kết
+            html += '<div class="atm-grand-total">' +
+                        '<span>📊 Tổng tiền bàn</span>' +
+                        '<span>' + formatMoney(grandTotal) + '</span>' +
                     '</div>';
         }
         
@@ -2926,4 +3217,312 @@ function toggleSettingsSection(titleEl) {
         if (body) body.style.display = '';
         if (icon) icon.textContent = '▼';
     }
+}
+
+// ============================================================
+// HIỂN THỊ DANH SÁCH GIAO DỊCH THEO PHƯƠNG THỨC THANH TOÁN
+// ============================================================
+// Khi click vào 💵 Tiền mặt / 💳 Chuyển khoản / 🛵 Grab / 📝 Nợ trong ngày
+// Hiển thị modal danh sách: STT - Số tiền - SL món - Tên món
+// ============================================================
+
+// Map payment method code -> tên hiển thị và icon
+var _paymentMethodLabels = {
+    'cash': '💵 Tiền mặt',
+    'transfer': '💳 Chuyển khoản',
+    'grab': '🛵 Grab',
+    'debt': '📝 Nợ',
+    'debt_payment': '💳 Khách trả nợ',
+    'prepaid': '💰 Khách đưa trước'
+};
+
+function showPaymentMethodTransactions(paymentMethod) {
+    // Inject CSS cho pmtx modal nếu chưa có
+    if (!document.getElementById('pmtx-style')) {
+        var style = document.createElement('style');
+        style.id = 'pmtx-style';
+        style.textContent =
+            '.pmtx-header,.pmtx-row,.pmtx-footer{display:flex;align-items:center;padding:6px 8px;gap:4px;}' +
+            '.pmtx-header{background:#f8fafc;border-bottom:1px solid #e2e8f0;font-weight:600;font-size:12px;color:#64748b;position:sticky;top:0;z-index:1;}' +
+            '.pmtx-row{cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background 0.15s;}' +
+            '.pmtx-row:hover{background:#f1f5f9;}' +
+            '.pmtx-footer{background:#f8fafc;border-top:2px solid #e2e8f0;font-weight:600;font-size:13px;color:#1e293b;}' +
+            '.pmtx-col-stt{flex:0 0 36px;text-align:center;font-size:11px;color:#94a3b8;}' +
+            '.pmtx-col-time{flex:0 0 44px;text-align:center;font-size:12px;color:#64748b;}' +
+            '.pmtx-col-source{flex:0 0 80px;text-align:left;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+            '.pmtx-col-qty{flex:0 0 30px;text-align:center;font-size:12px;color:#64748b;}' +
+            '.pmtx-col-items{flex:1;text-align:left;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px;}' +
+            '.pmtx-col-amount{flex:0 0 90px;text-align:right;font-size:13px;font-weight:600;color:#0f172a;}';
+        document.head.appendChild(style);
+    }
+
+    // Lấy ngày đang xem
+    var targetDate = _selectedCloseDate || (_posCashData && _posCashData.dateKey) || getTodayDateKey();
+    var methodLabel = _paymentMethodLabels[paymentMethod] || paymentMethod;
+
+    // Đọc transactions từ IndexedDB theo ngày
+    DB.getTransactionsByDate(targetDate).then(function(transactions) {
+        if (!Array.isArray(transactions)) transactions = [];
+
+        // Lọc theo phương thức thanh toán
+        var filtered = transactions.filter(function(tx) {
+            if (tx.refunded) return false;
+            if (paymentMethod === 'debt') {
+                // Nợ: type='debt_payment' && paymentMethod='debt' (ghi nợ)
+                return tx.type === 'debt_payment' && tx.paymentMethod === 'debt';
+            }
+            if (paymentMethod === 'debt_payment') {
+                // Khách trả nợ: type='debt_payment' && paymentMethod !== 'debt' (cash/transfer)
+                return tx.type === 'debt_payment' && tx.paymentMethod !== 'debt';
+            }
+            if (paymentMethod === 'prepaid') {
+                // Khách đưa trước: type='prepaid'
+                return tx.type === 'prepaid';
+            }
+            // cash, transfer, grab: paymentMethod khớp
+            // Chỉ loại trừ ghi nợ (type='debt_payment' && paymentMethod='debt')
+            // Giữ lại trả nợ bằng tiền mặt/chuyển khoản (type='debt_payment' && paymentMethod='cash'|'transfer')
+            return tx.paymentMethod === paymentMethod && !(tx.type === 'debt_payment' && tx.paymentMethod === 'debt');
+        });
+
+        // Sắp xếp theo thời gian giảm dần (mới nhất lên đầu)
+        filtered.sort(function(a, b) {
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+
+        var modalId = 'paymentMethodTxModal_' + Date.now();
+        var html = '<div class="modal" id="' + modalId + '">' +
+            '<div class="modal-content" style="max-width:520px;">' +
+                '<div class="modal-header">' +
+                    '<span class="modal-title">' + methodLabel + ' - ' + formatDateDisplay(targetDate) + '</span>' +
+                    '<span class="modal-close" onclick="closeModal(\'' + modalId + '\')">&times;</span>' +
+                '</div>' +
+                '<div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:6px 0;">';
+
+        if (filtered.length === 0) {
+            html += '<div class="empty-state" style="text-align:center;padding:40px 16px;color:#94a3b8;font-size:15px;">📭 Không có giao dịch nào</div>';
+        } else {
+            // Header
+            html += '<div class="pmtx-header">' +
+                        '<span class="pmtx-col-stt">STT</span>' +
+                        '<span class="pmtx-col-time">Giờ</span>' +
+                        '<span class="pmtx-col-source">Nguồn</span>' +
+                        '<span class="pmtx-col-qty">SL</span>' +
+                        '<span class="pmtx-col-items">Món</span>' +
+                        '<span class="pmtx-col-amount">Tiền</span>' +
+                    '</div>';
+
+            var grandTotal = 0;
+            var grandCount = 0;
+
+            for (var i = 0; i < filtered.length; i++) {
+                var tx = filtered[i];
+                var stt = i + 1;
+                var amount = tx.amount || 0;
+                grandTotal += amount;
+
+                // Format giờ từ createdAt
+                var timeStr = '';
+                if (tx.createdAt) {
+                    var d = new Date(tx.createdAt);
+                    timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+                }
+
+                // Xác định nguồn gốc đơn hàng
+                var sourceLabel = '';
+                // Lấy tên khách hàng nếu có (cho giao dịch nợ)
+                var customerName = '';
+                if (tx.customer && tx.customer.name) {
+                    customerName = escapeHtml(tx.customer.name);
+                }
+                if (tx.type === 'dinein') {
+                    sourceLabel = '🪑 ' + escapeHtml(tx.tableName || 'Bàn');
+                } else if (tx.type === 'takeaway') {
+                    sourceLabel = '🛵 Mang đi';
+                } else if (tx.type === 'debt_payment') {
+                    // Hiển thị tên khách hàng cho giao dịch nợ
+                    sourceLabel = '📝 ' + (customerName || (tx.paymentMethod === 'debt' ? 'Ghi nợ' : 'Trả nợ'));
+                } else {
+                    sourceLabel = tx.type || '';
+                }
+
+                // Gom các món thành chuỗi
+                var itemsStr = '';
+                var totalQty = 0;
+                if (tx.items && tx.items.length) {
+                    for (var j = 0; j < tx.items.length; j++) {
+                        var item = tx.items[j];
+                        totalQty += item.qty || 0;
+                        itemsStr += escapeHtml(item.name);
+                        if (j < tx.items.length - 1) itemsStr += ', ';
+                    }
+                } else {
+                    itemsStr = '<span style="color:#94a3b8;font-style:italic;">(không có món)</span>';
+                }
+                grandCount += totalQty;
+
+                // Tạo hàng có thể click để xem chi tiết
+                html += '<div class="pmtx-row" onclick="showTransactionDetail(\'' + tx.id + '\')">' +
+                            '<span class="pmtx-col-stt">#' + stt + '</span>' +
+                            '<span class="pmtx-col-time">' + timeStr + '</span>' +
+                            '<span class="pmtx-col-source">' + sourceLabel + '</span>' +
+                            '<span class="pmtx-col-qty">' + totalQty + '</span>' +
+                            '<span class="pmtx-col-items">' + itemsStr + '</span>' +
+                            '<span class="pmtx-col-amount">' + formatMoney(amount) + '</span>' +
+                        '</div>';
+            }
+
+            // Tổng kết
+            html += '<div class="pmtx-footer">' +
+                        '<span class="pmtx-col-stt"></span>' +
+                        '<span class="pmtx-col-time"></span>' +
+                        '<span class="pmtx-col-source"></span>' +
+                        '<span class="pmtx-col-qty">' + grandCount + '</span>' +
+                        '<span class="pmtx-col-items">Tổng cộng</span>' +
+                        '<span class="pmtx-col-amount">' + formatMoney(grandTotal) + '</span>' +
+                    '</div>';
+        }
+
+        html += '    </div>' +
+            '</div>' +
+        '</div>';
+
+        // Xóa modal cũ cùng loại nếu còn
+        var oldModals = document.querySelectorAll('[id^="paymentMethodTxModal_"]');
+        for (var mi = 0; mi < oldModals.length; mi++) {
+            if (oldModals[mi].parentNode) oldModals[mi].parentNode.removeChild(oldModals[mi]);
+        }
+
+        var div = document.createElement('div');
+        div.innerHTML = html;
+        document.body.appendChild(div.firstElementChild);
+        openBottomSheet(modalId);
+    }).catch(function(err) {
+        showToast('❌ Lỗi tải dữ liệu giao dịch', 'error');
+    });
+}
+
+// ============================================================
+// HIỂN THỊ DANH SÁCH CHI PHÍ KÉT POS
+// ============================================================
+// Khi click vào 🏦 Chi phí Két POS
+// Hiển thị modal danh sách: STT - Giờ - Số tiền - Nội dung chi
+// ============================================================
+
+function showPosCostTransactions() {
+    var targetDate = _selectedCloseDate || (_posCashData && _posCashData.dateKey) || getTodayDateKey();
+
+    // TỐI ƯU: Dùng cache _costTxCache nếu đã có (được cập nhật realtime qua child_* events)
+    // Nếu cache chưa có, chỉ tải cost_transactions cho targetDate bằng orderByChild
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    var dbRef = firebase.database().ref(shopId);
+
+    var costPromise;
+    if (_costTxCacheLoaded && _costTxCache) {
+        // Dùng cache đã có, filter client-side
+        costPromise = Promise.resolve(_costTxCache);
+    } else {
+        // Chỉ tải các transaction có dateKey === targetDate (tiết kiệm băng thông)
+        // Yêu cầu index .indexOn: "dateKey" trên node cost_transactions trong Firebase Rules
+        costPromise = dbRef.child('cost_transactions').orderByChild('dateKey').equalTo(targetDate).once('value').then(function(snapshot) {
+            return snapshot.val() || {};
+        });
+    }
+
+    costPromise.then(function(allCostsSnapshot) {
+        var allCosts = [];
+        for (var key in allCostsSnapshot) {
+            if (allCostsSnapshot.hasOwnProperty(key)) {
+                var item = allCostsSnapshot[key];
+                item.id = key;
+                allCosts.push(item);
+            }
+        }
+
+        // Lọc: cùng ngày, chưa xóa, nguồn từ Két POS
+        // Nếu dùng cache, cần filter dateKey; nếu query Firebase có equalTo thì dateKey đã đúng
+        var filtered = allCosts.filter(function(c) {
+            return c.dateKey === targetDate && !c.deleted && c.fundSource === 'pos_cash';
+        });
+
+        // Sắp xếp theo thời gian giảm dần (mới nhất lên đầu)
+        filtered.sort(function(a, b) {
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+
+        var modalId = 'posCostTxModal_' + Date.now();
+        var html = '<div class="modal" id="' + modalId + '">' +
+            '<div class="modal-content" style="max-width:520px;">' +
+                '<div class="modal-header">' +
+                    '<span class="modal-title">🏦 Chi phí Két POS - ' + formatDateDisplay(targetDate) + '</span>' +
+                    '<span class="modal-close" onclick="closeModal(\'' + modalId + '\')">&times;</span>' +
+                '</div>' +
+                '<div class="modal-body" style="max-height:65vh;overflow-y:auto;padding:6px 0;">';
+
+        if (filtered.length === 0) {
+            html += '<div class="empty-state" style="text-align:center;padding:40px 16px;color:#94a3b8;font-size:15px;">📭 Không có chi phí nào</div>';
+        } else {
+            // Header
+            html += '<div class="pmtx-header">' +
+                        '<span class="pmtx-col-stt">STT</span>' +
+                        '<span class="pmtx-col-time">Giờ</span>' +
+                        '<span class="pmtx-col-items" style="flex:2;">Nội dung</span>' +
+                        '<span class="pmtx-col-amount">Tiền</span>' +
+                    '</div>';
+
+            var grandTotal = 0;
+
+            for (var i = 0; i < filtered.length; i++) {
+                var c = filtered[i];
+                var stt = i + 1;
+                var amount = c.amount || 0;
+                grandTotal += amount;
+
+                // Format giờ từ createdAt
+                var timeStr = '';
+                if (c.createdAt) {
+                    var d = new Date(c.createdAt);
+                    timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+                }
+
+                // Nội dung chi: categoryName + chi tiết (nếu là nguyên liệu)
+                var contentStr = escapeHtml(c.categoryName || '');
+                if (c.costType === 'ingredient' && c.ingredientQty && c.ingredientUnitPrice) {
+                    contentStr += ' <span style="color:#94a3b8;font-size:12px;">x' + c.ingredientQty + ' × ' + formatMoney(c.ingredientUnitPrice) + '</span>';
+                }
+
+                html += '<div class="pmtx-row">' +
+                            '<span class="pmtx-col-stt">#' + stt + '</span>' +
+                            '<span class="pmtx-col-time">' + timeStr + '</span>' +
+                            '<span class="pmtx-col-items" style="flex:2;">' + contentStr + '</span>' +
+                            '<span class="pmtx-col-amount">' + formatMoney(amount) + '</span>' +
+                        '</div>';
+            }
+
+            // Tổng kết
+            html += '<div class="pmtx-footer">' +
+                        '<span class="pmtx-col-stt"></span>' +
+                        '<span class="pmtx-col-time"></span>' +
+                        '<span class="pmtx-col-items" style="flex:2;">Tổng cộng</span>' +
+                        '<span class="pmtx-col-amount">' + formatMoney(grandTotal) + '</span>' +
+                    '</div>';
+        }
+
+        html += '    </div>' +
+            '</div>' +
+        '</div>';
+
+        // Xóa modal cũ cùng loại nếu còn
+        var oldModals = document.querySelectorAll('[id^="posCostTxModal_"]');
+        for (var mi = 0; mi < oldModals.length; mi++) {
+            if (oldModals[mi].parentNode) oldModals[mi].parentNode.removeChild(oldModals[mi]);
+        }
+
+        var div = document.createElement('div');
+        div.innerHTML = html;
+        document.body.appendChild(div.firstElementChild);
+        openBottomSheet(modalId);
+    }).catch(function(err) {
+        showToast('❌ Lỗi tải dữ liệu chi phí', 'error');
+    });
 }

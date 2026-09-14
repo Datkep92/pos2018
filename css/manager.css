@@ -20,6 +20,41 @@
     -webkit-appearance: none;
 }
 
+/* Manager View Mode Select - Bộ lọc Kỳ/Tháng/Ngày */
+#managerViewModeSelect {
+    flex: 1;
+    padding: 10px 16px;
+    border-radius: 30px;
+    border: 1.5px solid var(--primary, #3b82f6);
+    background: var(--surface, #fff);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--primary, #3b82f6);
+    text-align: center;
+    text-align-last: center;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    outline: none;
+    letter-spacing: 0.3px;
+}
+#managerViewModeSelect:hover {
+    border-color: var(--primary-dark, #2563eb);
+    box-shadow: 0 2px 6px rgba(59,130,246,0.15);
+}
+#managerViewModeSelect:focus {
+    border-color: var(--primary-dark, #2563eb);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+#managerViewModeSelect option {
+    font-weight: 500;
+    color: #333;
+    text-align: center;
+    background: #fff;
+}
+
 .manager-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -177,6 +212,240 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+}
+
+/* ============================================================
+   MASTER TAB - Quản lý hệ thống POS
+   Responsive: grid 2 cột (ngang) / 1 cột (dọc)
+   ============================================================ */
+.master-container {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 12px;
+}
+
+.master-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2e8f0;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.master-header h2 {
+    margin: 0;
+    font-size: 16px;
+    white-space: nowrap;
+}
+
+.btn-add-pos {
+    padding: 7px 14px;
+    border: none;
+    border-radius: 8px;
+    background: #f97316;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+.btn-add-pos:active {
+    opacity: 0.8;
+}
+
+/* Khi master tab active, main-content bỏ padding */
+.main-content.master-active {
+    padding: 0;
+}
+
+/* Master tab tự quản lý padding */
+#masterView {
+    padding: 0;
+}
+
+/* Grid danh sách POS */
+.master-pos-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+/* Card POS */
+.master-pos-card {
+    border-radius: 10px;
+    padding: 10px 12px;
+    transition: box-shadow 0.15s;
+}
+
+.master-pos-card:active {
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+
+.master-pos-card .pos-name-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.master-pos-card .pos-name {
+    font-weight: 600;
+    font-size: 14px;
+    word-break: break-word;
+}
+
+.master-pos-card .pos-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+.master-pos-card .pos-badge.active {
+    background: #16a34a;
+    color: #fff;
+}
+
+.master-pos-card .pos-badge.locked {
+    background: #dc2626;
+    color: #fff;
+}
+
+.master-pos-card .pos-badge.deleted {
+    background: #6366f1;
+    color: #fff;
+}
+
+.master-pos-card .pos-info-row {
+    font-size: 11px;
+    color: #64748b;
+    margin-bottom: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+}
+
+.master-pos-card .pos-info-row span {
+    white-space: nowrap;
+}
+
+.master-pos-card .pos-config-row {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    word-break: break-all;
+}
+
+/* Hàng buttons */
+.master-pos-card .pos-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.master-pos-card .pos-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #374151;
+    white-space: nowrap;
+    transition: background 0.1s, opacity 0.15s;
+    line-height: 1.3;
+}
+.master-pos-card .pos-btn:active {
+    opacity: 0.7;
+}
+.master-pos-card .pos-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.master-pos-card .pos-btn.primary {
+    background: #3b82f6;
+    color: #fff;
+    border-color: #3b82f6;
+}
+
+.master-pos-card .pos-btn.warning {
+    background: #f59e0b;
+    color: #fff;
+    border-color: #f59e0b;
+}
+
+.master-pos-card .pos-btn.success {
+    background: #16a34a;
+    color: #fff;
+    border-color: #16a34a;
+}
+
+.master-pos-card .pos-btn.danger {
+    background: #dc2626;
+    color: #fff;
+    border-color: #dc2626;
+}
+
+.master-pos-card .pos-btn.outline-orange {
+    border-color: #f97316;
+    color: #f97316;
+}
+
+.master-pos-card .pos-btn.outline-purple {
+    border-color: #6366f1;
+    color: #6366f1;
+}
+
+.master-pos-card .pos-btn.outline-yellow {
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
+.master-pos-card .pos-btn.outline-red {
+    border-color: #dc2626;
+    color: #dc2626;
+}
+
+/* Trạng thái loading/empty/error */
+.master-loading,
+.master-empty,
+.master-error {
+    padding: 30px 16px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.master-loading { color: #94a3b8; }
+.master-empty { color: #94a3b8; }
+.master-error { color: #dc2626; }
+
+/* Responsive: 2 cột trên màn hình >=600px (ngang) */
+@media (min-width: 600px) {
+    .master-pos-list {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 10px 0;
+    }
+    .master-header h2 {
+        font-size: 18px;
+    }
+}
+
+/* Responsive: 3 cột trên màn hình lớn */
+@media (min-width: 1024px) {
+    .master-pos-list {
+        grid-template-columns: 1fr 1fr 1fr;
+    }
 }
 .inv-filter-btn {
     padding: 6px 14px;
