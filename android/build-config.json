@@ -1,7 +1,7 @@
 ﻿{
     "packageName":  "com.milano.pos259",
-    "versionName":  "1.0.2",
-    "versionCode":  10002,
+    "versionName":  "1.0.3",
+    "versionCode":  10003,
     "minSdk":  21,
     "targetSdk":  34,
     "compileSdk":  34,
@@ -12,7 +12,6 @@
                       "mangdi.html",
                       "takeaway.html",
                       "quy.html",
-                      "restore-staff.html",
-                      "sync.html"
+                      "restore-staff.html"
                   ]
 }

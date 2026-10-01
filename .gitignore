@@ -10,12 +10,22 @@
 # Thu muc lam viec cua script build APK
 android/build/
 
-# File APK. Dung Release cua GitHub de phat hanh, khong luu trong repo.
-# Luu trong git se lam repo nang them moi lan phat hanh.
-dist/
-*.apk
-*.apk.sha256
+# File APK.
+#
+# CHI luu ban DANG PHAT HANH trong repo, de clone repo ve la co ngay file cai.
+# Cac ban cu van nam trong GitHub Releases.
+#
+# Luu nhieu ban APK trong git se lam repo nang dan va cham lai: moi lan phat
+# hanh la them ~460 KB vao lich su, khong xoa duoc. Release la noi dung cho
+# lich su phat hanh; day chi la ban "ban hoan chinh" de tai.
+dist/*
+!dist/milano-pos-*.apk
+!dist/milano-pos-*.apk.sha256
 *.idsig
+# Ban cu hon ban dang phat hanh
+dist/milano-pos-1.0.0.*
+dist/milano-pos-1.0.1.*
+dist/milano-pos-1.0.2.*
 
 # KHOA KY APK - TUYET DOI KHONG COMMIT
 #
