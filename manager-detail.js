@@ -1026,14 +1026,9 @@ function showManagerTotalDebtDetail() {
 }
 
 // 9. NHÂN VIÊN - Đã chuyển hoàn toàn sang employees.js (Modal quản lý)
-function showManagerEmployeeDetail() {
-    // Mở modal quản lý nhân viên từ employees.js
-    if (typeof window.openStaffManager === 'function') {
-        window.openStaffManager();
-    } else {
-        showToast('⚠️ Chưa sẵn sàng', 'warning');
-    }
-}
+// KHÔNG khai báo showManagerEmployeeDetail ở đây.
+// employees.js load SAU manager-detail.js và đã định nghĩa hàm trùng tên, nên
+// bản ở đây là code chết. Gỡ đi để không có hai hàm cùng tên trong global scope.
 
 // 10. THU NHẬP RÒNG
 // ========== QUỸ POS - CHI TIẾT ==========
@@ -1263,7 +1258,7 @@ window.showManagerExpenseDetail = showManagerExpenseDetail;
 window.showManagerDebtOccurDetail = showManagerDebtOccurDetail;
 window.showManagerAdminExpenseDetail = showManagerAdminExpenseDetail;
 window.showManagerTotalDebtDetail = showManagerTotalDebtDetail;
-window.showManagerEmployeeDetail = showManagerEmployeeDetail;
+// showManagerEmployeeDetail: export từ employees.js (hàm đã gỡ ở file này).
 window.showManagerPosFundDetail = showManagerPosFundDetail;
 window._closeManagerDetail = _closeManagerDetail;
 

@@ -1,0 +1,71 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "$shopId": {
+      "info": {
+        ".indexOn": ["updatedAt"]
+      },
+      "tables": {
+        ".indexOn": ["updatedAt"]
+      },
+      "customers": {
+        ".indexOn": ["updatedAt"]
+      },
+      "menu": {
+        ".indexOn": ["updatedAt"]
+      },
+      "menu_categories": {
+        ".indexOn": ["updatedAt"]
+      },
+      "ingredients": {
+        ".indexOn": ["updatedAt"]
+      },
+      "staffs": {
+        ".indexOn": ["updatedAt"]
+      },
+      "cost_categories": {
+        ".indexOn": ["updatedAt"]
+      },
+      "transactions": {
+        ".indexOn": ["updatedAt", "dateKey", "dateTypeKey"]
+      },
+      "daily_balances": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "cost_transactions": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "inventory_transactions": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "ingredient_transactions": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "manager_cash_pickups": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "employee_attendance": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "employee_salaries": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "delete_logs": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "drawer_sessions": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "notifications": {
+        ".indexOn": ["updatedAt", "dateKey"]
+      },
+      "bonus_fund": {
+        ".indexOn": ["updatedAt"]
+      },
+      "messages": {
+        ".indexOn": ["updatedAt"]
+      }
+    }
+  }
+}

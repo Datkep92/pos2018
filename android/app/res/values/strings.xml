@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MILANO COFFEE 259</string>
+
+    <string name="upd_title">Co ban cap nhat moi</string>
+    <string name="upd_msg">Ban moi nhat: %1$s\n\nDung tai va cai dat? Thoi gian thuong 10-20 giay.</string>
+    <string name="upd_downloading">Dang tai ban cap nhat...</string>
+    <string name="upd_checking">Dang kiem tra ban cap nhat...</string>
+    <string name="upd_yes">Cap nhat</string>
+    <string name="upd_no">Sau</string>
+    <string name="upd_cancel">Da huy</string>
+    <string name="upd_failed">Tai ban cap nhat that bai. Thu lai sau.</string>
+    <string name="upd_none">App da la ban moi nhat.</string>
+    <string name="upd_need_permission">Can mo quyen cai dat ung dung de cap nhat.</string>
+    <string name="upd_no_browser">Khong tim thay trinh duyet de mo file cai dat.</string>
+</resources>

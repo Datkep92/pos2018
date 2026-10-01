@@ -2,20 +2,51 @@
 // Tách từ pos.js - ES5, tương thích Android 6, iOS 12
 
 // ========== KIỂM TRA KHÓA GIAO DỊCH ==========
+// Đọc 1 giá trị số từ window.shopConfig, có chặn null/NaN.
+// BẮT BUỘC phải chặn null: saveLockConfig() (settings.js) ghi null vào
+// shopConfig.lockStartHour khi admin xoá ô (để XOÁ giá trị đã lưu).
+// Nếu đọc bằng `!== undefined` thì lockStartHour = null, và
+// `hourVN >= null` <=> `hourVN >= 0` => LUÔN TRUE => MỌI giao dịch (kể cả
+// 10h sáng) bị coi là đã khóa => nhân viên không hoàn tác được gì.
+function _lockCfgNum(key, def) {
+    var v = window.shopConfig ? window.shopConfig[key] : undefined;
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    // Chấp nhận chuỗi số vì Firebase/localStorage có thể trả string
+    if (typeof v === 'string' && v.trim() !== '') {
+        var n = parseInt(v, 10);
+        if (!isNaN(n)) return n;
+    }
+    return def;
+}
+
+// Lấy giờ Việt Nam (UTC+7) từ một Date. Dùng chung với quyết định khóa để
+// hiển thị và logic khóa không lệch nhau.
+function _getVnTimePartsOf(dateLike) {
+    var d = new Date(dateLike);
+    if (typeof _getVietnamTimeParts === 'function') {
+        return _getVietnamTimeParts(d);
+    }
+    return { hour: (d.getUTCHours() + 7) % 24, minute: d.getUTCMinutes() };
+}
+
 // Kiểm tra xem giao dịch có bị khóa hoàn tác không, dựa trên thời điểm thanh toán (createdAt)
 function isTransactionLocked(trans) {
     if (!trans) return false;
     
     // Lấy thời gian thanh toán từ createdAt
+    // FIX: dùng chung _getVietnamTimeParts() của tables.js thay vì tự tính
+    // "getUTCHours()+7" ở đây. Hai chỗ tự tính dễ lệch nhau khi sửa, và lệch
+    // 1 giờ là giao dịch bị khoá hoàn tác oan (hoặc không bị khoá khi phải khoá).
     var payTime = new Date(trans.createdAt || trans.date);
-    var hourVN = (payTime.getUTCHours() + 7) % 24;
-    var minVN = payTime.getUTCMinutes();
+    var vt = _getVnTimePartsOf(payTime);
+    var hourVN = vt.hour;
+    var minVN = vt.minute;
     
-    // Đọc cấu hình lock từ shopConfig (giống tables.js)
-    var lockStartHour = (window.shopConfig && window.shopConfig.lockStartHour !== undefined) ? window.shopConfig.lockStartHour : 22;
-    var lockEndHour = (window.shopConfig && window.shopConfig.lockEndHour !== undefined) ? window.shopConfig.lockEndHour : 5;
-    var lockEndMinute = (window.shopConfig && window.shopConfig.lockEndMinute !== undefined) ? window.shopConfig.lockEndMinute : 30;
-    var lockHours = (window.shopConfig && window.shopConfig.tableLockHours !== undefined) ? window.shopConfig.tableLockHours : 5;
+    // Đọc cấu hình lock từ shopConfig, chặn null/NaN
+    var lockStartHour = _lockCfgNum('lockStartHour', 22);
+    var lockEndHour = _lockCfgNum('lockEndHour', 5);
+    var lockEndMinute = _lockCfgNum('lockEndMinute', 30);
+    var lockHours = _lockCfgNum('tableLockHours', 5);
     
     // Điều kiện 1: Thanh toán trong khung giờ khóa cố định (vd: 22h-5h30)
     // lockStartHour:00 - 23h59
@@ -23,15 +54,29 @@ function isTransactionLocked(trans) {
     // 00h00 - lockEndHour:lockEndMinute
     if (hourVN < lockEndHour || (hourVN === lockEndHour && minVN < lockEndMinute)) return true;
     
+    // Điều kiện 3: HIỆN TẠI có đang trong khung giờ khóa không?
+    // Điều kiện 1 chỉ xét giờ THANH TOÁN. Kịch bản lỗ hổng: khách thanh toán
+    // lúc 21:00 (chưa khóa), 23:30 quản lý đã khóa toàn bộ -> giao dịch đó vẫn
+    // hoàn tác không cần mật khẩu, và doRefund còn gọi restoreTable() tức tạo
+    // lại bàn trong khung giờ khóa - việc mà tables.js / split-transfer-merge.js
+    // không bao giờ cho phép.
+    var nowParts = _getVnTimePartsOf(new Date());
+    if (nowParts.hour >= lockStartHour ||
+        nowParts.hour < lockEndHour ||
+        (nowParts.hour === lockEndHour && nowParts.minute < lockEndMinute)) return true;
+
     // Điều kiện 2: Nếu là bàn (dinein), kiểm tra thời gian ngồi quá giới hạn
     if (trans.type === 'dinein' && trans.tableId) {
         // Dùng tableTime nếu có (vd: "2h15p", "5h30p")
         if (trans.tableTime) {
             var match = trans.tableTime.match(/(\d+)h(\d*)p?/);
             if (match) {
+                // Dùng >= để khớp với tables.js (`elapsed >= lockMs`).
+                // Trước đây dùng `hours > lockHours || (=== && mins > 0)` nên
+                // bàn ngồi ĐÚNG 5h00 (tableTime = "5h") bị coi là CHƯA khóa ở
+                // đây, trong khi chính bàn đó đang bị tables.js khóa.
                 var hours = parseInt(match[1], 10);
-                var mins = parseInt(match[2] || '0', 10);
-                if (hours > lockHours || (hours === lockHours && mins > 0)) return true;
+                if (hours >= lockHours) return true;
             }
         }
         // Fallback: dùng originalCreatedAt (thời gian gốc) nếu có
@@ -39,6 +84,22 @@ function isTransactionLocked(trans) {
             var startTime = new Date(trans.originalCreatedAt);
             var elapsed = payTime.getTime() - startTime.getTime();
             if (elapsed >= lockHours * 60 * 60 * 1000) return true;
+        }
+    } else if (trans.type === 'debt_payment' && trans.tableId) {
+        // FIX: ghi nợ tại bàn cũng có tableTime nhưng trước đây bị bỏ qua vì điều
+        // kiện chỉ nhận type === 'dinein'. -> ghi nợ của bàn đã ngồi lâu (>5h) vẫn
+        // hoàn tác được tuỳ ý, lệch với thanh toán tiền mặt của cùng bàn đó.
+        if (trans.tableTime) {
+            var dm = trans.tableTime.match(/(\d+)h(\d*)p?/);
+            if (dm) {
+                // >= để khớp với tables.js (xem giải thích ở nhánh dinein)
+                var dh = parseInt(dm[1], 10);
+                if (dh >= lockHours) return true;
+            }
+        }
+        if (trans.startTime) {
+            var st = new Date(trans.startTime);
+            if (payTime.getTime() - st.getTime() >= lockHours * 60 * 60 * 1000) return true;
         }
     }
     
@@ -74,9 +135,14 @@ function _renderTxItem(tx, index) {
     var isRefunded = tx.refunded === true;
     var txDate = new Date(tx.createdAt || tx.date);
     var elapsedTime = _getElapsedTime(tx.createdAt || tx.date);
-    // FIX: Format giờ 12h với AM/PM thay vì 24h
-    var hours = txDate.getHours();
-    var minutes = txDate.getMinutes();
+    // Dùng GIỜ VIỆT NAM (UTC+7) cho phần hiển thị, giống hệt quyết định khóa.
+    // Trước đây dùng txDate.getHours() = giờ LOCAL CỦA MÁY. Máy đặt UTC (phổ
+    // biến với tablet Android rẻ) thì mọi giao dịch lệch -7 giờ, trong khi
+    // isTransactionLocked vẫn dùng giờ VN => nhân viên thấy giờ không khớp
+    // với trạng thái khóa.
+    var vt = _getVnTimePartsOf(txDate);
+    var hours = vt.hour;
+    var minutes = vt.minute;
     var ampm = hours >= 12 ? 'PM' : 'AM';
     var h12 = hours % 12;
     if (h12 === 0) h12 = 12;
@@ -169,15 +235,12 @@ function _renderTxItem(tx, index) {
         if (!isAdmin) {
             var dateEl = document.getElementById('historyDate');
             var viewingDate = dateEl ? dateEl.getAttribute('data-date') : '';
-            var todayStr = '';
-            try {
-                var now = new Date();
-                var y = now.getFullYear();
-                var m = ('0' + (now.getMonth() + 1)).slice(-2);
-                var d = ('0' + now.getDate()).slice(-2);
-                todayStr = y + '-' + m + '-' + d;
-            } catch(e) { todayStr = ''; }
-            if (viewingDate && viewingDate !== todayStr) canRefund = false;
+            // Dùng chung _toLocalDateStr với addHistory() và db.js (cùng dùng giờ
+            // local của máy) để cổng ngày khớp với dateKey của giao dịch.
+            var todayStr = _toLocalDateStr(new Date());
+            // fail-CLOSED: thiếu data-date thì KHÔNG cho phép (trước đây
+            // `if (viewingDate && ...)` cho phép khi thiếu data-date)
+            canRefund = (viewingDate === todayStr);
         }
         if (canRefund) {
             swipeHtml += '<div class="history-swipe-actions"><button class="swipe-refund-btn" onclick="event.stopPropagation(); refundTransaction(\'' + tx.id + '\')">↩️ Hoàn tác</button></div>';
@@ -216,6 +279,12 @@ function _renderTxItem(tx, index) {
 // Bỏ dấu tiếng Việt, chuẩn hóa khoảng trắng để tìm kiếm
 function _removeDiacritics(str) {
     if (!str) return '';
+    // Bàn phím Android hay nhập dạng NFD (dấu tách rời U+0300-U+036F) trong khi
+    // dữ liệu lưu NFC => gõ "to" không khớp "tố". Chuẩn hoá về NFD rồi bỏ
+    // nhóm dấu trước khi thay map.
+    if (str.normalize) {
+        try { str = str.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+    }
     var map = {
         'à':'a','á':'a','ạ':'a','ả':'a','ã':'a','â':'a','ầ':'a','ấ':'a','ậ':'a','ẩ':'a','ẫ':'a','ă':'a','ằ':'a','ắ':'a','ặ':'a','ẳ':'a','ẵ':'a',
         'è':'e','é':'e','ẹ':'e','ẻ':'e','ẽ':'e','ê':'e','ề':'e','ế':'e','ệ':'e','ể':'e','ễ':'e',
@@ -245,7 +314,9 @@ function onHistorySearch() {
     var input = document.getElementById('historySearchInput');
     if (!input) return;
     var keyword = _normalizeKeyword(input.value);
-    
+    // Nhớ từ khóa để áp lại sau mỗi lần _renderHistoryCore thay innerHTML
+    _historySearchKeyword = keyword;
+
     var container = document.getElementById('historyList');
     if (!container) return;
     
@@ -277,15 +348,21 @@ function onHistorySearch() {
         if (normalizedText.indexOf(keyword) !== -1) {
             match = true;
         } else {
-            // Kiểm tra số tiền: nếu keyword là số, so sánh với amount
-            var amountNum = parseInt(keyword.replace(/[^0-9]/g, ''), 10);
-            if (amountNum > 0) {
-                // Tìm số tiền trong item (format: + 50,000 hoặc - 20,000)
-                var amountMatch = itemText.match(/[\+\-]\s*([\d,]+)/);
-                if (amountMatch) {
-                    var itemAmount = parseInt(amountMatch[1].replace(/,/g, ''), 10);
-                    if (itemAmount === amountNum) {
-                        match = true;
+            // Kiểm tra số tiền: chỉ chạy khi keyword CHỈ gồm chữ số.
+            // Trước đây parseInt(keyword.replace(/[^0-9]/g,'')) gộp mọi chữ số
+            // trong keyword, nên "combo 21" bị coi như tìm số tiền 21.
+            if (/^\d[\d.\s]*$/.test(keyword)) {
+                var amountNum = parseInt(keyword.replace(/[^\d]/g, ''), 10);
+                if (amountNum > 0) {
+                    // formatMoney dùng toLocaleString('vi-VN') => "50.000đ" (DẤU CHẤM).
+                    // Regex cũ /[\+\-]\s*([\d,]+)/ chỉ bắt được "50" trong "50.000"
+                    // => tìm số tiền >= 1000 luôn hỏng, chỉ số < 1000 mới ra kết quả.
+                    var amountMatch = itemText.match(/[\+\-]\s*([\d.,\s]*\d)/);
+                    if (amountMatch) {
+                        var itemAmount = parseInt(amountMatch[1].replace(/[^\d]/g, ''), 10);
+                        if (itemAmount === amountNum) {
+                            match = true;
+                        }
                     }
                 }
             }
@@ -317,6 +394,15 @@ function onHistorySearch() {
     }
 }
 
+// Số thứ tự render + filter/từ khóa đang dùng.
+// - _historyRenderSeq: chống 2 render khác ngày chạy chồng nhau (xem _renderHistoryCore)
+// - _historyFilter: nhớ filter đang bật, vì chip nhân viên được dựng lại mỗi
+//   lần render nên đọc trạng thái từ DOM sẽ mất.
+// - _historySearchKeyword: giữ từ khóa tìm kiếm qua các lần render lại.
+var _historyRenderSeq = 0;
+var _historyFilter = 'all';
+var _historySearchKeyword = '';
+
 // FIX: Gộp renderHistoryByDate và renderHistoryByDateStr thành 1 hàm core duy nhất
 // để tránh duplicate code ~160 dòng
 function _renderHistoryCore(dateStr) {
@@ -325,6 +411,15 @@ function _renderHistoryCore(dateStr) {
         console.warn('⚠️ _renderHistoryCore: #historyDate not found in DOM');
         return;
     }
+    var mySeq = ++_historyRenderSeq;
+
+    // Đổi ngày -> bỏ từ khóa tìm kiếm cũ (đang tìm trong ngày khác vô nghĩa)
+    if (dateEl.getAttribute('data-date') !== dateStr) {
+        _historySearchKeyword = '';
+        var searchEl = document.getElementById('historySearchInput');
+        if (searchEl) searchEl.value = '';
+    }
+
     dateEl.innerText = formatDateDisplay(dateStr);
     dateEl.setAttribute('data-date', dateStr);
     
@@ -332,8 +427,15 @@ function _renderHistoryCore(dateStr) {
     // HTML dùng filter-chip buttons, không có <select>
     var activeChip = document.querySelector('#historyFilterChips .filter-chip.active, #historyStaffChips .filter-chip.active');
     var filter = activeChip ? activeChip.getAttribute('data-filter') : 'all';
+    _historyFilter = filter;
     
     DB.getTransactionsByDate(dateStr).then(function(transactions) {
+        // Bỏ qua nếu đã có render mới hơn (bấm ◀ rồi ▶ nhanh: render chậm của
+        // ngày cũ có thể tới sau và ghi đè list của ngày mới, trong khi header
+        // đã hiện ngày mới -> người dùng bấm Hoàn tác nhầm ngày).
+        if (mySeq !== _historyRenderSeq) return;
+        var curDate = document.getElementById('historyDate');
+        if (curDate && curDate.getAttribute('data-date') !== dateStr) return;
         // Lấy danh sách tên nhân viên duy nhất từ các giao dịch
         var staffNames = [];
         var staffMap = {};
@@ -349,18 +451,27 @@ function _renderHistoryCore(dateStr) {
         // FIX: Cập nhật staff chips vào #historyStaffChips thay vì <select> options
         // Các chip này sẽ xử lý click qua event delegation (xem pos-app.js)
         var staffChipsContainer = document.getElementById('historyStaffChips');
-if (staffChipsContainer) {
-    staffChipsContainer.innerHTML = '';
-    if (staffNames.length > 0) {
-        for (var i = 0; i < staffNames.length; i++) {
-            var chip = document.createElement('button');
-            chip.className = 'filter-chip staff-chip';
-            chip.setAttribute('data-filter', 'staff:' + staffNames[i]);
-            chip.textContent = '👤'; // chỉ icon
-            staffChipsContainer.appendChild(chip);
+        if (staffChipsContainer) {
+            staffChipsContainer.innerHTML = '';
+            if (staffNames.length > 0) {
+                for (var i = 0; i < staffNames.length; i++) {
+                    var chip = document.createElement('button');
+                    // Tên class đúng theo CSS (css/pos-base.css có .filter-chip-staff,
+                    // không có .staff-chip) + có title để phân biệt từng nhân viên
+                    chip.className = 'filter-chip filter-chip-staff';
+                    chip.setAttribute('data-filter', 'staff:' + staffNames[i]);
+                    chip.textContent = '👤';
+                    chip.title = staffNames[i];
+                    // Giữ lại chip đang active. Trước đây innerHTML = '' xoá cả chip
+                    // active, nên lần render sau không tìm thấy .filter-chip.active
+                    // => filter nhân viên mất hiệu lực im lặng.
+                    if (filter === 'staff:' + staffNames[i]) {
+                        chip.classList.add('active');
+                    }
+                    staffChipsContainer.appendChild(chip);
+                }
+            }
         }
-    }
-}
         
         // FIX: Không cần khôi phục giá trị select, dùng filter từ active chip
         
@@ -406,8 +517,33 @@ if (staffChipsContainer) {
         if (!container) return;
 
         if (transactions.length === 0) {
-            container.innerHTML = '<div class="empty-state">📭 Không có giao dịch nào trong ngày</div>';
+            // Nhánh rỗng: phân biệt "ngày này không có giao dịch" với
+            // "bộ lọc không khớp giao dịch nào". Trước đây luôn hiện
+            // "Không có giao dịch nào trong ngày" -> người dùng tưởng mất dữ liệu.
+            var emptyText = (filter && filter !== 'all')
+                ? '🔍 Không có giao dịch nào khớp bộ lọc'
+                : '📭 Không có giao dịch nào trong ngày';
+            container.innerHTML = '<div class="empty-state">' + emptyText + '</div>';
             container.className = 'history-list';
+            // Dùng nhãn đã bị giấu bởi bộ lọc: cho phép bỏ lọc bằng 1 chạm
+            if (filter && filter !== 'all') {
+                // Dùng class có thật trong CSS (css/pos-base.css có .filter-chip,
+                // .btn-outline; KHÔNG có .btn-secondary)
+                var clearBtn = document.createElement('button');
+                clearBtn.className = 'filter-chip';
+                clearBtn.setAttribute('data-filter', 'all');
+                clearBtn.textContent = '🔄 Xoá bộ lọc';
+                clearBtn.style.marginTop = '8px';
+                clearBtn.onclick = function() {
+                    var chips = document.querySelectorAll('#historyFilterChips .filter-chip, #historyStaffChips .filter-chip');
+                    for (var c = 0; c < chips.length; c++) chips[c].classList.remove('active');
+                    var allChip = document.querySelector('#historyFilterChips .filter-chip[data-filter="all"]');
+                    if (allChip) allChip.classList.add('active');
+                    _historyFilter = 'all';
+                    renderHistoryByDate(currentHistoryDate);
+                };
+                container.appendChild(clearBtn);
+            }
             return;
         }
 
@@ -422,6 +558,11 @@ if (staffChipsContainer) {
             if (tx.refunded) continue;
             if (tx.type === 'credit') continue;
             if (tx.type === 'delete_table') continue;
+            // Tiền khách NẠP TRƯỚC không phải doanh thu.
+            // customers.js tạo transaction type:'prepaid' với amount = số tiền
+            // khách nạp. Trước đây không chặn nên bị cộng vào "Tổng" mà
+            // nhân viên/quản lý dùng để đối chiếu cuối ngày.
+            if (tx.type === 'prepaid') continue;
             // Nếu filter = 'all', bỏ qua giao dịch debt (vì đã có bộ lọc riêng)
             if (!isDebtFilter && tx.type === 'debt_payment' && tx.paymentMethod === 'debt') continue;
             totalCount++;
@@ -430,11 +571,13 @@ if (staffChipsContainer) {
         // Phân quyền: admin thấy tổng tiền, staff chỉ thấy số lượng
         var currentUser = DB.getCurrentUser();
         var isAdmin = currentUser && isAdminUser();
+        // Nhãn nói rõ đang tính theo bộ lọc nào, tránh tưởng luôn là tổng cả ngày
+        var totalLabel = (filter === 'all') ? 'Tổng' : 'Tổng (theo bộ lọc)';
         var summaryHtml = '';
         if (isAdmin) {
-            summaryHtml = '<div class="history-summary">📊 Tổng: <strong>' + totalCount + ' giao dịch</strong> - <strong>' + formatMoney(totalAmount) + '</strong></div>';
+            summaryHtml = '<div class="history-summary">📊 ' + totalLabel + ': <strong>' + totalCount + ' giao dịch</strong> - <strong>' + formatMoney(totalAmount) + '</strong></div>';
         } else {
-            summaryHtml = '<div class="history-summary">📊 Tổng: <strong>' + totalCount + ' giao dịch</strong></div>';
+            summaryHtml = '<div class="history-summary">📊 ' + totalLabel + ': <strong>' + totalCount + ' giao dịch</strong></div>';
         }
 
         // Luôn hiển thị 1 hàng dọc
@@ -444,11 +587,20 @@ if (staffChipsContainer) {
         }
         container.innerHTML = html;
         _initHistorySwipe();
+
+        // Áp lại từ khóa tìm kiếm sau mỗi lần render.
+        // onHistorySearch() chỉ lọc bằng style.display trên DOM hiện tại, nên
+        // innerHTML vừa thay sẽ xoá sạch kết quả lọc: ô tìm kiếm còn chữ nhưng
+        // list lại hiện tất cả. Rất dễ xảy ra vì realtime render lại ~200-300ms.
+        if (_historySearchKeyword) {
+            onHistorySearch();
+        }
     }).catch(function(err) {
+        if (mySeq !== _historyRenderSeq) return;
         console.error('❌ _renderHistoryCore error:', err);
         var container = document.getElementById('historyList');
         if (container) {
-            container.innerHTML = '<div class="empty-state">⚠️ Lỗi tải dữ liệu: ' + (err.message || 'unknown') + '</div>';
+            container.innerHTML = '<div class="empty-state">⚠️ Lỗi tải dữ liệu: ' + escapeHtml(err.message || 'unknown') + '</div>';
         }
     });
 }
@@ -495,8 +647,10 @@ function showTransactionDetail(transactionId) {
         else if (tx.type === 'takeaway') typeName = 'Mang đi';
         else if (tx.type === 'grab') typeName = 'Grab';
         else if (isCredit) typeName = '💰 Tiền dư (trả trước)';
+        else if (tx.type === 'prepaid') typeName = '💵 Khách đưa trước';
         else if (isDebtRecord) typeName = '📝 Ghi nợ (mua chịu)';
         else if (isDebtPayment) typeName = '💵 Thanh toán nợ (trả tiền)';
+        else typeName = tx.type || 'Khác';
         
         var paymentMethodText = '';
         if (isDeleteTable) paymentMethodText = '🗑️ Xóa bàn';
@@ -588,6 +742,13 @@ function showTransactionDetail(transactionId) {
                         break;
                     }
                 }
+                // Fallback: bàn đã bị XOÁ khỏi DB sau khi thanh toán
+                // (tables.js gọi DB.remove khi đóng bàn) nên cachedTables chỉ
+                // chứa bàn ĐANG HOẠT ĐỘNG => vòng dò trên không tìm thấy.
+                // tx.tableTime ("2h15p") vẫn còn trong transaction, dùng làm dự phòng.
+                if (!tableTimeHtml && tx.tableTime) {
+                    tableTimeHtml = '<div class="detail-row"><span>⏱ Thời gian bàn:</span><span>' + escapeHtml(tx.tableTime) + '</span></div>';
+                }
                 if (table && table.startTime) {
                     var startTime = new Date(table.startTime);
                     var endTime = table.endTime ? new Date(table.endTime) : new Date(tx.createdAt || tx.date);
@@ -609,8 +770,16 @@ function showTransactionDetail(transactionId) {
                 renderDetail('');
             }
         } else {
-            renderDetail('');
+            // Ghi nợ tại bàn cũng có tableTime nhưng không có startTime
+            if (tx.tableTime) {
+                renderDetail('<div class="detail-row"><span>⏱ Thời gian bàn:</span><span>' + escapeHtml(tx.tableTime) + '</span></div>');
+            } else {
+                renderDetail('');
+            }
         }
+    }).catch(function(err) {
+        console.error('[showTransactionDetail] lỗi:', err);
+        showToast('❌ Lỗi tải chi tiết giao dịch', 'error');
     });
 }
 
@@ -774,7 +943,14 @@ function refundTransaction(transactionId) {
     var todayStr = _toLocalDateStr(new Date());
     
     DB.get('transactions', transactionId).then(function(trans) {
-        if (!trans || trans.refunded) return;
+        if (!trans) {
+            showToast('⚠️ Không tìm thấy giao dịch', 'warning');
+            return;
+        }
+        if (trans.refunded) {
+            showToast('ℹ️ Giao dịch này đã được hủy trước đó', 'warning');
+            return;
+        }
         
         // YÊU CẦU 1: Chặn hoàn tác giao dịch ngày trước đó
         // Fix timezone: nếu không có dateKey, parse trans.date theo giờ địa phương
@@ -784,6 +960,16 @@ function refundTransaction(transactionId) {
         }
         if (transDate !== todayStr) {
             showToast('❌ Không thể hoàn tác giao dịch của ngày trước đó', 'error');
+            return;
+        }
+        
+        // Chặn khi CHƯA BIẾT ngày đã chốt hay chưa.
+        // isDayClosed() trả false khi _dayClosedCache === null (dữ liệu chốt
+        // ngày chưa tải xong) => vài giây đầu sau khi mở app (hoặc khi offline)
+        // nhân viên có thể hoàn tác mà không bị hỏi mật khẩu, kể cả khi ngày
+        // thực sự đã chốt. Phải chặn (fail-closed) chứ không cho qua.
+        if (typeof isDayClosedUnknown === 'function' && isDayClosedUnknown()) {
+            showToast('⏳ Đang tải trạng thái chốt ngày, vui lòng thử lại sau', 'warning');
             return;
         }
         
@@ -809,8 +995,9 @@ function refundTransaction(transactionId) {
 // ========== KHÔI PHỤC PREPAIDBALANCE KHI HOÀN TÁC ==========
 // creditUsed: số tiền đã dùng từ prepaidBalance (cần cộng lại)
 // prepaidChange: số tiền dư được thêm vào prepaidBalance (cần trừ đi)
-function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
-    return new Promise(function(resolve) {
+// txTime: thời điểm giao dịch, dùng để xác định đúng creditHistory entry cần xóa
+function restoreCustomerCredit(customerId, creditUsed, prepaidChange, txTime) {
+    return new Promise(function(resolve, reject) {
         if (!customerId || (!creditUsed && !prepaidChange)) { resolve(); return; }
         var c = null;
         for (var i = 0; i < customers.length; i++) {
@@ -824,10 +1011,14 @@ function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
             if (creditUsed > 0) {
                 cust.prepaidBalance = (cust.prepaidBalance || 0) + creditUsed;
                 updateData.prepaidBalance = cust.prepaidBalance;
-                // Xóa creditHistory entry tương ứng (entry có amount = -creditUsed)
+                // Xóa creditHistory entry tương ứng.
+                // FIX: so sánh theo cả số tiền VÀ thời gian gần với giao dịch.
+                // Trước đây chỉ so amount === -creditUsed nên khi khách dùng tiền dư
+                // 2 lần cùng số tiền, sẽ xóa nhầm entry cũ và để lại entry mới
+                // -> lịch sử hiển thị sai.
                 if (cust.creditHistory) {
                     for (var k = 0; k < cust.creditHistory.length; k++) {
-                        if (cust.creditHistory[k].amount === -creditUsed) {
+                        if (cust.creditHistory[k].amount === -creditUsed && _isNearTransTime(cust.creditHistory[k].date, txTime)) {
                             cust.creditHistory.splice(k, 1);
                             break;
                         }
@@ -841,10 +1032,10 @@ function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
             if (prepaidChange > 0) {
                 cust.prepaidBalance = Math.max(0, (cust.prepaidBalance || 0) - prepaidChange);
                 updateData.prepaidBalance = cust.prepaidBalance;
-                // Xóa creditHistory entry tương ứng (entry có amount = prepaidChange)
+                // Xóa creditHistory entry tương ứng (cũng so cả số tiền và thời gian)
                 if (cust.creditHistory) {
                     for (var k = 0; k < cust.creditHistory.length; k++) {
-                        if (cust.creditHistory[k].amount === prepaidChange) {
+                        if (cust.creditHistory[k].amount === prepaidChange && _isNearTransTime(cust.creditHistory[k].date, txTime)) {
                             cust.creditHistory.splice(k, 1);
                             break;
                         }
@@ -856,7 +1047,20 @@ function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
             
             if (changed) {
                 updateData.creditBalance = cust.prepaidBalance || 0;
-                DB.update('customers', cust.id, updateData).then(function() { resolve(); });
+                // PHẢI có .catch + truyền reject: trước đây chỉ có .then(resolve)
+                // nên khi DB.update() lỗi thì promise KHÔNG BAO GIỜ settle ->
+                // Promise.all trong doRefund treo vĩnh viễn, giao dịch không
+                // bao giờ được đánh dấu refunded và không có báo lỗi nào.
+                DB.update('customers', cust.id, updateData).then(function() {
+                    // Bỏ cache tính toán (TTL 5 phút) để số nợ/tiền dư hiển thị đúng
+                    if (typeof _invalidateCustomerCalcCache === 'function') {
+                        _invalidateCustomerCalcCache();
+                    }
+                    resolve();
+                }).catch(function(err) {
+                    console.error('[restoreCustomerCredit] lỗi cập nhật khách:', err);
+                    reject(err);
+                });
             } else {
                 resolve();
             }
@@ -869,9 +1073,24 @@ function restoreCustomerCredit(customerId, creditUsed, prepaidChange) {
                     if (allC[i].id === customerId) { c = allC[i]; break; }
                 }
                 if (c) { doRestore(c); } else { resolve(); }
+            }).catch(function(err) {
+                console.error('[restoreCustomerCredit] lỗi đọc khách:', err);
+                reject(err);
             });
         }
     });
+}
+
+// Kiểm tra 2 mốc thời gian có gần nhau trong 2 phút không
+// Dùng khi cần khớp entry lịch sử với giao dịch mà chỉ biết số tiền + thời gian
+function _isNearTransTime(entryDate, txTime) {
+    // Mốc thời gian hỏng thì KHÔNG được khớp. Trước đây trả true khiến mọi entry
+    // cùng số tiền đều khớp -> xoá nhầm entry khác, đúng cái tình huống mà
+    // điều kiện 2 phút sinh ra để tránh.
+    if (!txTime || isNaN(txTime)) return false;
+    var t = new Date(entryDate).getTime();
+    if (isNaN(t)) return false;
+    return Math.abs(t - txTime) < 120000;
 }
 
 function proceedRefund(trans, needPassword) {
@@ -885,7 +1104,10 @@ function proceedRefund(trans, needPassword) {
             if (trans.type !== 'delete_table') {
                 ingPromise = restoreIngredients(trans.items);
             }
-            ingPromise.then(function() {
+            // Có .catch để lỗi hoàn kho không làm đứt chuỗi im lặng
+            ingPromise.catch(function(err) {
+                console.error('[refund] lỗi hoàn nguyên liệu:', err);
+            }).then(function() {
                 // Xử lý hoàn tác trả sau: trả về Promise để đợi hoàn thành trước khi update transaction
                 var debtPromise = Promise.resolve();
                 
@@ -893,13 +1115,15 @@ function proceedRefund(trans, needPassword) {
                     if (trans.paymentMethod === 'debt') {
                         // GHI NỢ: hoàn tác = xóa entry debtHistory gốc và trừ totalDebt
                         // KHÔNG thêm entry mới để tránh sai lệch lịch sử trả sau
-                        debtPromise = new Promise(function(resolve) {
+                        // (creditUsed được hoàn ở creditPromise bên dưới để tránh cộng 2 lần)
+                        debtPromise = new Promise(function(resolve, reject) {
                             var c = null;
                             for (var i = 0; i < customers.length; i++) {
                                 if (customers[i].id === trans.customer.id) { c = customers[i]; break; }
                             }
                             function doRestoreDebt(cust) {
                                 // Tìm và xóa entry debtHistory gốc tương ứng với giao dịch trả sau này
+                                var removedEntry = null;
                                 if (cust.debtHistory) {
                                     var foundIdx = -1;
                                     for (var d = 0; d < cust.debtHistory.length; d++) {
@@ -914,16 +1138,71 @@ function proceedRefund(trans, needPassword) {
                                         }
                                     }
                                     if (foundIdx >= 0) {
+                                        removedEntry = cust.debtHistory[foundIdx];
                                         cust.debtHistory.splice(foundIdx, 1);
                                     }
                                 }
-                                // Trừ totalDebt (vì đã xóa entry nợ gốc)
+                                // FIX: khi ghi nợ đã tự trừ tiền dư của khách (creditUsed)
+                                // mà không hoàn lại thì khách mất tiền.
+                                //
+                                // Lỗi cũ: khối này cộng prepaidBalance +=
+                                // removedEntry.creditUsed, đồng thời creditPromise bên
+                                // dưới lại gọi restoreCustomerCredit với trans.creditUsed
+                                // (đúng số đó) => cộng 2 lần.
+                                // Cách sửa lúc đó: bỏ cộng ở đây và truyền
+                                // creditUsed = 0 cho creditPromise.
+                                //
+                                // Nhưng làm vậy thì CẢ HAI đều không hoàn: khối này bỏ
+                                // cộng, còn restoreCustomerCredit nhận creditUsed = 0 nên
+                                // thoát ngay ở dòng
+                                //   if (!customerId || (!creditUsed && !prepaidChange)) ...
+                                // Khách gửi trước 60k, ghi nợ dùng 60k đó, rồi hoàn tác
+                                // giao dịch ghi nợ => mất trắng 60k tiền dư.
+                                //
+                                // Nay hoàn ở ĐÂY, lấy creditUsed từ chính entry gốc vừa
+                                // xoá (chính xác hơn trans.creditUsed vì trans có thể đã
+                                // bị sửa). creditPromise vẫn nhận 0 nên không còn nguy cơ
+                                // cộng hai lần.
+                                var txTimeRef = new Date(trans.createdAt || trans.date).getTime();
+                                var creditToRestore = (removedEntry && typeof removedEntry.creditUsed === 'number')
+                                    ? removedEntry.creditUsed : 0;
+                                if (creditToRestore > 0) {
+                                    cust.prepaidBalance = (cust.prepaidBalance || 0) + creditToRestore;
+                                    // Gỡ đúng dòng creditHistory đã trừ lúc ghi nợ
+                                    if (cust.creditHistory) {
+                                        for (var ch = 0; ch < cust.creditHistory.length; ch++) {
+                                            if (cust.creditHistory[ch].amount === -creditToRestore &&
+                                                _isNearTransTime(cust.creditHistory[ch].date, txTimeRef)) {
+                                                cust.creditHistory.splice(ch, 1);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // FIX: tính lại totalDebt từ lịch sử thay vì trừ dồn
+                                // (field totalDebt có thể đã lệch sẵn, trừ dồn nhân bản lệch đó)
                                 cust.totalDebt = Math.max(0, (cust.totalDebt || 0) - trans.amount);
+                                if (typeof _calcOutstandingDebt === 'function') {
+                                    cust.totalDebt = _calcOutstandingDebt(cust);
+                                }
                                 DB.update('customers', cust.id, {
                                     totalDebt: cust.totalDebt,
-                                    debtHistory: cust.debtHistory || []
+                                    debtHistory: cust.debtHistory || [],
+                                    prepaidBalance: cust.prepaidBalance || 0,
+                                    // creditBalance luôn bằng prepaidBalance (xem
+                                    // restoreCustomerCredit). Trước đây ghi
+                                    // cust.creditBalance cũ => lệch với tiền dư thật.
+                                    creditBalance: cust.prepaidBalance || 0,
+                                    creditHistory: cust.creditHistory || []
                                 }).then(function() {
+                                    if (typeof _invalidateCustomerCalcCache === 'function') {
+                                        _invalidateCustomerCalcCache();
+                                    }
                                     resolve();
+                                }).catch(function(err) {
+                                    console.error('[refund] lỗi cập nhật nợ:', err);
+                                    reject(err);
                                 });
                             }
                             if (c) {
@@ -938,13 +1217,20 @@ function proceedRefund(trans, needPassword) {
                                     } else {
                                         resolve();
                                     }
+                                }).catch(function(err) {
+                                    console.error('[refund] lỗi đọc khách:', err);
+                                    reject(err);
                                 });
                             }
                         });
                     } else {
                         // THANH TOÁN NỢ: hoàn tác = khôi phục nợ bằng cách xóa paymentHistory entry và cộng lại totalDebt
                         // KHÔNG thêm entry mới vào debtHistory để tránh sai lệch lịch sử
-                        debtPromise = new Promise(function(resolve) {
+                        // FIX: dùng debtSettled (nợ thực sự được xóa) thay vì trans.amount.
+                        // trans.amount là tiền thực nhận (đã gồm phần dùng tiền dư và phần trả dư),
+                        // dùng nó để cộng lại nợ sẽ làm nợ phình to hơn đúng số đã trừ.
+                        var settled = (typeof trans.debtSettled === 'number') ? trans.debtSettled : trans.amount;
+                        debtPromise = new Promise(function(resolve, reject) {
                             var c = null;
                             for (var i = 0; i < customers.length; i++) {
                                 if (customers[i].id === trans.customer.id) { c = customers[i]; break; }
@@ -955,7 +1241,7 @@ function proceedRefund(trans, needPassword) {
                                     var foundIdx = -1;
                                     for (var p = 0; p < cust.paymentHistory.length; p++) {
                                         var entry = cust.paymentHistory[p];
-                                        if (entry.amount === trans.amount) {
+                                        if (entry.amount === settled) {
                                             var entryTime = new Date(entry.date).getTime();
                                             var txTime = new Date(trans.createdAt || trans.date).getTime();
                                             if (Math.abs(entryTime - txTime) < 120000) { // sai lệch trong 2 phút
@@ -968,13 +1254,23 @@ function proceedRefund(trans, needPassword) {
                                         cust.paymentHistory.splice(foundIdx, 1);
                                     }
                                 }
-                                // Khôi phục: cộng lại số tiền đã thanh toán
-                                cust.totalDebt = (cust.totalDebt || 0) + trans.amount;
+                                // Khôi phục: cộng lại số nợ đã được trừ
+                                // FIX: tính lại từ lịch sử sau khi đã xóa entry paymentHistory
+                                cust.totalDebt = (cust.totalDebt || 0) + settled;
+                                if (typeof _calcOutstandingDebt === 'function') {
+                                    cust.totalDebt = _calcOutstandingDebt(cust);
+                                }
                                 DB.update('customers', cust.id, {
                                     totalDebt: cust.totalDebt,
                                     paymentHistory: cust.paymentHistory || []
                                 }).then(function() {
+                                    if (typeof _invalidateCustomerCalcCache === 'function') {
+                                        _invalidateCustomerCalcCache();
+                                    }
                                     resolve();
+                                }).catch(function(err) {
+                                    console.error('[refund] lỗi cập nhật lịch sử trả nợ:', err);
+                                    reject(err);
                                 });
                             }
                             if (c) {
@@ -989,6 +1285,9 @@ function proceedRefund(trans, needPassword) {
                                     } else {
                                         resolve();
                                     }
+                                }).catch(function(err) {
+                                    console.error('[refund] lỗi đọc khách:', err);
+                                    reject(err);
                                 });
                             }
                         });
@@ -1014,21 +1313,52 @@ function proceedRefund(trans, needPassword) {
                 }
                 
                 // Khôi phục prepaidBalance và creditHistory nếu giao dịch có dùng tiền dư/trả dư
+                //
+                // GHI NỢ (debt_payment + paymentMethod 'debt'): truyền creditUsed = 0.
+                // Nhánh debtPromise ở trên KHÔNG cộng lại prepaidBalance nữa (xem
+                // comment ở đó) - nếu truyền creditUsed thật thì số tiền bị cộng 2 lần.
+                var isDebtRecordTx = (trans.type === 'debt_payment' && trans.paymentMethod === 'debt');
                 var creditPromise = restoreCustomerCredit(
                     trans.customer ? trans.customer.id : null,
-                    trans.creditUsed || 0,
-                    trans.prepaidChange || 0
+                    isDebtRecordTx ? 0 : (trans.creditUsed || 0),
+                    trans.prepaidChange || 0,
+                    new Date(trans.createdAt || trans.date).getTime()
                 );
                 
                 // Đợi xử lý trả sau + khôi phục bàn + khôi phục credit xong mới update transaction
                 Promise.all([debtPromise, tablePromise, creditPromise]).then(function() {
                     // FIX TIMEZONE: KHÔNG ghi đè trans.createdAt để giữ nguyên ngày gốc của giao dịch
-                    // Thay vào đó, dùng refundedAt để sort nếu cần
+                    // Dùng originalCreatedAt để lưu mốc gốc (nếu chưa có) + refundedAt cho mốc hủy
+                    if (!trans.originalCreatedAt) {
+                        trans.originalCreatedAt = trans.createdAt || trans.date;
+                    }
                     trans.refunded = true;
                     trans.refundReason = reason;
                     trans.refundedAt = Date.now();
                     
-                    DB.update('transactions', transactionId, trans).then(function() {
+                    // PHẢI trả về promise + có .catch.
+                    // Trước đây .then() không return nên DB.update lỗi bị nuốt im lặng,
+                    // trong khi bàn/ngợ/tiền dư/nguyên liệu ĐÃ hoàn nguyên => lệch dữ liệu
+                    // không có đường undo.
+                    return DB.update('transactions', transactionId, trans).catch(function(err) {
+                        console.error('[refund] lỗi cập nhật transaction:', err);
+                        // Trả lại trạng thái trong RAM để không hiện "Đã hủy" giả
+                        trans.refunded = false;
+                        delete trans.refundReason;
+                        delete trans.refundedAt;
+                        // Ghi log để quản lý biết cần kiểm tra lại
+                        try {
+                            DB.create('refund_failures', {
+                                transactionId: transactionId,
+                                amount: trans.amount || 0,
+                                reason: reason,
+                                error: String(err && err.message ? err.message : err),
+                                at: Date.now()
+                            }).catch(function() {});
+                        } catch (e) {}
+                        throw err;
+                    });
+                }).then(function() {
                         showToast('✅ Đã hủy giao dịch', 'success');
                         // Gửi thông báo Telegram qua bot cảnh báo
                         if (typeof notifyTelegramWarning === 'function') {
@@ -1040,14 +1370,20 @@ function proceedRefund(trans, needPassword) {
                             if (trans.paymentMethod) refundMsg += '💳 Phương thức: ' + trans.paymentMethod;
                             notifyTelegramWarning(refundMsg);
                         }
-                        // Cập nhật lại lịch sử và báo cáo
+                        // Cập nhật lại lịch sử
                         if (currentTab === 'history') {
                             renderHistoryByDate(currentHistoryDate);
                         }
-                        if (currentTab === 'report') {
-                            renderReport(currentReportDate);
-                        }
-                    });
+                        // KHÔNG gọi renderReport: hàm này chỉ tồn tại trong
+                        // report.js (KHÔNG được load trong index.html) và index.html
+                        // cũng không có tab 'report'. Nếu sau này thêm tab thì
+                        // ReferenceError ngay sau khi refund đã ghi xong.
+                }).catch(function(err) {
+                    // Bắt lỗi từ cả 3 nhánh hoàn nguyên lẫn từ DB.update.
+                    // Trước đây Promise.all không có .catch và 2 promise không hề
+                    // settle khi lỗi => treo vĩnh viễn, không báo gì cho người dùng.
+                    console.error('[refund] Hoàn tác lỗi:', err);
+                    showToast('❌ Hoàn tác lỗi: ' + (err && err.message ? err.message : 'không xác định') + ' — dữ liệu CÓ THỂ đã lệch, cần quản lý kiểm tra', 'error', 6000);
                 });
             });
         });
@@ -1062,7 +1398,7 @@ function proceedRefund(trans, needPassword) {
 
 // ========== KHÔI PHỤC BÀN KHI HOÀN TÁC GIAO DỊCH DINEIN ==========
 function restoreTable(trans) {
-    return new Promise(function(resolve) {
+    return new Promise(function(resolve, reject) {
         // Tính tổng tiền từ items (ưu tiên dùng trans.amount)
         var total = trans.amount || 0;
         if (total === 0 && trans.items && trans.items.length) {
@@ -1087,7 +1423,13 @@ function restoreTable(trans) {
             startTime: trans.startTime || new Date().toISOString(),
             customerId: customerId,
             customerName: customerName,
-            recentAdds: []
+            recentAdds: [],
+            // BẮT BUỘC: cờ "đã trừ kho".
+            // Bước hoàn tác đã gọi restoreIngredients() trả kho lại. Nếu bàn
+            // khôi phục thiếu cờ này thì lần thanh toán sau sẽ thấy
+            // alreadyDeducted = false và trừ kho LẦN THỨ HAI -> kho phình dần
+            // sau mỗi vòng hoàn tác, sai vốn/giá vốn.
+            ingredientsDeducted: true
         };
         
         // FIX 4: Dùng window.cachedTables thay vì DB.get('tables', ...)
@@ -1105,20 +1447,25 @@ function restoreTable(trans) {
             resolve();
         } else {
             // Khôi phục bàn: tạo mới hoặc cập nhật
+            // KHÔNG nuốt lỗi trong .catch: trước đây resolve() ở cả nhánh lỗi
+            // khiến người dùng thấy "✅ Đã hủy giao dịch" dù bàn không được
+            // khôi phục, món đã hoàn kho => mất đơn mà không có dấu hiệu gì.
             if (existingTable) {
                 // Bàn đã tồn tại (rỗng) -> cập nhật
                 DB.update('tables', String(trans.tableId), tableData).then(function() {
                     resolve();
-                }).catch(function() {
-                    resolve();
+                }).catch(function(err) {
+                    console.error('[restoreTable] lỗi cập nhật bàn:', err);
+                    reject(err);
                 });
             } else {
                 // Bàn chưa tồn tại -> tạo mới
                 tableData.id = trans.tableId;
                 DB.create('tables', tableData, String(trans.tableId)).then(function() {
                     resolve();
-                }).catch(function() {
-                    resolve();
+                }).catch(function(err) {
+                    console.error('[restoreTable] lỗi tạo bàn:', err);
+                    reject(err);
                 });
             }
         }
@@ -1146,7 +1493,13 @@ function addHistory(transaction) {
     var now = new Date();
     var dateKey = _toLocalDateStr(now);
     var newTrans = {
-        id: Date.now().toString(),
+        // KHÔNG dùng Date.now().toString() một mình: hai giao dạch tạo trong cùng
+        // 1 mili giây sẽ trùng id. DB.create() lấy data.id làm khoá và
+        // saveToLocal dùng store.put => ghi đè, GIAO DỊCH MẤT IM LẶNG
+        // (kể cả trên Firebase: addToSyncQueue ghi vào ref.child(id)).
+        // Khối dedup ở _renderHistoryCore KHÔNG cứu được vì IndexedDB đã ghi đè
+        // từ lúc ghi, getTransactionsByDate không bao giờ trả về 2 bản cùng id.
+        id: Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6),
         date: now.toISOString(),
         dateKey: dateKey,
         type: transaction.type,
@@ -1164,10 +1517,13 @@ function addHistory(transaction) {
         creditUsed: transaction.creditUsed || 0,   // Số tiền đã dùng từ prepaidBalance khi ghi nợ/thanh toán
         prepaidChange: transaction.prepaidChange || 0 // Số tiền dư được thêm vào prepaidBalance (overpay)
     };
-    // Bổ sung tên nhân viên thực hiện
+    // Bổ sung tên + vai trò nhân viên thực hiện (dùng cho toast giao dịch gần đây)
     var user = DB.getCurrentUser();
     if (user && user.displayName) {
         newTrans.createdByName = user.displayName;
+    }
+    if (user && user.role) {
+        newTrans.createdByRole = user.role;
     }
     return DB.create('transactions', newTrans).then(function(result) {
         // KHÔNG gọi render trực tiếp nữa, để realtime subscription tự cập nhật
@@ -1177,7 +1533,8 @@ function addHistory(transaction) {
 // ========== SWIPE: TRÁI = HOÀN TÁC, PHẢI = XÓA ==========
 // FIX 6: Dùng data attribute để đánh dấu item đã có listener, tránh gắn listener chồng chéo
 function _initHistorySwipe() {
-    var items = document.querySelectorAll('.history-item');
+    // Scope vào #historyList để không gắn nhầm .history-item ở màn hình khác
+    var items = document.querySelectorAll('#historyList .history-item');
     for (var i = 0; i < items.length; i++) {
         var el = items[i];
         // Nếu đã có listener thì bỏ qua
@@ -1185,14 +1542,35 @@ function _initHistorySwipe() {
         el.setAttribute('data-swipe-initialized', 'true');
         
         (function(el) {
-            var startX = 0, currentX = 0, isDragging = false;
+            var startX = 0, startY = 0, currentX = 0, isDragging = false, axisLocked = false;
+            function reset() {
+                isDragging = false;
+                axisLocked = false;
+                el.style.transition = 'transform 0.2s ease';
+                el.classList.remove('swipe-reveal');
+                el.classList.remove('swipe-left-reveal');
+                el.style.transform = '';
+            }
             el.addEventListener('touchstart', function(e) {
                 startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                axisLocked = false;
                 isDragging = true;
             }, { passive: true });
             el.addEventListener('touchmove', function(e) {
                 if (!isDragging) return;
-                currentX = e.touches[0].clientX;
+                var t = e.touches[0];
+                // Khoá trục: chỉ vào chế độ vuốt ngang khi chuyển động ngang
+                // rõ ràng. Trước đây vuốt DỌC (cuộn danh sách) cũng làm item
+                // dịch ngang 80px.
+                if (!axisLocked) {
+                    var dx0 = Math.abs(t.clientX - startX);
+                    var dy0 = Math.abs(t.clientY - startY);
+                    if (dx0 < 10 && dy0 < 10) return;
+                    if (dy0 > dx0) { isDragging = false; return; }  // vuốt dọc -> bỏ qua
+                    axisLocked = true;
+                }
+                currentX = t.clientX;
                 var diff = startX - currentX;
                 if (diff > 0) {
                     // Vuốt trái: hiện nút hoàn tác (bên phải)
@@ -1207,6 +1585,8 @@ function _initHistorySwipe() {
             el.addEventListener('touchend', function(e) {
                 if (!isDragging) return;
                 isDragging = false;
+                if (!axisLocked) { axisLocked = false; return; }
+                axisLocked = false;
                 el.style.transition = 'transform 0.2s ease';
                 var diff = startX - currentX;
                 if (diff > 50) {
@@ -1224,6 +1604,11 @@ function _initHistorySwipe() {
                     el.classList.remove('swipe-left-reveal');
                     el.style.transform = '';
                 }
+            }, { passive: true });
+            // Không có touchcancel thì gesture bị trình duyệt cắt sẽ để lại
+            // isDragging = true và transform dạch ngang => item kẹt lệch.
+            el.addEventListener('touchcancel', function() {
+                reset();
             }, { passive: true });
         })(el);
     }
@@ -1254,13 +1639,23 @@ function deleteTransaction(transactionId) {
             // Refresh lại danh sách
             var dateEl = document.getElementById('historyDate');
             if (dateEl) {
-                var dateStr = dateEl.getAttribute('data-date') || dateEl.innerText;
-                renderHistoryByDateStr(dateStr);
+                // CHỈ dùng data-date. Fallback innerText là định dạng d/m/Y
+                // (vd "5/10/2026") không phải dateKey YYYY-MM-DD =>
+                // getTransactionsByDate trả rỗng -> list trống sau khi xoá.
+                var dateStr = dateEl.getAttribute('data-date');
+                if (dateStr) {
+                    renderHistoryByDateStr(dateStr);
+                } else {
+                    renderHistoryByDate(currentHistoryDate);
+                }
             }
         }).catch(function(err) {
             console.error('[deleteTransaction] Lỗi:', err);
             showToast('❌ Lỗi khi xóa giao dịch', 'error');
         });
+    }).catch(function(err) {
+        console.error('[deleteTransaction] Lỗi đọc giao dịch:', err);
+        showToast('❌ Lỗi khi tải giao dịch', 'error');
     });
 }
 

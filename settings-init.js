@@ -6,6 +6,74 @@
 // 2. CÀI ĐẶT ỨNG DỤNG (Settings)
 // ============================================================
 
+/**
+ * Nạp cấu hình quán từ IndexedDB rồi điền vào form Cài đặt.
+ *
+ * Nguồn: DB.getShopConfig() đọc IndexedDB (nhanh, không mạng). Dùng nguồn này
+ * thay vì window.shopConfig vì global có thể chưa sẵn sàng lúc mở tab.
+ *
+ * Chỉ điền vào ô đang TRỐNG, nên không đè lên thứ admin đang gõ dở.
+ */
+function _loadSettingsConfigFromDB() {
+    if (typeof DB === 'undefined' || typeof DB.getShopConfig !== 'function') return;
+    var fill = window._settingsFillIfEmpty;
+    if (typeof fill !== 'function') {
+        // initSettingsTab() chưa chạy lần nào -> tự tạo hàm điền tối thiểu
+        fill = function (el, val) {
+            if (!el) return;
+            if (el.value && el.value.length > 0) return;
+            el.value = val == null ? '' : val;
+        };
+        window._settingsFillIfEmpty = fill;
+    }
+
+    DB.getShopConfig().then(function (cfg) {
+        if (!cfg) return;
+
+        // Cờ "cấu hình đã sẵn sàng". Form Cài đặt có thể mở trước lúc dữ liệu
+        // tới - lúc đó mọi ô đều trống và BẤM LƯU sẽ xoá sạch cấu hình trên
+        // Firebase. Các hàm lưu kiểm tra cờ này để chặn.
+        // Đánh dấu khi có bất kỳ dữ liệu cấu hình nào (khác rỗng toàn bộ).
+        var _hasAny = false;
+        for (var _k in cfg) {
+            if (cfg.hasOwnProperty(_k) && cfg[_k] !== '' && cfg[_k] !== null && cfg[_k] !== undefined) {
+                _hasAny = true; break;
+            }
+        }
+        if (_hasAny) window._shopConfigReady = true;
+
+        // Gom vào window.shopConfig để các hàm khác (gửi Telegram, khóa bàn)
+        // đọc được ngay, kể cả khi chưa có db_update nào bắn.
+        if (!window.shopConfig) window.shopConfig = {};
+        for (var k in cfg) {
+            if (cfg.hasOwnProperty(k) && window.shopConfig[k] === undefined) {
+                window.shopConfig[k] = cfg[k];
+            }
+        }
+
+        // Telegram
+        fill(document.getElementById('telegramBotToken'), cfg.telegramBotToken);
+        fill(document.getElementById('telegramChatId'), cfg.telegramChatId);
+        fill(document.getElementById('telegramShiftCloseToken'), cfg.telegramShiftCloseToken);
+        fill(document.getElementById('telegramWarningToken'), cfg.telegramWarningToken);
+        fill(document.getElementById('telegramExpenseToken'), cfg.telegramExpenseToken);
+
+        // Khóa bàn & thời gian
+        fill(document.getElementById('settingsLockStartHour'), cfg.lockStartHour);
+        fill(document.getElementById('settingsLockEndHour'), cfg.lockEndHour);
+        fill(document.getElementById('settingsLockEndMinute'), cfg.lockEndMinute);
+        fill(document.getElementById('settingsTableLockHours'), cfg.tableLockHours);
+        fill(document.getElementById('settingsLockPassword'), cfg.lockPassword);
+
+        // Thông tin quán
+        fill(document.getElementById('shopInfoName'), cfg.name);
+        if (cfg.address) fill(document.getElementById('shopInfoAddress'), cfg.address);
+        if (cfg.phone) fill(document.getElementById('shopInfoPhone'), cfg.phone);
+    }).catch(function () {
+        // Không đọc được thì để nguyên form, không đụng gì
+    });
+}
+
 function initSettingsTab() {
     try {
     // Phân quyền hiển thị:
@@ -65,45 +133,33 @@ function initSettingsTab() {
         if (staffNoteSection) staffNoteSection.style.display = '';
     }
 
-    // Load Telegram config từ localStorage
-    var savedToken = localStorage.getItem('telegram_bot_token');
-    var savedChatId = localStorage.getItem('telegram_chat_id');
-    var savedBotName = localStorage.getItem('telegram_bot_name');
-    var savedShiftCloseToken = localStorage.getItem('telegram_shift_close_token');
-    var savedWarningToken = localStorage.getItem('telegram_warning_token');
-    var savedExpenseToken = localStorage.getItem('telegram_expense_token');
-
-    // Khởi tạo window.shopConfig để các hàm gửi Telegram (cả chung và chốt ca) đọc được
-    // Ưu tiên giữ giá trị từ Firebase realtime nếu đã có (tránh ghi đè bằng localStorage rỗng)
+    // Load Telegram config vào UI
+    //
+    // NGUỒN ĐÚNG là cấu hình quán (Firebase), KHÔNG phải localStorage. Trước đây
+    // đọc localStorage rồi ghi đè lên form: trên máy mới localStorage chưa có
+    // gì nên mỗi lần bấm vào tab Cài đặt là 5 ô bị xoá trắng, dù Firebase vẫn
+    // còn token hợp lệ.
     if (!window.shopConfig) {
         window.shopConfig = {};
     }
-    // Chỉ ghi đè nếu localStorage có giá trị, nếu không giữ nguyên từ Firebase realtime
-    if (savedToken) window.shopConfig.telegramBotToken = savedToken;
-    if (savedChatId) window.shopConfig.telegramChatId = savedChatId;
-    if (savedShiftCloseToken) window.shopConfig.telegramShiftCloseToken = savedShiftCloseToken;
-    if (savedWarningToken) window.shopConfig.telegramWarningToken = savedWarningToken;
-    if (savedExpenseToken) window.shopConfig.telegramExpenseToken = savedExpenseToken;
+    var _cfg = window.shopConfig;
 
-    // Load Telegram config vào UI
-    var tokenInput = document.getElementById('telegramBotToken');
-    if (tokenInput) tokenInput.value = savedToken || '';
-    var chatIdInput = document.getElementById('telegramChatId');
-    if (chatIdInput) chatIdInput.value = savedChatId || '';
-    var botNameInput = document.getElementById('telegramBotName');
-    if (botNameInput) botNameInput.value = savedBotName || '';
+    // Chỉ ghi vào ô khi ô đang trống. Nếu admin đang sửa dở thì không được
+    // xoá nội dung họ vừa gõ.
+    function _fillIfEmpty(el, val) {
+        if (!el) return;
+        if (el.value && el.value.length > 0) return;   // đã có nội dung -> giữ
+        el.value = val == null ? '' : val;
+    }
+    window._settingsFillIfEmpty = _fillIfEmpty;
 
-    // Load shift-close Telegram config vào UI
-    var shiftCloseTokenInput = document.getElementById('telegramShiftCloseToken');
-    if (shiftCloseTokenInput) shiftCloseTokenInput.value = savedShiftCloseToken || '';
-
-    // Load warning Telegram config vào UI
-    var warningTokenInput = document.getElementById('telegramWarningToken');
-    if (warningTokenInput) warningTokenInput.value = savedWarningToken || '';
-
-    // Load expense Telegram config vào UI
-    var expenseTokenInput = document.getElementById('telegramExpenseToken');
-    if (expenseTokenInput) expenseTokenInput.value = savedExpenseToken || '';
+    // Sửa dụng các hàm lưu giá trị để nạp từ localStorage khi Firebase chưa có
+    function _persist(key, val) {
+        if (val) { try { localStorage.setItem(key, val); } catch (e) {} }
+    }
+    function _ls(key) {
+        try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+    }
 
     // Load staff permission list (đã chuyển sang modal employees.js)
     // Giữ lại để tương thích nếu có gọi từ nơi khác
@@ -125,6 +181,15 @@ function initSettingsTab() {
 
     // Load lock config
     loadLockConfig();
+
+    // Nạp lại cấu hình từ IndexedDB (đọc local, không chờ mạng).
+    //
+    // initSettingsTab() chạy ngay khi bấm tab. Nếu bấm sớm lúc app còn đang
+    // đồng bộ thì window.shopConfig / window.shopInfo chưa có dữ liệu, form
+    // hiện trống hết. Rồi admin bấm "Lưu cấu hình" là saveLockConfig() ghi
+    // null lên Firebase và XOÁ mật khẩu khóa bàn của cả shop.
+    // Đọc thẳng IndexedDB thì luôn có dữ liệu ngay, không phụ thuộc thứ tự.
+    _loadSettingsConfigFromDB();
 
     // Đồng bộ trạng thái toggle khóa chat
     // Sử dụng isChatLocked() từ messages.js (đã đồng bộ qua Firebase realtime)

@@ -302,8 +302,8 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     
-    <script src="db.js?v=3"></script>
-    <script src="auth.js"></script>
+    <script src="js.min/db.min.js?v=1790853708102"></script>
+    <script src="js.min/auth.min.js?v=1790853708102"></script>
     
     <!-- === ĐỊNH NGHĨA BIẾN GLOBAL TRƯỚC KHI LOAD CÁC MODULE === -->
     <script>
@@ -342,6 +342,49 @@
     window.closeModal = function() {};
     window.showToast = function() {};
     window.hideToast = function() {};
+    // showActivityToast / _setToastExtra nằm ở realtime-pos.js và pos-app.js -
+    // file này KHÔNG load 2 file đó. Trước khi stub, mỗi lần thanh toán mang đi
+    // gặp ReferenceError ngay sau DB.suppressRealtime() -> flushRealtime() không
+    // bao giờ chạy -> realtime của MỌI collection bị nuốt tới 20s (watchdog db.js).
+    // Trang này cố ý tắt toast (showToast là no-op) nên stub no-op là đúng nhất quán.
+    window.showActivityToast = function() {};
+    window._setToastExtra = function() {};
+    // addHistory nằm ở history.js - cũng không load. Trước đây thiếu stub nên
+    // mỗi lần thanh toán mang đi/Grab đều ném ReferenceError và KHÔNG giao dịch.
+    // Stub ghi thẳng vào transactions để doanh thu vẫn được ghi nhận.
+    window.addHistory = function(transaction) {
+        try {
+            var now = new Date();
+            var pad = function(n) { return ('0' + n).slice(-2); };
+            var dateKey = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+            var user = (window.DB && DB.getCurrentUser) ? DB.getCurrentUser() : null;
+            var tx = {
+                id: Date.now().toString(),
+                date: now.toISOString(),
+                dateKey: dateKey,
+                type: transaction.type,
+                amount: transaction.amount,
+                paymentMethod: transaction.paymentMethod,
+                items: transaction.items || [],
+                customer: transaction.customer || null,
+                tableName: transaction.tableName || null,
+                tableId: transaction.tableId || null,
+                note: transaction.note || '',
+                refunded: false,
+                tableTime: transaction.tableTime || '',
+                startTime: transaction.startTime || null,
+                endTime: transaction.endTime || null,
+                creditUsed: transaction.creditUsed || 0,
+                prepaidChange: transaction.prepaidChange || 0
+            };
+            if (user && user.displayName) tx.createdByName = user.displayName;
+            if (user && user.role) tx.createdByRole = user.role;
+            return DB.create('transactions', tx);
+        } catch (e) {
+            console.error('[TAKEAWAY] addHistory lỗi:', e);
+            return Promise.resolve();
+        }
+    };
     window.renderRecentTransactions = function() {};
     window.formatMoney = function(amount) {
         if (amount === null || amount === undefined) amount = 0;
@@ -359,14 +402,26 @@
     window.handleCashPayment = function(amount, invoiceId) {
         return Promise.resolve();
     };
+    // Các helper nằm ở tables.js (file này không load). order.js tham chiếu chúng
+    // trong một số nhánh; trang này chỉ dùng handleTakeawayPayment/handleGrabOrder
+    // nhưng stub cho an toàn để không bao giờ gặp ReferenceError.
+    window._withRealtimeSuppressed = function(fn) {
+        try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); }
+    };
+    window.closeCustomDenomInput = function() {};
+    window._nextTableNumber = function(allTables) { return (allTables || []).length + 1; };
+    window._buildTableName = function(n) { return 'Bàn ' + n; };
+    window._getTableFromCache = function() { return Promise.resolve(null); };
+    window._calcTableTime = function() { return ''; };
+    window.isTableLocked = function() { return false; };
     </script>
     
     <!-- CHỈ LOAD NHỮNG GÌ CẦN CHO BÁN MANG ĐI -->
-    <script src="ingredients.js"></script>
-    <script src="notifications.js"></script>
-    <script src="order.js"></script>
-    <script src="customers.js"></script>
-    <script src="telegram.js"></script>
+    <script src="js.min/ingredients.min.js?v=1790853708102"></script>
+    <script src="js.min/notifications.min.js?v=1790853708102"></script>
+    <script src="js.min/order.min.js?v=1790853708102"></script>
+    <script src="js.min/customers.min.js?v=1790853708102"></script>
+    <script src="js.min/telegram.min.js?v=1790853708102"></script>
 
     <!-- ===== INLINE SCRIPT: KHỞI TẠO TAKEAWAY ===== -->
     <script>

@@ -14,13 +14,16 @@
 // ============================================================
 // 1. ESCAPE HELPERS
 // ============================================================
+// FIX: bản cũ dùng replace(/&/g,'&') -> identity cho & < > " (không escape gì),
+// chỉ dấu nháy đơn là đúng. Tên nhân viên / tên chức vụ chứa ký tự HTML sẽ phá
+// vỡ modal. Nay escape đủ, giống escapeHtml() ở pos-app.js.
 function empEscapeHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g, '&')
-              .replace(/</g, '<')
-              .replace(/>/g, '>')
-              .replace(/"/g, '"')
-              .replace(/'/g, '&#039;');
+    return str.replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
 }
 
 function empEscapeJsString(str) {
@@ -128,6 +131,14 @@ function empGetCurrentPeriod() {
 
 /** Lấy số ngày trong tháng */
 function empGetDaysInMonth(year, month) {
+    // FIX: trước đây new Date(year, 0, 0) với month=0 lặng lẽ trả về 31 ngày
+    // của tháng 12 năm trước, month=13 trả về 31/1 năm sau... Tính sai lương
+    // mà không có lỗi nào báo. Chặn lại ngay từ đầu.
+    year = parseInt(year, 10);
+    month = parseInt(month, 10);
+    if (isNaN(year) || isNaN(month)) return 0;
+    if (month < 1) month = 1;
+    if (month > 12) month = 12;
     return new Date(year, month, 0).getDate();
 }
 
@@ -529,9 +540,12 @@ function empLoadStaffList() {
                                 var attData = staffPeriods[monthKey] || staffPeriods[period] || null;
                                 if (attData) {
                                     if (!EMP.attendanceCache[attStaffId]) EMP.attendanceCache[attStaffId] = {};
+                                    // Lọc ngày sai tháng / trùng trước khi dùng
+                                    var mp = monthKey.split('-');
+                                    var cleanAtt = _empSanitizeAttendance(attData, parseInt(mp[0], 10), parseInt(mp[1], 10));
                                     EMP.attendanceCache[attStaffId][period] = {
-                                        offDays: (attData.offDays && Array.isArray(attData.offDays)) ? attData.offDays : [],
-                                        otDays: (attData.otDays && Array.isArray(attData.otDays)) ? attData.otDays : []
+                                        offDays: cleanAtt.offDays,
+                                        otDays: cleanAtt.otDays
                                     };
                                 }
                             }
@@ -564,7 +578,7 @@ function empRenderStaffList() {
     var container = document.getElementById('empStaffListContainer');
     if (!container) return;
 
-    var searchTerm = (document.getElementById('empSearchInput')?.value || '').toLowerCase().trim();
+    var searchTerm = ((document.getElementById('empSearchInput')||{}).value || '').toLowerCase().trim();
     var staffs = EMP.staffs;
 
     if (!staffs || staffs.length === 0) {
@@ -636,12 +650,12 @@ function empCalculateStaffSalary(staffId, period) {
     var daysInPeriod = periodInfo.days;       // Tổng ngày trong kỳ (20/N → 19/N+1)
 
     // Lấy dữ liệu attendance
-    var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+    var attendance = (((EMP.attendanceCache||{})[staffId])||{})[period] || {};
     var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
     var otDays = (attendance.otDays && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
 
     // Lấy dữ liệu lương từ cache
-    var salaryData = EMP.salaryCache[staffId]?.[period] || {};
+    var salaryData = (((EMP.salaryCache||{})[staffId])||{})[period] || {};
 
     // Lấy dailySalary từ cache, nếu không hợp lệ thì fallback về staff object
     var dailySalary = salaryData.dailySalary;
@@ -681,7 +695,23 @@ function empCalculateStaffSalary(staffId, period) {
     // Lương full = lương_ngày × số_ngày_tháng_N
     // Nghỉ 1 ngày trong kỳ → trừ 1 ngày công
     // Tăng ca 1 ngày trong kỳ → cộng 1 ngày công
-    var workingDays = daysInMonth - offDays.length + otDays.length;
+    //
+    // FIX: chỉ tính những ngày thực sự nằm trong tháng N. Dữ liệu chấm công đọc
+    // từ Firebase không được lọc ngày (xem chỗ nạp: staffPeriods[monthKey]), nên
+    // nếu dữ liệu cũ lẫn ngày của tháng khác (sai sót khi nhập, copy từ kỳ
+    // trước) thì trước đây chỉ cần vài ngày lạ là cắng hết lương cả tháng,
+    // hoặc cộng vô hết tiền tăng ca.
+    var monthPrefix = year + '-' + ('0' + month).slice(-2) + '-';
+    var offInMonth = 0, otInMonth = 0;
+    var i;
+    for (i = 0; i < offDays.length; i++) {
+        if (typeof offDays[i] === 'string' && offDays[i].indexOf(monthPrefix) === 0) offInMonth++;
+    }
+    for (i = 0; i < otDays.length; i++) {
+        if (typeof otDays[i] === 'string' && otDays[i].indexOf(monthPrefix) === 0) otInMonth++;
+    }
+
+    var workingDays = daysInMonth - offInMonth + otInMonth;
     if (workingDays < 0) workingDays = 0;
     if (workingDays > daysInMonth * 2) workingDays = daysInMonth * 2; // tối đa gấp đôi
 
@@ -703,8 +733,8 @@ function empCalculateStaffSalary(staffId, period) {
         workingDays: workingDays,
         daysInPeriod: daysInPeriod,
         daysInMonth: daysInMonth,
-        offDays: offDays.length,
-        otDays: otDays.length,
+        offDays: offInMonth,
+        otDays: otInMonth,
         revenueBonus: revenueBonus,
         revenueBonusEnabled: revenueBonusEnabled,
         manualBonus: manualBonus,
@@ -733,7 +763,7 @@ function empCalculateRevenueBonus(staffId, period, year, month) {
     if (!revenueCache) return 0;
 
     // Lấy danh sách ngày off của nhân viên trong kỳ này
-    var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+    var attendance = (((EMP.attendanceCache||{})[staffId])||{})[period] || {};
     var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
 
     // Tính theo tháng N (1 → hết tháng N) để đồng bộ với lịch LLV
@@ -776,7 +806,7 @@ function empShowRevenueBonusDetail() {
     var staffId = EMP.currentStaffId;
     var offDays = [];
     if (staffId) {
-        var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+        var attendance = (((EMP.attendanceCache||{})[staffId])||{})[period] || {};
         offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
     }
 
@@ -939,7 +969,21 @@ function empUpdateDailyRevenue(dateStr) {
     // Đọc transactions của ngày đó từ DB
     if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDate === 'function') {
         DB.getTransactionsByDate(dateStr).then(function(transactions) {
-            if (!transactions || transactions.length === 0) return;
+            // FIX: trước đây hàm return sớm khi không có giao dịch nào, nên
+            // Firebase giữ nguyên doanh thu cũ của ngày đó mãi mãi. Đơn bị
+            // huỷ hết hoặc bàn bị xoá thì doanh thu về 0 nhưng thưởng 1%
+            // vẫn được tính trên số cũ. Bây giờ ghi 0 xuống cho đúng.
+            // (empRecalculateDailyRevenueForPeriod cũng tự làm việc này cho
+            // cả tháng mỗi khi mở modal quản lý nhân viên.)
+            if (!transactions || transactions.length === 0) {
+                _empDailyRevenueCache[dateStr] = {
+                    total: 0, cash: 0, transfer: 0, grab: 0,
+                    debtPayment: 0, prepayment: 0, orderCount: 0,
+                    timestamp: Date.now()
+                };
+                _debounceFirebaseWrite(shopId, dateStr, _empDailyRevenueCache[dateStr]);
+                return;
+            }
 
             var total = 0;
             var cash = 0, transfer = 0, grab = 0;
@@ -951,6 +995,12 @@ function empUpdateDailyRevenue(dateStr) {
                 if (!tx || tx.refunded) continue;
                 // Bỏ qua ghi nợ - chỉ tính doanh thu thực tế
                 if (tx.paymentMethod === 'debt') continue;
+                // FIX: xoá bàn KHÔNG phải doanh thu. Giao dịch loại này có
+                // amount = tổng tiền bàn vừa xoá; trước đây bị cộng vào
+                // doanh thu nên thưởng 1% cho nhân viên cao hơn, trong khi
+                // báo cáo Quản lý (manager.js) đã loại bỏ loại này nên hai
+                // bên lệch nhau.
+                if (tx.type === 'delete_table') continue;
                 var amt = tx.amount || 0;
                 total += amt;
                 orderCount++;
@@ -1038,9 +1088,11 @@ function empRecalculateDailyRevenueForPeriod(year, month) {
             if (!tx || tx.refunded) continue;
             // Loại bỏ debt - chỉ tính doanh thu thực tế
             if (tx.paymentMethod === 'debt') continue;
-            var dateKey = tx.dateKey || tx.createdAt;
+            // FIX: xoá bàn không phải doanh thu (giống manager.js và
+            // empUpdateDailyRevenue)
+            if (tx.type === 'delete_table') continue;
+            var dateKey = _empTxDateKey(tx);
             if (!dateKey) continue;
-            if (dateKey.length > 10) dateKey = dateKey.slice(0, 10);
             if (!dailyMap[dateKey]) {
                 dailyMap[dateKey] = { total: 0, cash: 0, transfer: 0, grab: 0, orderCount: 0 };
             }
@@ -1051,27 +1103,106 @@ function empRecalculateDailyRevenueForPeriod(year, month) {
             else if (tx.paymentMethod === 'transfer') dailyMap[dateKey].transfer += amt;
             else if (tx.paymentMethod === 'grab') dailyMap[dateKey].grab += amt;
         }
-        // Ghi đè lên Firebase - xóa dữ liệu cũ (kể cả debt)
-        var updates = {};
-        for (var ds in dailyMap) {
-            if (dailyMap.hasOwnProperty(ds)) {
-                updates[shopId + '/daily_revenue/' + ds] = {
-                    total: dailyMap[ds].total,
-                    cash: dailyMap[ds].cash,
-                    transfer: dailyMap[ds].transfer,
-                    grab: dailyMap[ds].grab,
-                    orderCount: dailyMap[ds].orderCount,
-                    updatedAt: Date.now()
-                };
+
+        // FIX: ngày đã có doanh thu trên Firebase nhưng nay không còn giao dịch
+        // nào (đơn bị huỷ hết, bàn bị xoá) sẽ bị giữ nguyên số cũ mãi mãi vì
+        // vòng lặp trên chỉ ghi những ngày CÓ dữ liệu. Đọc các node đang có
+        // rồi ghi 0 cho ngày không còn giao dịch, để thưởng doanh thu tự
+        // sửa khi dữ liệu bị sửa/hoàn tác.
+        return _empZeroStaleRevenueDays(shopId, year, month, dailyMap).then(function () {
+            // Ghi đè lên Firebase - xóa dữ liệu cũ (kể cả debt)
+            var updates = {};
+            for (var ds in dailyMap) {
+                if (dailyMap.hasOwnProperty(ds)) {
+                    updates[shopId + '/daily_revenue/' + ds] = {
+                        total: dailyMap[ds].total,
+                        cash: dailyMap[ds].cash,
+                        transfer: dailyMap[ds].transfer,
+                        grab: dailyMap[ds].grab,
+                        orderCount: dailyMap[ds].orderCount,
+                        updatedAt: Date.now()
+                    };
+                }
             }
-        }
-        if (Object.keys(updates).length > 0) {
-            firebase.database().ref().update(updates).catch(function(err) {
-                console.error('empRecalculateDailyRevenueForPeriod error:', err);
-            });
-        }
+            if (Object.keys(updates).length > 0) {
+                return firebase.database().ref().update(updates);
+            }
+            return null;
+        });
     }).catch(function(err) {
-        console.error('empRecalculateDailyRevenueForPeriod fetch error:', err);
+        console.error('empRecalculateDailyRevenueForPeriod error:', err);
+    });
+}
+
+/**
+ * Lấy dateKey (YYYY-MM-DD) của một giao dịch.
+ * createdAt có thể là chuỗi ISO hoặc TIMESTAMP dạng số. Trước đây code dùng
+ * `tx.dateKey || tx.createdAt` rồi `slice(0,10)` - với timestamp dạng số thì
+ * `.length` là undefined nên không cắt được, kết quả ghi Firebase thành
+ * `daily_revenue/1786726800000` thay vì `daily_revenue/2026-08-15`. Node
+ * đúng không bao giờ được tạo/cập nhật nên thưởng doanh thu của ngày đó bị
+ * thiếu hoặc dùng số cũ.
+ */
+function _empTxDateKey(tx) {
+    if (!tx) return '';
+    if (typeof tx.dateKey === 'string' && tx.dateKey.length >= 10) {
+        return tx.dateKey.slice(0, 10);
+    }
+    var raw = tx.date;
+    if (typeof raw !== 'string' && typeof raw !== 'number') raw = tx.createdAt;
+    if (typeof raw === 'number') {
+        if (raw <= 0) return '';       // 0 / âm = không có mốc thời gian
+        var dn = new Date(raw);
+        if (isNaN(dn.getTime())) return '';
+        return dn.getFullYear() + '-' + ('0' + (dn.getMonth() + 1)).slice(-2) + '-' + ('0' + dn.getDate()).slice(-2);
+    }
+    if (typeof raw === 'string' && raw.length >= 10) {
+        return raw.slice(0, 10);
+    }
+    return '';
+}
+
+/**
+ * Ghi 0 cho các ngày trong tháng đang có doanh thu trên Firebase nhưng không
+ * còn giao dịch nào trong dailyMap.
+ */
+function _empZeroStaleRevenueDays(shopId, year, month, dailyMap) {
+    var ref = firebase.database().ref(shopId + '/daily_revenue');
+    return new Promise(function (resolve) {
+        var settled = false;
+        function done() { if (!settled) { settled = true; resolve(null); } }
+        var timer = setTimeout(done, 3000);   // không chờ vô hạn nếu mạng lỗi
+        try {
+            ref.once('value', function (snap) {
+                clearTimeout(timer);
+                var all = snap && snap.val ? snap.val() : null;
+                var updates = null;
+                if (all && typeof all === 'object') {
+                    var prefix = year + '-' + ('0' + month).slice(-2) + '-';
+                    for (var ds in all) {
+                        if (!all.hasOwnProperty(ds)) continue;
+                        if (ds.indexOf(prefix) !== 0) continue;   // chỉ trong tháng này
+                        if (dailyMap[ds]) continue;               // ngày còn dữ liệu
+                        var v = all[ds];
+                        if (v && (v.total || 0) === 0 && (v.orderCount || 0) === 0) continue;
+                        if (!updates) updates = {};
+                        updates[shopId + '/daily_revenue/' + ds] = {
+                            total: 0, cash: 0, transfer: 0, grab: 0,
+                            orderCount: 0, updatedAt: Date.now()
+                        };
+                    }
+                }
+                if (updates) {
+                    firebase.database().ref().update(updates)
+                        .then(done).catch(done);
+                } else {
+                    done();
+                }
+            }).catch(done);
+        } catch (e) {
+            clearTimeout(timer);
+            done();
+        }
     });
 }
 
@@ -1130,11 +1261,15 @@ function _updateRevenueCacheEntry(dateStr, dayData) {
     if (!EMP._revenueCache) EMP._revenueCache = {};
     if (typeof dayData === 'number') {
         EMP._revenueCache[dateStr] = dayData;
-    } else if (typeof dayData === 'object') {
+    } else if (dayData && typeof dayData === 'object') {
         // Ưu tiên cash+transfer+grab nếu có
         if (dayData.cash !== undefined || dayData.transfer !== undefined || dayData.grab !== undefined) {
             EMP._revenueCache[dateStr] = (dayData.cash || 0) + (dayData.transfer || 0) + (dayData.grab || 0);
-        } else if (dayData.total) {
+        } else if (dayData.total !== undefined && dayData.total !== null) {
+            // FIX: trước đây dùng `if (dayData.total)` nên khi doanh thu về 0
+            // (đơn bị huỷ, sửa lại giao dịch) thì nhánh này không chạy, cache
+            // giữ nguyên số cũ và thưởng doanh thu bị tính sai.
+            // Phải kiểm tra có tồn tại hay không, không kiểm tra giá trị khác 0.
             EMP._revenueCache[dateStr] = dayData.total;
         }
     }
@@ -1168,11 +1303,19 @@ function empLoadRevenueData(year, month) {
 
     var cacheKey = year + '-' + String(month).padStart(2, '0');
     if (!EMP._revenueLoading) EMP._revenueLoading = {};
+    // Chống gọi chồng nhau trong lúc đang tải. Cờ được XOÁ khi tải xong
+    // (xem .finally ở cuối) để lần sau vào lại kỳ đó vẫn nạp lại được từ
+    // Firebase. Trước đây cờ bật mãi không tắt, nên chuyển kỳ 8 → 9 → 8 thì
+    // lần thứ hai vào kỳ 8 không bao giờ đọc lại, dữ liệu máy khác sửa vô
+    // không thấy.
     if (EMP._revenueLoading[cacheKey]) return;
     EMP._revenueLoading[cacheKey] = true;
 
     var shopId = empGetShopId();
-    if (!shopId || typeof firebase === 'undefined') return;
+    if (!shopId || typeof firebase === 'undefined') {
+        delete EMP._revenueLoading[cacheKey];   // không tải được -> cho phép thử lại
+        return;
+    }
 
     // Tính theo tháng N (1 → hết tháng N)
     var startDate = year + '-' + String(month).padStart(2, '0') + '-01';
@@ -1191,11 +1334,13 @@ function empLoadRevenueData(year, month) {
                     EMP._revenueCache[dateStr] = dayData;
                     hasData = true;
                 } else if (typeof dayData === 'object') {
-                    // Uu tien cash+transfer+grab neu co
+                    // Ưu tiên cash+transfer+grab nếu có
                     if (dayData.cash !== undefined || dayData.transfer !== undefined || dayData.grab !== undefined) {
                         EMP._revenueCache[dateStr] = (dayData.cash || 0) + (dayData.transfer || 0) + (dayData.grab || 0);
                         hasData = true;
-                    } else if (dayData.total) {
+                    } else if (dayData.total !== undefined && dayData.total !== null) {
+                        // FIX: `if (dayData.total)` bỏ qua giá trị 0, khiến
+                        // ngày doanh thu = 0 không được nạp vào cache.
                         EMP._revenueCache[dateStr] = dayData.total;
                         hasData = true;
                     }
@@ -1224,9 +1369,13 @@ function empLoadRevenueData(year, month) {
                         var tx = transactions[i];
                         if (!tx || tx.refunded) continue;
                         if (tx.paymentMethod === 'debt') continue;
-                        var dateKey = tx.dateKey || tx.createdAt;
+                        // FIX: xoá bàn không phải doanh thu
+                        if (tx.type === 'delete_table') continue;
+                        // FIX: dateKey phải là YYYY-MM-DD. createdAt có thể là
+                        // timestamp số, `.length` lúc đó là undefined nên
+                        // slice() không chạy và key ra số như "1786726800000".
+                        var dateKey = _empTxDateKey(tx);
                         if (!dateKey) continue;
-                        if (dateKey.length > 10) dateKey = dateKey.slice(0, 10);
                         if (!dailyMap[dateKey]) dailyMap[dateKey] = 0;
                         dailyMap[dateKey] += tx.amount || 0;
                     }
@@ -1239,7 +1388,15 @@ function empLoadRevenueData(year, month) {
                     for (var ds in dailyMap) {
                         if (dailyMap.hasOwnProperty(ds)) {
                             var fbRef = firebase.database().ref(shopId + '/daily_revenue/' + ds);
+                            // FIX: update() GỘP, không thay thế. Node cũ có
+                            // cash/transfer/grab từ lần ghi trước vẫn còn nguyên,
+                            // mà cả employees.js và bonus_fund.js đều ưu tiên
+                            // cash+transfer+grab hơn total -> đọc ra số CŨ
+                            // dù total vừa ghi là số mới. Gán null để xoá hẳn.
                             fbRef.update({
+                                cash: null,
+                                transfer: null,
+                                grab: null,
                                 total: dailyMap[ds],
                                 updatedAt: Date.now()
                             }).catch(function() {});
@@ -1260,6 +1417,10 @@ function empLoadRevenueData(year, month) {
         }
     }).catch(function(err) {
         console.error('empLoadRevenueData fetch error:', err);
+    }).finally(function () {
+        // Xoá cờ sau khi xong (thành công hay lỗi) để lần sau vào lại kỳ này
+        // vẫn nạp lại được.
+        delete EMP._revenueLoading[cacheKey];
     });
 }
 
@@ -1353,7 +1514,7 @@ function empRenderStaffDetail(staff) {
         daysInMonth = salaryInfo.daysInMonth;
     } else {
         // Load từ cache hoặc Firebase
-        var sd = EMP.salaryCache[staff.id]?.[period] || {};
+        var sd = (((EMP.salaryCache||{})[staff.id])||{})[period] || {};
         dailySalary = sd.dailySalary;
         manualBonus = sd.manualBonus || 0;
         manualPenalty = sd.manualPenalty || 0;
@@ -1453,7 +1614,7 @@ function empRenderStaffDetail(staff) {
                 '</div>' +
                 '<div class="emp-total-row" id="empTotalRevenueBonusRow" style="' + (revenueBonusEnabled ? '' : 'display:none;') + '">' +
                     '<span>🏆 Thưởng doanh thu:</span>' +
-                    '<span id="empTotalRevenueBonus">' + empFormatCurrency(salaryInfo?.revenueBonus || 0) + '</span>' +
+                    '<span id="empTotalRevenueBonus">' + empFormatCurrency(((salaryInfo||{}).revenueBonus) || 0) + '</span>' +
                 '</div>' +
                 '<div class="emp-total-row" style="color:#16a34a;">' +
                     '<span>➕ Thưởng thêm:</span>' +
@@ -1508,11 +1669,11 @@ function empBuildCalendar(period, staffId) {
 
     // Lấy attendance: ưu tiên attendance của kỳ hiện tại (period = tháng N)
     // Nếu không có, thử lấy attendance theo tháng (YYYY-MM)
-    var attendance = EMP.attendanceCache[staffId]?.[period] || {};
+    var attendance = (((EMP.attendanceCache||{})[staffId])||{})[period] || {};
     // Fallback: lấy attendance theo đúng tháng (nếu lưu theo tháng)
     var monthKey = year + '-' + String(month).padStart(2, '0');
     if (!attendance.offDays && !attendance.otDays) {
-        attendance = EMP.attendanceCache[staffId]?.[monthKey] || attendance;
+        attendance = (((EMP.attendanceCache||{})[staffId])||{})[monthKey] || attendance;
     }
     var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
     var otDays = (attendance.otDays && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
@@ -1717,9 +1878,9 @@ function empRecalculateSalary() {
     var penaltyInput = document.getElementById('empDetailPenalty');
     var revenueCheckbox = document.getElementById('empDetailRevenueBonus');
 
-    var dailySalary = parseFloat(dailySalaryInput?.value) || 0;
-    var manualBonus = parseFloat(bonusInput?.value) || 0;
-    var manualPenalty = parseFloat(penaltyInput?.value) || 0;
+    var dailySalary = parseFloat((dailySalaryInput||{}).value) || 0;
+    var manualBonus = parseFloat((bonusInput||{}).value) || 0;
+    var manualPenalty = parseFloat((penaltyInput||{}).value) || 0;
     var revenueBonusEnabled = revenueCheckbox ? revenueCheckbox.checked : false;
 
     // Cập nhật cache
@@ -1810,7 +1971,7 @@ function empChangePeriod(delta) {
         // Cập nhật giá trị input Thưởng/Phạt theo kỳ mới TRƯỚC khi tính lại lương
         var bonusInput = document.getElementById('empDetailBonus');
         var penaltyInput = document.getElementById('empDetailPenalty');
-        var sd = EMP.salaryCache[EMP.currentStaffId]?.[newPeriod] || {};
+        var sd = (((EMP.salaryCache||{})[EMP.currentStaffId])||{})[newPeriod] || {};
         if (bonusInput) bonusInput.value = sd.manualBonus || 0;
         if (penaltyInput) penaltyInput.value = sd.manualPenalty || 0;
 
@@ -1841,6 +2002,9 @@ function empLoadAttendance(staffId, period) {
         // Đảm bảo offDays và otDays luôn là array
         if (!data.offDays || !Array.isArray(data.offDays)) data.offDays = [];
         if (!data.otDays || !Array.isArray(data.otDays)) data.otDays = [];
+        // Dữ liệu cũ có thể chứa ngày sai tháng / trùng / vừa nghỉ vừa tăng
+        // ca. Lọc ngay khi nạp để lịch hiển thị và lương tính khớp nhau.
+        data = _empSanitizeAttendance(data, year, month);
         if (!EMP.attendanceCache[staffId]) EMP.attendanceCache[staffId] = {};
         // Lưu theo monthKey để lịch tháng có thể đọc được
         EMP.attendanceCache[staffId][monthKey] = data;
@@ -1858,13 +2022,70 @@ function empLoadAttendance(staffId, period) {
 // ============================================================
 // 20. LƯU BẢNG LƯƠNG + ATTENDANCE
 // ============================================================
+/**
+ * Làm sạch dữ liệu chấm công trước khi ghi lên Firebase.
+ *
+ * Trả về { offDays, otDays } chỉ chứa ngày hợp lệ của tháng N:
+ *   - ngày phải là chuỗi YYYY-MM-DD thuộc đúng tháng N
+ *   - không trùng lặp
+ *   - một ngày không được vừa là ngày nghỉ vừa là ngày tăng ca
+ *
+ * Không làm bước này thì dữ liệu sai nhập tay tích tụ dần: một ngày nhập
+ * sai tháng sẽ được lưu lên Firebase rồi tải xuống mọi máy khác, và lương
+ * các kỳ sau cũng bị ảnh hưởng.
+ */
+function _empSanitizeAttendance(attendance, year, month) {
+    year = parseInt(year, 10);
+    month = parseInt(month, 10);
+    if (isNaN(year) || isNaN(month)) return { offDays: [], otDays: [] };
+    if (month < 1) month = 1;
+    if (month > 12) month = 12;
+    var prefix = year + '-' + ('0' + month).slice(-2) + '-';
+    var maxDay = empGetDaysInMonth(year, month);
+    var seen = {};
+    var off = [], ot = [];
+
+    // Ngày phải tồn tại thật trong tháng: 31/4, 30/2 đều là ngày sai.
+    function _validDay(d) {
+        if (typeof d !== 'string') return null;
+        d = d.slice(0, 10);
+        if (d.length !== 10 || d.indexOf(prefix) !== 0) return null;
+        var dayNum = parseInt(d.slice(8), 10);
+        if (isNaN(dayNum) || dayNum < 1 || dayNum > maxDay) return null;
+        return d;
+    }
+
+    var rawOff = (attendance && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
+    for (var i = 0; i < rawOff.length; i++) {
+        var d = _validDay(rawOff[i]);
+        if (!d) continue;
+        if (seen[d]) continue;                                       // trùng -> bỏ
+        seen[d] = 'off';
+        off.push(d);
+    }
+
+    var rawOt = (attendance && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
+    for (var j = 0; j < rawOt.length; j++) {
+        var o = _validDay(rawOt[j]);
+        if (!o) continue;
+        // Ngày đã đánh dấu nghỉ thì không được tính thêm tăng ca
+        if (seen[o]) continue;
+        seen[o] = 'ot';
+        ot.push(o);
+    }
+
+    off.sort();
+    ot.sort();
+    return { offDays: off, otDays: ot };
+}
+
 function empSaveStaffSalary(staffId) {
     if (!staffId) return;
 
     var period = EMP.currentPeriod || empGetCurrentPeriod();
-    var dailySalary = parseFloat(document.getElementById('empDetailDailySalary')?.value) || 0;
-    var manualBonus = parseFloat(document.getElementById('empDetailBonus')?.value) || 0;
-    var manualPenalty = parseFloat(document.getElementById('empDetailPenalty')?.value) || 0;
+    var dailySalary = parseFloat((document.getElementById('empDetailDailySalary')||{}).value) || 0;
+    var manualBonus = parseFloat((document.getElementById('empDetailBonus')||{}).value) || 0;
+    var manualPenalty = parseFloat((document.getElementById('empDetailPenalty')||{}).value) || 0;
     var revenueCheckbox = document.getElementById('empDetailRevenueBonus');
     var revenueBonusEnabled = revenueCheckbox ? revenueCheckbox.checked : false;
 
@@ -1895,11 +2116,17 @@ function empSaveStaffSalary(staffId) {
         // Lưu attendance theo tháng (monthKey = YYYY-MM)
         var parts = period.split('-');
         var monthKey = parts[0] + '-' + parts[1];
-        var attendance = EMP.attendanceCache[staffId]?.[monthKey] ||
-                         EMP.attendanceCache[staffId]?.[period] ||
+        var attendance = (((EMP.attendanceCache||{})[staffId])||{})[period] ||
                          { offDays: [], otDays: [] };
+        // FIX: chỉ ghi ngày hợp lệ của tháng N, bỏ trùng, bỏ ngày vừa
+        // nghỉ vừa tăng ca. Ghi thẳng cache lên Firebase là đẩy cả dữ liệu
+        // nhập sai lên mọi máy khác và làm hỏng lương các kỳ sau.
+        var cleanAtt = _empSanitizeAttendance(attendance, parseInt(parts[0], 10), parseInt(parts[1], 10));
+        // Đồng bộ cache trong RAM với đã lưu
+        if (!EMP.attendanceCache[staffId]) EMP.attendanceCache[staffId] = {};
+        EMP.attendanceCache[staffId][period] = cleanAtt;
         var attRef = firebase.database().ref(shopId + '/employee_attendance/' + staffId + '/' + monthKey);
-        return attRef.set(attendance);
+        return attRef.set(cleanAtt);
     }).then(function() {
         // Cập nhật cache
         if (!EMP.salaryCache[staffId]) EMP.salaryCache[staffId] = {};
@@ -1972,7 +2199,7 @@ function empHandleAddStaff() {
     var user = username.value.trim();
     var pass = password.value;
     var name = displayName ? displayName.value.trim() : user;
-    var salary = parseFloat(dailySalary?.value) || 0;
+    var salary = parseFloat((dailySalary||{}).value) || 0;
     var revenueBonus = revenueCheckbox ? revenueCheckbox.checked : false;
 
     if (!user || !pass) {
@@ -2209,8 +2436,8 @@ function empToggleStaffRole(staffId, currentRole) {
 }
 
 function empCreateNewStaff() {
-    var username = document.getElementById('newStaffUsername')?.value.trim();
-    var password = document.getElementById('newStaffPassword')?.value.trim();
+    var username = (document.getElementById('newStaffUsername')||{}).value.trim();
+    var password = (document.getElementById('newStaffPassword')||{}).value.trim();
 
     if (!username || !password) {
         showToast('⚠️ Vui lòng nhập tên đăng nhập và mật khẩu', 'warning');
@@ -2389,7 +2616,7 @@ function empUpdateManagerButton(optPeriod) {
             if (!st || !st.id) continue;
 
             // Lấy dailySalary và revenueBonusEnabled từ salaryCache trước
-            var cached = EMP.salaryCache[st.id]?.[period];
+            var cached = (((EMP.salaryCache||{})[st.id])||{})[period];
             var dailySalary = 0;
             var revenueBonusEnabled = false;
 
@@ -2412,7 +2639,7 @@ function empUpdateManagerButton(optPeriod) {
             }
 
             // Tính ngày công
-            var attendance = EMP.attendanceCache[st.id]?.[period] || {};
+            var attendance = (((EMP.attendanceCache||{})[st.id])||{})[period] || {};
             var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
             var otDays = (attendance.otDays && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
             var workingDays = daysInMonth - offDays.length + otDays.length;
@@ -2534,9 +2761,10 @@ window.loadStaffPermissionList = empLoadStaffPermissionList;
 window.toggleStaffRole = empToggleStaffRole;
 window.createNewStaff = empCreateNewStaff;
 window.deleteStaff = empDeleteStaff;
-window.showAddStaffForm = function() {};
-window.hideAddStaffForm = function() {};
-window.handleAddStaff = function() {};
+// showAddStaffForm / hideAddStaffForm / handleAddStaff: UI thêm nhân viên đã
+// chuyển vào modal của openStaffManager() và dùng empHandleAddStaff() trực tiếp
+// (onclick="empHandleAddStaff()"). Ba hàm rỗng này không có call site nào trong
+// index.html nên đã gỡ. Trước đây chúng ghi đè bản ở auth.js bằng hàm rỗng.
 window.openEmployeeDetail = function(staffId) {
     openStaffManager();
     setTimeout(function() {

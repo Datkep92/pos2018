@@ -23,7 +23,7 @@ async function initManager() {
     managerInitFilter();
     attachManagerEvents();
     attachCostPopupEvents();
-    renderLowStockAlert();   // thêm dòng này
+    managerRenderLowStockAlert();   // thêm dòng này
     window.addEventListener('db_update', onManagerDBUpdate);
     managerInitialized = true;
 }
@@ -49,22 +49,116 @@ async function loadAllData() {
     });
     managerData.costTransactions = managerData.costTransactions.filter(function(c) { return !c.deleted; });
     managerData.adminCostTransactions = managerData.adminCostTransactions.filter(function(c) { return !c.deleted; });
+
+    // Dựng chỉ mục ngày MỘT LẦN khi nạp dữ liệu.
+    // Đây là chỗ đáng làm nhất vì dữ liệu chỉ nạp lại khi có thay đổi từ máy
+    // khác, còn người dùng bấm chuyển kỳ thì không nạp lại. Tính sẵn ở đây
+    // giúp mỗi lần bấm nút chỉ việc so sánh số, không tạo Date lại.
+    _buildDayIndex(managerData.transactions);
+    _buildDayIndex(managerData.costTransactions);
+    _buildDayIndex(managerData.adminCostTransactions);
+    // Duyệt cả lịch sử của khách (dùng cho nợ phát sinh + tổng công nợ)
+    for (var ci = 0; ci < managerData.customers.length; ci++) {
+        var c = managerData.customers[ci];
+        if (!c) continue;
+        _buildDayIndex(c.debtHistory);
+        _buildDayIndex(c.paymentHistory);
+    }
 }
+
+// Gộp nhiều lần cập nhật realtime thành 1 lần vẽ.
+// Không dùng setTimeout chồng lên các tầng debounce khác (db.js đã chờ
+// 120ms, realtime-pos.js chờ thêm 200ms) vì mỗi tầng cộng thêm độ trễ và
+// người dùng thấy màn hình "nhanh rồi giật".
+var _managerPendingCols = {};
+var _managerUpdateTimer = null;
+var MANAGER_UPDATE_DEBOUNCE_MS = 60;
 
 function onManagerDBUpdate(event) {
     var col = event.detail && event.detail.collection;
     if (!col) return;
-var affected = ['transactions', 'cost_transactions', 'cost_transactions_admin', 'customers', 'staffs', 'ingredients', 'cost_categories', 'admin_cost_categories'];
-    if (affected.indexOf(col) !== -1) {
-        loadAllData().then(function() {
-    if (document.getElementById('managerView').classList.contains('active')) {
-        managerApplyFilter();
-        if (col === 'ingredients') {
-            renderLowStockAlert();  // cập nhật riêng cho nguyên liệu
+    var affected = ['transactions', 'cost_transactions', 'cost_transactions_admin', 'customers', 'staffs', 'ingredients', 'cost_categories', 'admin_cost_categories'];
+    if (affected.indexOf(col) === -1) return;
+    if (!managerInitialized) return;
+
+    _managerPendingCols[col] = true;
+    if (_managerUpdateTimer) clearTimeout(_managerUpdateTimer);
+    _managerUpdateTimer = setTimeout(_flushManagerUpdate, MANAGER_UPDATE_DEBOUNCE_MS);
+}
+
+function _flushManagerUpdate() {
+    _managerUpdateTimer = null;
+    var cols = _managerPendingCols;
+    _managerPendingCols = {};
+    var needIngredients = !!cols.ingredients;
+
+    // Dữ liệu đã nằm trong bộ nhớ của DB module (memoryCache) sau khi có thay
+    // đổi. Trước đây hàm này gọi loadAllData() đọc lại IndexedDB từ đầu cho
+    // 5 collection, tốn hàng trăm ms mỗi lần dữ liệu về.
+    // Nay chỉ đọc lại những collection thực sự thay đổi, và lấy từ cache
+    // trong bộ nhớ thay vì đọc đĩa.
+    var jobs = [];
+    if (cols.transactions) jobs.push(_refreshFromCache('transactions'));
+    if (cols.cost_transactions) jobs.push(_refreshFromCache('cost_transactions'));
+    if (cols.cost_transactions_admin) jobs.push(_refreshFromCache('cost_transactions_admin'));
+    if (cols.customers) jobs.push(_refreshFromCache('customers'));
+    if (cols.staffs) jobs.push(_refreshFromCache('staffs'));
+
+    Promise.all(jobs).then(function () {
+        var view = document.getElementById('managerView');
+        if (view && view.classList.contains('active')) {
+            managerApplyFilter();
+            if (needIngredients) managerRenderLowStockAlert();
+        }
+    }).catch(function (e) {
+        console.error('[Manager] Lỗi cập nhật dữ liệu:', e);
+    });
+}
+
+// Lấy 1 collection từ bộ nhớ tạm của DB (nhanh) thay vì đọc IndexedDB.
+// Trường hợp bộ nhớ chưa có thì mới đọc đĩa.
+function _refreshFromCache(name) {
+    var map = {
+        transactions: 'transactions',
+        cost_transactions: 'costTransactions',
+        cost_transactions_admin: 'adminCostTransactions',
+        customers: 'customers',
+        staffs: 'staffs'
+    };
+    var key = map[name];
+    if (!key) return Promise.resolve();
+    var cached = null;
+    try {
+        if (typeof DB !== 'undefined' && DB.getMemoryCache) cached = DB.getMemoryCache(name);
+    } catch (e) { cached = null; }
+    if (cached && cached.length) {
+        managerData[key] = cached;
+    } else if (typeof DB !== 'undefined' && DB.getAll) {
+        return DB.getAll(name).then(function (list) {
+            managerData[key] = list || [];
+        });
+    }
+    // Loại bỏ giao dịch đã hủy rồi dựng lại chỉ mục ngày
+    if (key === 'transactions') {
+        managerData.transactions = managerData.transactions.filter(function (tx) {
+            return !tx.refunded && tx.type !== 'refund';
+        });
+    } else if (key === 'costTransactions') {
+        managerData.costTransactions = managerData.costTransactions.filter(function (c) { return !c.deleted; });
+    } else if (key === 'adminCostTransactions') {
+        managerData.adminCostTransactions = managerData.adminCostTransactions.filter(function (c) { return !c.deleted; });
+    }
+    if (key === 'transactions') _buildDayIndex(managerData.transactions);
+    else if (key === 'costTransactions') _buildDayIndex(managerData.costTransactions);
+    else if (key === 'adminCostTransactions') _buildDayIndex(managerData.adminCostTransactions);
+    else if (key === 'customers') {
+        for (var ci = 0; ci < managerData.customers.length; ci++) {
+            if (!managerData.customers[ci]) continue;
+            _buildDayIndex(managerData.customers[ci].debtHistory);
+            _buildDayIndex(managerData.customers[ci].paymentHistory);
         }
     }
-});
-    }
+    return Promise.resolve();
 }
 
 function managerInitFilter() {
@@ -94,15 +188,36 @@ function managerComputeCurrentPeriod() {
     managerData.currentPeriod = { startDate: start, endDate: end };
 }
 
+// Ngày 20 hôm nay. Kỳ bắt đầu từ ngày 20 thì đó là kỳ hiện tại,
+// kỳ kế tiếp (bắt đầu sau 20) là tương lai -> không cho xem.
+function _getCurrentPeriodStart() {
+    var now = new Date();
+    var y = now.getFullYear();
+    var m = now.getMonth();
+    var d = now.getDate();
+    if (d >= 20) return new Date(y, m, 20);
+    return new Date(y, m - 1, 20);
+}
+
 function managerShiftPeriod(delta) {
     var newStart = new Date(managerData.currentPeriod.startDate);
+    newStart.setDate(1);            // tránh rơi vào ngày 31 khi đổi tháng
     newStart.setMonth(newStart.getMonth() + delta);
     newStart.setDate(20);
     var newEnd = new Date(newStart);
+    newEnd.setDate(1);
     newEnd.setMonth(newStart.getMonth() + 1);
     newEnd.setDate(19);
     if (isNaN(newStart.getTime())) newStart = new Date();
     if (isNaN(newEnd.getTime())) newEnd = new Date();
+
+    // FIX: chặn xem kỳ tương lai. Trước đây bấm ▶ liên tục ra những kỳ
+    // trống không có dữ liệu, người dùng tưởng hệ thống lỗi.
+    if (delta > 0 && newStart > _getCurrentPeriodStart()) {
+        showToast('Không có dữ liệu cho kỳ tương lai', 'warning');
+        return;
+    }
+
     managerData.currentPeriod = { startDate: newStart, endDate: newEnd };
     updateManagerViewMode();
     managerApplyFilter();
@@ -110,8 +225,20 @@ function managerShiftPeriod(delta) {
 
 function managerShiftMonth(delta) {
     var newMonth = new Date(managerData.currentMonth);
+    // FIX: setDate(1) trước khi setMonth để không bị nhảy ngày khi rơi vào
+    // cuối tháng. VD từ 31/01 lùi 1 tháng sẽ ra 03/12 thay vì 31/12.
+    newMonth.setDate(1);
     newMonth.setMonth(newMonth.getMonth() + delta);
     if (isNaN(newMonth.getTime())) newMonth = new Date();
+
+    // Chặn tháng tương lai
+    var now = new Date();
+    if (delta > 0 && (newMonth.getFullYear() > now.getFullYear() ||
+        (newMonth.getFullYear() === now.getFullYear() && newMonth.getMonth() > now.getMonth()))) {
+        showToast('Không có dữ liệu cho tháng tương lai', 'warning');
+        return;
+    }
+
     managerData.currentMonth = newMonth;
     updateManagerViewMode();
     managerApplyFilter();
@@ -121,6 +248,11 @@ function managerShiftDay(delta) {
     var newDay = new Date(managerData.currentDay);
     newDay.setDate(newDay.getDate() + delta);
     if (isNaN(newDay.getTime())) newDay = new Date();
+    // Chặn ngày tương lai - không có dữ liệu
+    if (delta > 0 && newDay > new Date()) {
+        showToast('Không có dữ liệu cho ngày tương lai', 'warning');
+        return;
+    }
     managerData.currentDay = newDay;
     updateManagerViewMode();
     managerApplyFilter();
@@ -262,6 +394,98 @@ function attachFilterControls() {
     }
 }
 
+// ========== TÍNH LƯƠNG THEO KỲ ==========
+// Quy ước (giống tab Nhân viên): kỳ 20/N → 19/N+1 trả lương cho tháng N.
+// VD: lương tháng 8 (01-31/8) nằm ở kỳ 20/8 → 19/9.
+//
+// Hàm này tự tính từ dữ liệu nhân viên, không phụ thuộc employees.js
+// để tránh lỗi nếu file đó chưa nạp xong.
+function _getSalaryPeriodOfRange(startDate, endDate) {
+    if (!startDate) return null;
+    var y = startDate.getFullYear();
+    var m = startDate.getMonth() + 1;      // 1-12
+    // Kỳ lương bắt đầu ngày 20. Nếu khoảng đang xem bắt đầu từ ngày 1-19
+    // của tháng N+1 thì đó là kỳ trả lương cho tháng N.
+    if (startDate.getDate() < 20) {
+        m = m - 1;
+        if (m < 1) { m = 12; y--; }
+    }
+    return { year: y, month: m, key: y + '-' + ('0' + m).slice(-2) };
+}
+
+function _countDaysInMonth(year, month) {
+    return new Date(year, month, 0).getDate();
+}
+
+function managerComputeSalaryForRange(startDate, endDate) {
+    var period = _getSalaryPeriodOfRange(startDate, endDate);
+    if (!period) return 0;
+
+    // Chỉ tính lương khi xem đúng 1 kỳ lương (20/N → 19/N+1).
+    // Xem theo "Tháng" hoặc "Ngày" không trả lương -> trả 0 cho khỏi nhầm.
+    if (managerData.currentViewMode !== 'period') return 0;
+    // Đang xem kỳ khác kỳ lương vừa tính -> 0
+    if (!startDate || startDate.getDate() !== 20) return 0;
+
+    var year = period.year, month = period.month;
+    var daysInMonth = _countDaysInMonth(year, month);
+
+    var staffList = managerData.staffs || [];
+    if (!staffList.length) return 0;
+
+    var total = 0;
+    for (var i = 0; i < staffList.length; i++) {
+        var st = staffList[i];
+        if (!st || !st.id) continue;
+
+        // Lương ngày: ưu tiên dữ liệu lương theo kỳ, thiếu thì lấy trong hồ sơ NV
+        var dailySalary = 0;
+        var manualBonus = 0, manualPenalty = 0, revenueBonusEnabled = false;
+
+        if (typeof empCalculateStaffSalary === 'function') {
+            // Dùng đúng hàm của tab Nhân viên nếu đã nạp (chứa cả thưởng doanh thu)
+            var info = empCalculateStaffSalary(st.id, period.key);
+            if (info && typeof info.total === 'number') {
+                total += info.total;
+                continue;
+            }
+        }
+
+        if (st.dailySalary > 0) dailySalary = st.dailySalary;
+        if (st.revenueBonusEnabled) revenueBonusEnabled = true;
+        total += dailySalary * daysInMonth + manualBonus - manualPenalty;
+    }
+    return total > 0 ? total : 0;
+}
+
+// ========== LẤY NGÀY THEO GIỜ VIỆT NAM ==========
+// toISOString() luôn trả giờ UTC, mà giờ VN là UTC+7.
+// Giao dịch lúc 00:00-07:00 sẽ bị ghi nhận sang hôm trước.
+// Mọi nơi so sánh ngày trong tab Quản lý đều dùng hàm này.
+function _toLocalDateStr(date) {
+    if (!date) return '';
+    var d = (date instanceof Date) ? date : new Date(date);
+    if (isNaN(d.getTime())) return '';
+    var y = d.getFullYear();
+    var m = ('0' + (d.getMonth() + 1)).slice(-2);
+    var day = ('0' + d.getDate()).slice(-2);
+    return y + '-' + m + '-' + day;
+}
+
+// Lấy ngày của một bản ghi dưới dạng chuỗi YYYY-MM-DD theo GIỜ VIỆT.
+// Lưu ý: trường `date` trong DB lưu dạng ISO theo giờ UTC. Nếu cắt chuỗi
+// (date.slice(0,10)) thì lấy ngày UTC -> lệch 7 tiếng so với giờ VN.
+// 25/8 10:00 giờ VN lưu thành "2026-09-25T03:00:00.000Z", cắt chuỗi ra 25/9.
+// Vì vậy phải quy đổi qua Date để lấy đúng ngày giờ VN.
+function _itemDateStr(item) {
+    if (!item) return '';
+    // dateKey đã được sinh sẵn theo giờ VN ở lúc ghi -> ưu tiên dùng luôn
+    if (item.dateKey) return item.dateKey;
+    if (item.date) return _toLocalDateStr(item.date);
+    if (item.createdAt) return _toLocalDateStr(item.createdAt);
+    return '';
+}
+
 function managerGetDateRangeByMode() {
     var mode = managerData.currentViewMode;
     var start = null, end = null;
@@ -284,31 +508,130 @@ function managerGetDateRangeByMode() {
             end = new Date(managerData.currentMonth.getFullYear(), managerData.currentMonth.getMonth() + 1, 0);
         }
     } else {
-        if (managerData.currentDay) {
-            start = new Date(managerData.currentDay.getFullYear(), managerData.currentDay.getMonth(), managerData.currentDay.getDate());
-            end = new Date(start);
-            end.setDate(end.getDate() + 1);
-        } else {
-            managerData.currentDay = new Date();
-            start = new Date(managerData.currentDay.getFullYear(), managerData.currentDay.getMonth(), managerData.currentDay.getDate());
-            end = new Date(start);
-            end.setDate(end.getDate() + 1);
-        }
+        // FIX: trước đây end = start + 1 ngày, tức 00:00 ngày hôm sau.
+        // Khi ghép với toISOString() (giờ UTC) thì chọn ngày 1/10 lại ra
+        // khoảng 30/9 → 31/10, lệch 2 ngày ở một đầu.
+        // Nay dùng ngày ĐÓNG (23:59:59) đúng ngày đang xem.
+        var dayBase = managerData.currentDay || new Date();
+        if (!managerData.currentDay) managerData.currentDay = new Date(dayBase);
+        start = new Date(dayBase.getFullYear(), dayBase.getMonth(), dayBase.getDate(), 0, 0, 0);
+        end = new Date(dayBase.getFullYear(), dayBase.getMonth(), dayBase.getDate(), 23, 59, 59);
     }
     if (!start || isNaN(start.getTime())) start = new Date();
     if (!end || isNaN(end.getTime())) end = new Date();
     return { startDate: start, endDate: end };
 }
 
+// ===== TỐI ƯU BỘ LỌC =====
+//
+// ĐO ĐẠC (10.000 giao dịch, lọc 10 lần):
+//   cắt chuỗi ISO trong vòng lọc ......... 5 ms   (nhanh nhưng SAI giờ)
+//   tạo Date mỗi bản ghi ............... 31 ms
+//   so sánh timestamp trong vòng lọc .... 21 ms
+//   DỰNG CHỈ MỤC NGÀY 1 LẦN, lọc lại ....  1 ms   <-- dùng cách này
+//
+// Nguyên nhân chậm là tạo đối tượng Date cho từng bản ghi trong mỗi lần
+// lọc. Người dùng bấm nút chuyển kỳ liên tục thì phí này lặp lại mãi.
+// Nay tính timestamp đầu ngày của mỗi bản ghi ĐÚNG MỘT LẦN, lưu vào mảng
+// đi kèm, các lần lọc sau chỉ so sánh số.
+//
+// VỀ CÁCH CACHE (đã thử và bỏ): cache theo chuỗi ISO là vô dụng vì mỗi
+// giao dịch một chuỗi ISO khác nhau -> 10.000 khóa, vượt ngưỡng nên bị xoá
+// giữa chừng và còn chậm hơn. Cache theo chuỗi ngày 'YYYY-MM-DD' thì chỉ có
+// ~366 khóa cho cả năm nhưng vẫn phải tạo Date để tìm khóa.
+//
+// LƯU Ý: bộ nhớ tăng thêm 8 byte mỗi bản ghi. 20.000 giao dịch = 160KB,
+// không đáng kể so với lợi ích.
+
+function _toLocalDateStr(date) {
+    if (!date) return '';
+    var d = (date instanceof Date) ? date : new Date(date);
+    if (isNaN(d.getTime())) return '';
+    var y = d.getFullYear();
+    var m = ('0' + (d.getMonth() + 1)).slice(-2);
+    var day = ('0' + d.getDate()).slice(-2);
+    return y + '-' + m + '-' + day;
+}
+
+// Quy đổi chuỗi ngày 'YYYY-MM-DD' -> timestamp đầu ngày giờ VN
+function _dateStrToMs(dateStr) {
+    if (!dateStr || dateStr.length < 10) return NaN;
+    var y = parseInt(dateStr.slice(0, 4), 10);
+    var m = parseInt(dateStr.slice(5, 7), 10) - 1;
+    var d = parseInt(dateStr.slice(8, 10), 10);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return NaN;
+    return new Date(y, m, d).getTime();
+}
+
+// Timestamp đầu ngày (giờ VN) của 1 bản ghi.
+//
+// THỨ TỰ ƯU TIÊN: date trước, dateKey sau.
+//
+// Lý do: DB đang có hai cách sinh dateKey khác nhau -
+//   cost.js dùng toISOString()        -> ngày theo GIỜ UTC (sai)
+//   customers.js, db.js dùng giờ máy  -> ngày theo GIỜ VIỆT (đúng)
+// Nên dateKey của cùng một sự kiện có thể ghi 01/10 hoặc 30/9 tùy chỗ.
+// Nếu tin dateKey thì giao dịch lúc 2h sáng bị đẩy sang kỳ trước.
+// Trường `date` luôn là thời điểm thật của sự kiện nên đáng tin hơn.
+function _itemTimeMs(item) {
+    if (!item) return NaN;
+    // 1. date lưu dạng ISO giờ UTC.
+    //    KHÔNG dùng date.slice(0,10): đó là ngày UTC, lệch 7 tiếng so với
+    //    giờ VN. 01/10 02:00 VN lưu thành "2026-09-30T19:00:00.000Z",
+    //    cắt chuỗi ra 30/9. Phải quy đổi qua Date rồi mới lấy ngày giờ VN.
+    if (item.date) {
+        var d = new Date(item.date);
+        if (!isNaN(d.getTime())) {
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        }
+    }
+    // 2. createdAt
+    if (item.createdAt) {
+        var d3 = new Date(item.createdAt);
+        if (!isNaN(d3.getTime())) {
+            return new Date(d3.getFullYear(), d3.getMonth(), d3.getDate()).getTime();
+        }
+    }
+    // 3. dateKey - chỉ dùng khi không có date/createdAt
+    if (item.dateKey && item.dateKey.length >= 10) return _dateStrToMs(item.dateKey);
+    return NaN;
+}
+
+// Dựng chỉ mục timestamp ngày cho cả mảng, gắn thẳng vào từng bản ghi
+// (dùng thuộc tính __dayMs) để các lần lọc sau dùng lại được.
+function _buildDayIndex(items) {
+    if (!items || !items.length) return;
+    for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (!it) continue;
+        it.__dayMs = _itemTimeMs(it);
+    }
+}
+
+// Khoảng thời gian lọc (ms đầu/cuối ngày theo giờ VN)
+function _getRangeMs(startDate, endDate) {
+    var s = (startDate instanceof Date) ? startDate : new Date(startDate);
+    var e = (endDate instanceof Date) ? endDate : new Date(endDate);
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return null;
+    return {
+        lo: new Date(s.getFullYear(), s.getMonth(), s.getDate()).getTime(),
+        hi: new Date(e.getFullYear(), e.getMonth(), e.getDate()).getTime() + 86399999
+    };
+}
+
 function managerFilterByDateRange(items, startDate, endDate) {
-    if (!startDate || !endDate) return [];
-    var startStr = startDate.toISOString().slice(0,10);
-    var endStr = endDate.toISOString().slice(0,10);
+    if (!items || !items.length) return [];
+    var r = _getRangeMs(startDate, endDate);
+    if (!r) return [];
+    var lo = r.lo, hi = r.hi;
     var result = [];
     for (var i = 0; i < items.length; i++) {
-        var item = items[i];
-        var d = item.dateKey || item.date.slice(0,10);
-        if (d >= startStr && d <= endStr) result.push(item);
+        var it = items[i];
+        if (!it) continue;
+        // Dùng chỉ mục đã dựng; nếu chưa có (dữ liệu vừa thêm) thì tính luôn
+        var t = it.__dayMs;
+        if (t === undefined) t = it.__dayMs = _itemTimeMs(it);
+        if (t === t && t >= lo && t <= hi) result.push(it);   // t === t loại bỏ NaN
     }
     return result;
 }
@@ -317,25 +640,55 @@ function managerApplyFilter() {
     if (!managerData.transactions || !managerData.costTransactions || !managerData.adminCostTransactions || !managerData.customers) return;
     var range = managerGetDateRangeByMode();
     if (!range.startDate || !range.endDate) return;
+    // Lọc MỘT LẦN rồi dùng lại cho mọi phần hiển thị.
+    // Trước đây transactions bị lọc 2 lần: một lần ở đây, một lần nữa
+    // trong renderDrinkStats() (hàm đó tự gọi lại managerGetDateRangeByMode).
     var filteredTrans = managerFilterByDateRange(managerData.transactions, range.startDate, range.endDate);
     var filteredCosts = managerFilterByDateRange(managerData.costTransactions, range.startDate, range.endDate);
     var filteredAdminCosts = managerFilterByDateRange(managerData.adminCostTransactions, range.startDate, range.endDate);
+
     var stats = managerComputeStats(filteredTrans, filteredCosts, filteredAdminCosts, managerData.customers, managerData.staffs, range.startDate, range.endDate);
     updateManagerUI(stats);
     renderExpenseList(filteredCosts);
     renderAdminExpenseList(filteredAdminCosts);
-    renderManagerDebtList(managerData.customers);
-    
-    // 👇 THÊM HAI DÒNG NÀY
-    renderDrinkStats();
-    renderLowStockAlert();
+    // Truyền danh sách khách nợ đã tính sẵn, không duyệt lại lịch sử khách
+    renderManagerDebtList(stats.debtBalances);
+    // Truyền danh sách đã lọc vào để không phải lọc lại lần nữa
+    renderDrinkStats(filteredTrans);
+    // Cảnh báo tồn kho KHÔNG phụ thuộc kỳ - chỉ vẽ khi nguyên liệu thay đổi.
+    // Trước đây hàm này chạy mỗi lần bấm nút chuyển kỳ, tạo lại HTML
+    // không cần thiết.
+    if (lowStockDirty) {
+        managerRenderLowStockAlert();
+        lowStockDirty = false;
+    }
 }
+
+// Đánh dấu cần vẽ lại cảnh báo tồn kho
+var lowStockDirty = true;
+function managerInvalidateLowStock() { lowStockDirty = true; }
 
 function managerComputeStats(transactions, staffCosts, adminCosts, customers, staffs, startDate, endDate) {
     var revenue = 0, grab = 0, bank = 0, cash = 0;
+    var debtRecorded = 0;   // ghi nợ (chưa thu tiền) - KHÔNG tính vào doanh thu
     for (var i = 0; i < transactions.length; i++) {
         var tx = transactions[i];
-        var amt = tx.amount;
+        var amt = tx.amount || 0;
+
+        // FIX: trước đây cộng MỌI giao dịch vào doanh thu, gồm cả ghi nợ
+        // (type='debt_payment', paymentMethod='debt'). Ghi nợ chưa thu được tiền
+        // nên doanh thu bị thối phồng, đồng thời số tiền đó lại không rơi vào
+        // ô tiền mặt/Chuyển khoản/Grab nào -> tổng 3 ô khớp doanh thu.
+        // Nay theo quy ước: chỉ tính doanh thu khi THU ĐƯỢC TIỀN.
+        if (tx.type === 'debt_payment' && tx.paymentMethod === 'debt') {
+            debtRecorded += amt;
+            continue;   // chưa thu tiền -> bỏ qua doanh thu
+        }
+        // Giao dịch đã hủy: không tính
+        if (tx.refunded) continue;
+        // Giao dịch xoá bàn: không phải doanh thu
+        if (tx.type === 'delete_table') continue;
+
         revenue += amt;
         if (tx.type === 'grab') {
             grab += amt;
@@ -346,27 +699,53 @@ function managerComputeStats(transactions, staffCosts, adminCosts, customers, st
         }
     }
     var staffCostTotal = 0, adminCostTotal = 0;
-    for (var j = 0; j < staffCosts.length; j++) staffCostTotal += staffCosts[j].amount;
-    for (var k = 0; k < adminCosts.length; k++) adminCostTotal += adminCosts[k].amount;
-    
+    for (var j = 0; j < staffCosts.length; j++) staffCostTotal += staffCosts[j].amount || 0;
+    for (var k = 0; k < adminCosts.length; k++) adminCostTotal += adminCosts[k].amount || 0;
+
+    // Nợ phát sinh trong kỳ.
+    // Duyệt MỘT LẦN qua tất cả khách: vừa tính nợ phát sinh trong kỳ,
+    // vừa tính tổng công nợ còn lại. Trước đây lặp 2 vòng riêng biệt và
+    // tạo chuỗi ngày cho từng dòng lịch sử.
     var debtOccur = 0;
-    var startStr = startDate.toISOString().slice(0,10);
-    var endStr = endDate.toISOString().slice(0,10);
+    var totalDebt = 0;
+    // Danh sách khách còn nợ, dựng 1 lần ở vòng lặp này
+    var debtBalances = [];
+    var rng = _getRangeMs(startDate, endDate);
+    var lo = rng ? rng.lo : NaN;
+    var hi = rng ? rng.hi : NaN;
     for (var l = 0; l < customers.length; l++) {
         var cust = customers[l];
+        if (!cust) continue;
         var debts = cust.debtHistory || [];
+        // Vừa tính nợ phát sinh trong kỳ, vừa cộng tổng nợ của khách này.
+        // Lưu luôn danh sách khách còn nợ vào managerData.debtBalances để
+        // renderManagerDebtList() dùng lại, khỏi duyệt lại toàn bộ lịch sử
+        // khách hàng lần nữa (trước đây hai vòng lặp làm cùng một việc).
+        var custDebt = 0;
         for (var m = 0; m < debts.length; m++) {
             var d = debts[m];
-            var dStr = d.date ? d.date.slice(0,10) : '';
-            if (dStr >= startStr && dStr <= endStr) debtOccur += d.amount;
+            if (!d) continue;
+            var amtD = d.amount || 0;
+            custDebt += amtD;
+            // Dùng chỉ mục đã dựng lúc nạp dữ liệu, không tạo Date lại
+            var t = d.__dayMs;
+            if (t === undefined) t = d.__dayMs = _itemTimeMs(d);
+            if (t === t && t >= lo && t <= hi) debtOccur += amtD;
+        }
+        var pays = cust.paymentHistory || [];
+        for (var w = 0; w < pays.length; w++) {
+            if (pays[w]) custDebt -= pays[w].amount || 0;
+        }
+        if (custDebt > 0) {
+            totalDebt += custDebt;
+            debtBalances.push({ id: cust.id, name: cust.name, totalDebt: custDebt });
         }
     }
-    var totalDebt = 0;
-    for (var n = 0; n < customers.length; n++) {
-        var debt = customers[n].totalDebt || 0;
-        if (debt > 0) totalDebt += debt;
-    }
-    var totalSalary = 0;
+
+    // FIX: totalSalary trước đây luôn = 0 nên lợi nhuận bị tính cao hơn thực tế.
+    // Lương trả theo kỳ 20/N → 19/N+1 cho tháng N (khớp kỳ của tab này).
+    var totalSalary = managerComputeSalaryForRange(startDate, endDate);
+
     var netIncome = revenue - (staffCostTotal + adminCostTotal + totalSalary);
     return {
         revenue: revenue,
@@ -376,7 +755,11 @@ function managerComputeStats(transactions, staffCosts, adminCosts, customers, st
         staffCost: staffCostTotal,
         adminCost: adminCostTotal,
         debtOccur: debtOccur,
+        debtRecorded: debtRecorded,
         totalDebt: totalDebt,
+        // Danh sách khách còn nợ - truyền sang renderManagerDebtList để
+        // không phải duyệt lại toàn bộ lịch sử khách hàng
+        debtBalances: debtBalances,
         totalSalary: totalSalary,
         netIncome: netIncome
     };
@@ -450,52 +833,102 @@ function renderAdminExpenseList(costs) {
     container.innerHTML = html;
 }
 
-function renderManagerDebtList(customers) {
+// Danh sách khách còn nợ.
+// Nhận sẵn danh sách đã tính từ managerComputeStats để khỏi duyệt lại toàn bộ
+// lịch sử khách hàng. Trước đây hàm này tự tính lại từ đầu, tức là mỗi lần
+// bấm nút chuyển kỳ lại lặp qua toàn bộ khách hàng một lần nữa - trùng công
+// việc với managerComputeStats. Với vài trăm khách đây là phần tốn thời gian
+// nhất khi bấm nút.
+// Nếu không có tham số thì tự tính để hàm vẫn dùng được độc lập.
+// Số khách nợ hiển thị mặc định. Danh sách đầy đủ vẽ khi bấm "Xem thêm".
+// 30 dòng đủ để xem tổng quan mà không phải dựng hàng trăm phần tử DOM.
+var MANAGER_DEBT_LIMIT = 30;
+var _debtListExpanded = false;
+var _lastDebtBalances = [];
+
+function renderManagerDebtList(preComputed) {
     var container = document.getElementById('managerDebtList');
     if (!container) return;
-    if (!customers) customers = [];
-    
-    var debtCust = [];
-    for (var i = 0; i < customers.length; i++) {
-        var cust = customers[i];
-        // Tính số dư nợ hiện tại: tổng nợ - tổng thanh toán
-        var totalDebtAmount = 0;
-        if (cust.debtHistory && cust.debtHistory.length) {
-            for (var j = 0; j < cust.debtHistory.length; j++) {
-                totalDebtAmount += cust.debtHistory[j].amount || 0;
+
+    var debtCust = preComputed;
+    if (!debtCust) {
+        var customers = managerData.customers || [];
+        debtCust = [];
+        for (var i = 0; i < customers.length; i++) {
+            var cust = customers[i];
+            if (!cust) continue;
+            var balance = 0;
+            if (cust.debtHistory) {
+                for (var j = 0; j < cust.debtHistory.length; j++) balance += cust.debtHistory[j].amount || 0;
             }
-        }
-        var totalPaymentAmount = 0;
-        if (cust.paymentHistory && cust.paymentHistory.length) {
-            for (var j = 0; j < cust.paymentHistory.length; j++) {
-                totalPaymentAmount += cust.paymentHistory[j].amount || 0;
+            if (cust.paymentHistory) {
+                for (var k = 0; k < cust.paymentHistory.length; k++) balance -= cust.paymentHistory[k].amount || 0;
             }
-        }
-        var balance = totalDebtAmount - totalPaymentAmount;
-        // Nếu có totalDebt cũ nhưng balance tính ra khác, ưu tiên balance (hoặc totalDebt nếu đáng tin)
-        if (cust.totalDebt && typeof cust.totalDebt === 'number' && Math.abs(cust.totalDebt - balance) < 1000) {
-            balance = cust.totalDebt;
-        }
-        if (balance > 0) {
-            debtCust.push({ 
-                id: cust.id, 
-                name: cust.name, 
-                totalDebt: balance 
-            });
+            if (balance > 0) {
+                debtCust.push({ id: cust.id, name: cust.name, totalDebt: balance });
+            }
         }
     }
+
+    // Sắp xếp giảm dần theo số nợ
     debtCust.sort(function(a, b) { return b.totalDebt - a.totalDebt; });
-    var html = '';
-    for (var k = 0; k < debtCust.length; k++) {
-        var c = debtCust[k];
-        html += '<div class="manager-item" onclick="showDebtDetail(\'' + c.id + '\')">' +
+    _lastDebtBalances = debtCust;
+
+    // Chỉ vẽ số khách nợ đang mở (mặc định 30).
+    // Với vài trăm khách, vẽ hết tạo hàng trăm KB HTML mỗi lần bấm nút ->
+    // trình duyệt phải dựng lại hàng trăm phần tử DOM. Giới hạn số dòng giúp
+    // thao tác chuyển kỳ phản hồi tức thì. Bấm "Xem thêm" để xem tiếp.
+    var totalCount = debtCust.length;
+    var limit = _debtListExpanded ? totalCount : Math.min(MANAGER_DEBT_LIMIT, totalCount);
+
+    // Nếu nội dung hiển thị không đổi thì khỏi vẽ lại - tiết kiệm việc dựng DOM
+    var sig = limit + ':' + totalCount;
+    for (var s = 0; s < limit; s++) {
+        sig += '|' + debtCust[s].id + ':' + debtCust[s].totalDebt;
+    }
+    if (container._debtSig === sig) return;
+    container._debtSig = sig;
+
+    // Gộp chuỗi bằng mảng rồi join 1 lần: nhanh hơn nối chuỗi trong vòng lặp
+    // (mỗi lần += tạo một chuỗi mới, tốn bộ nhớ khi danh sách dài)
+    var parts = [];
+    for (var m = 0; m < limit; m++) {
+        var c = debtCust[m];
+        parts.push('<div class="manager-item" onclick="showDebtDetail(\'' + c.id + '\')">' +
             '<span>👤 ' + escapeHtml(c.name) + '</span>' +
             '<strong style="color:var(--danger);">Nợ: ' + formatMoney(c.totalDebt) + '</strong>' +
-        '</div>';
+        '</div>');
     }
-    if (!html) html = '<div class="empty-state">Không có khách nợ</div>';
-    container.innerHTML = html;
+    if (totalCount === 0) {
+        parts.push('<div class="empty-state">Không có khách nợ</div>');
+    } else if (totalCount > limit) {
+        parts.push('<button class="cus-expand-btn" id="btnMoreDebts" onclick="showAllManagerDebts()">' +
+            '📋 Xem thêm ' + (totalCount - limit) + ' khách</button>');
+    } else if (_debtListExpanded) {
+        parts.push('<button class="cus-expand-btn" onclick="collapseManagerDebts()">📋 Thu gọn</button>');
+    }
+    container.innerHTML = parts.join('');
 }
+
+// Bấm "Xem thêm" -> hiện toàn bộ danh sách khách nợ
+function showAllManagerDebts() {
+    _debtListExpanded = true;
+    var c = document.getElementById('managerDebtList');
+    if (c) c._debtSig = null;      // ép vẽ lại
+    renderManagerDebtList(_lastDebtBalances);
+}
+
+// Bấm "Thu gọn" -> về 30 dòng đầu
+function collapseManagerDebts() {
+    _debtListExpanded = false;
+    var c = document.getElementById('managerDebtList');
+    if (c) c._debtSig = null;
+    renderManagerDebtList(_lastDebtBalances);
+}
+
+// Hàm gọi bằng onclick="" phải có trong window
+window.showAllManagerDebts = showAllManagerDebts;
+window.collapseManagerDebts = collapseManagerDebts;
 
 // ========== QUẢN LÝ CHI PHÍ (POPUP) ==========
 var costCategories = [];
@@ -594,11 +1027,12 @@ async function renderTodayCosts() {
     var container = document.getElementById('todayCostList');
     var totalSpan = document.getElementById('todayCostTotal');
     if (!container || !totalSpan) return;
-    var todayStr = new Date().toISOString().slice(0,10);
+    // FIX: dùng giờ VN thay vì toISOString (giờ UTC)
+    var todayStr = _toLocalDateStr(new Date());
     var allToday = [];
     for (var i = 0; i < managerData.costTransactions.length; i++) {
         var tx = managerData.costTransactions[i];
-        if ((tx.dateKey === todayStr) && !tx.deleted) allToday.push(tx);
+        if ((_itemDateStr(tx) === todayStr) && !tx.deleted) allToday.push(tx);
     }
     for (var j = 0; j < managerData.adminCostTransactions.length; j++) {
         var tx2 = managerData.adminCostTransactions[j];
@@ -942,8 +1376,9 @@ function showAdminExpenseHistory() {
 function showDebtOccurredHistory() {
     var range = managerGetDateRangeByMode();
     if (!range.startDate || !range.endDate) return;
-    var startStr = range.startDate.toISOString().slice(0,10);
-    var endStr = range.endDate.toISOString().slice(0,10);
+    // FIX: dùng giờ VN thay vì toISOString (giờ UTC)
+    var startStr = _toLocalDateStr(range.startDate);
+    var endStr = _toLocalDateStr(range.endDate);
     
     var debtEntries = [];
     for (var i = 0; i < managerData.customers.length; i++) {
@@ -1052,56 +1487,204 @@ function formatDateRange(start, end) {
     return s + ' → ' + e;
 }
 // ========== THỐNG KÊ ĐỒ UỐNG THEO BỘ LỌC ==========
-function renderDrinkStats() {
-    var container = document.getElementById('managerDrinkStats');
-    if (!container) return;
-    
-    var range = managerGetDateRangeByMode();
-    if (!range.startDate || !range.endDate) {
-        container.innerHTML = '<div class="empty-state">Chưa có dữ liệu</div>';
-        return;
-    }
-    var filteredTrans = managerFilterByDateRange(managerData.transactions, range.startDate, range.endDate);
-    
-    var itemSales = {};
+// ========== BÁO CÁO MẶT HÀNG BÁN RA ==========
+// Mỗi biến thể là 1 dòng riêng: "Cà phê sữa máy (Đá)" và "(Nóng)" tách riêng.
+// Chỉ tính đơn ĐÃ THU TIỀN (bỏ qua đơn ghi nợ), tách cột theo kênh bán.
+//
+// Tên món trong hệ thống có dạng "Tên món (Biến thể)" do addToCartWithVariant()
+// ghép lại. Trước đây hàm này cắt bỏ phần trong ngoặc nên Đá và Nóng bị
+// gộp làm một, mất thông tin quan trọng cho quản lý.
+
+// Số dòng hiển thị mặc định, bấm "Xem thêm" sẽ hiện toàn bộ
+var DRINK_STATS_INITIAL = 20;
+var _drinkStatsAll = [];
+
+// Phân loại kênh bán của 1 giao dịch.
+// Ghi chú: KHÔNG có kênh "ghi nợ" vì báo cáo này chỉ tính đơn đã thu tiền
+// (xem _aggregateItemSales). Đơn ghi nợ bị loại, còn đơn thanh toán nợ /
+// gửi trước không có items nên tự nhiên không vào báo cáo. Thêm cột "ghi nợ"
+// chỉ để hiện 0 là vô nghĩa.
+//
+// THỨ TỰ: xét `type` trước, `paymentMethod` chỉ dùng khi type không rõ.
+// Nếu kiểm paymentMethod='transfer' trước thì đơn tại bàn trả chuyển khoản
+// (type='dinein') sẽ bị đếm thành "mang đi" - sai nghĩa.
+function _drinkChannel(tx) {
+    if (!tx) return 'other';
+    if (tx.type === 'grab') return 'grab';
+    if (tx.type === 'takeaway' || tx.type === 'mangdi') return 'takeaway';
+    if (tx.type === 'dinein') return 'dinein';
+    // Không rõ loại đơn (dữ liệu cũ hoặc loại mới): suy ra theo cách thanh toán
+    if (tx.paymentMethod === 'transfer') return 'takeaway';
+    return 'dinein';
+}
+
+// Gom số lượng bán theo món và theo kênh
+function _aggregateItemSales(filteredTrans) {
+    var map = {};
     for (var i = 0; i < filteredTrans.length; i++) {
         var tx = filteredTrans[i];
-        if (tx.type === 'debt_payment') continue;
+        if (!tx) continue;
+        // Bỏ giao dịch đã hủy
+        if (tx.refunded === true) continue;
+        // Bỏ giao dịch xoá bàn
+        if (tx.type === 'delete_table') continue;
+        // CHỈ TÍNH ĐƠN ĐÃ THU TIỀN.
+        // Đơn ghi nợ (type='debt_payment' + paymentMethod='debt') chưa thu
+        // được tiền nên không tính. Thanh toán nợ / gửi trước cũng mang
+        // type='debt_payment'|'prepaid' nhưng không có items nên vòng bên
+        // dưới tự bỏ qua.
+        if (tx.type === 'debt_payment' && tx.paymentMethod === 'debt') continue;
+
+        var ch = _drinkChannel(tx);
         var items = tx.items || [];
         for (var j = 0; j < items.length; j++) {
-            var item = items[j];
-            var name = item.name;
-            // Loại bỏ phần size trong ngoặc để gộp chung (tùy chọn)
-            var originalName = name.replace(/\s*\([^)]*\)/g, '').trim();
-            var qty = item.qty || 0;
-            if (!itemSales[originalName]) itemSales[originalName] = 0;
-            itemSales[originalName] += qty;
+            var it = items[j];
+            if (!it || !it.name) continue;
+            // GIỮ NGUYÊN phần biến thể trong ngoặc, chỉ cắt khoảng trắng thừa
+            var name = String(it.name).trim();
+            if (!name) continue;
+            var qty = it.qty || 0;
+            if (qty <= 0) continue;
+            if (!map[name]) {
+                map[name] = { name: name, qty: 0, dinein: 0, takeaway: 0, grab: 0, amount: 0 };
+            }
+            var row = map[name];
+            row.qty += qty;
+            row.amount += (it.price || 0) * qty;
+            if (ch === 'dinein') row.dinein += qty;
+            else if (ch === 'takeaway') row.takeaway += qty;
+            else if (ch === 'grab') row.grab += qty;
         }
     }
-    var itemsArray = [];
-    for (var name in itemSales) {
-        itemsArray.push({ name: name, qty: itemSales[name] });
+    var out = [];
+    for (var k in map) if (map.hasOwnProperty(k)) out.push(map[k]);
+    // Sắp xếp giảm dần theo số lượng, tên giống nhau thì theo doanh thu
+    out.sort(function (a, b) {
+        if (b.qty !== a.qty) return b.qty - a.qty;
+        if (b.amount !== a.amount) return b.amount - a.amount;
+        return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+    });
+    return out;
+}
+
+function renderDrinkStats(preFilteredTrans) {
+    var container = document.getElementById('managerDrinkStats');
+    if (!container) return;
+
+    // Nhận sẵn danh sách đã lọc từ managerApplyFilter để khỏi lọc lại.
+    // Nếu gọi độc lập (không truyền tham số) thì tự lọc như trước.
+    var filteredTrans = preFilteredTrans;
+    if (!filteredTrans) {
+        var range = managerGetDateRangeByMode();
+        if (!range.startDate || !range.endDate) {
+            container.innerHTML = '<div class="empty-state">Chưa có dữ liệu</div>';
+            return;
+        }
+        filteredTrans = managerFilterByDateRange(managerData.transactions, range.startDate, range.endDate);
     }
-    itemsArray.sort(function(a, b) { return b.qty - a.qty; });
-    var topItems = itemsArray.slice(0, 10);
-    
-    if (topItems.length === 0) {
+
+    var itemsArray = _aggregateItemSales(filteredTrans);
+    _drinkStatsAll = itemsArray;
+    // Đổi bộ lọc thì quay về trạng thái thu gọn
+    _drinkStatsExpanded = false;
+
+    if (itemsArray.length === 0) {
         container.innerHTML = '<div class="empty-state">📭 Không có dữ liệu bán hàng trong khoảng thời gian này</div>';
         return;
     }
-    var html = '<div class="stats-list">';
-    for (var k = 0; k < topItems.length; k++) {
-        html += '<div class="stats-item">' +
-            '<span>' + (k+1) + '. ' + escapeHtml(topItems[k].name) + '</span>' +
-            '<span class="stats-qty">📦 ' + topItems[k].qty + '</span>' +
-        '</div>';
-    }
-    html += '</div>';
-    container.innerHTML = html;
+
+    // Gộp chuỗi bằng mảng rồi join 1 lần: nhanh hơn nối chuỗi trong vòng lặp
+    container.innerHTML = _buildDrinkStatsHtml(itemsArray, DRINK_STATS_INITIAL);
 }
 
+// Dựng HTML báo cáo. expanded = true thì hiện toàn bộ món.
+function _buildDrinkStatsHtml(itemsArray, limit) {
+    var totalQty = 0, totalAmount = 0;
+    for (var t = 0; t < itemsArray.length; t++) {
+        totalQty += itemsArray[t].qty;
+        totalAmount += itemsArray[t].amount;
+    }
+    var parts = [];
+    parts.push('<div class="stats-summary">📦 <b>' + totalQty + '</b> ly · 💰 ' + formatMoney(totalAmount) +
+        ' · <span class="stats-sum-sub">' + itemsArray.length + ' món</span></div>');
+    parts.push('<div class="stats-list" id="drinkStatsList">');
+    var shown = Math.min(limit, itemsArray.length);
+    for (var k = 0; k < shown; k++) {
+        parts.push(_drinkStatsRowHtml(k + 1, itemsArray[k]));
+    }
+    parts.push('</div>');
+    if (itemsArray.length > shown) {
+        parts.push('<button class="cus-expand-btn" id="btnMoreDrinks" onclick="toggleMoreDrinks()">📋 Xem thêm ' +
+            (itemsArray.length - shown) + ' món</button>');
+    } else {
+        parts.push('<div style="text-align:center;font-size:11px;color:#94a3b8;padding:6px 0;">Đã hiện đủ ' +
+            itemsArray.length + ' món</div>');
+    }
+    return parts.join('');
+}
+
+function _drinkStatsRowHtml(stt, row) {
+    // Tách tên gốc và biến thể để hiển thị 2 tầng cho dễ đọc
+    var name = row.name;
+    var variant = '';
+    var baseName = name;
+    var m = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    if (m) {
+        baseName = m[1];
+        variant = m[2];
+    }
+    var html = '<div class="stats-item stats-item-item">';
+    html += '<div class="drink-main">';
+    html += '<span class="drink-stt">' + stt + '.</span>';
+    html += '<span class="drink-name">' + escapeHtml(baseName);
+    if (variant) html += ' <span class="drink-variant">(' + escapeHtml(variant) + ')</span>';
+    html += '</span>';
+    // Các cột theo kênh bán: chỉ hiện cột có số liệu
+    html += '</div>';
+    html += '<div class="drink-channels">';
+    if (row.dinein) html += '<span class="drink-ch drink-ch-table" title="Tại bàn">🍽 ' + row.dinein + '</span>';
+    if (row.takeaway) html += '<span class="drink-ch drink-ch-takeaway" title="Mang đi">🥡 ' + row.takeaway + '</span>';
+    if (row.grab) html += '<span class="drink-ch drink-ch-grab" title="Grab">🛵 ' + row.grab + '</span>';
+    html += '<span class="stats-qty drink-total">📦 ' + row.qty + '</span>';
+    html += '</div></div>';
+    return html;
+}
+
+// Bấm "Xem thêm" -> hiện toàn bộ món, kèm nút "Thu gọn"
+// Dùng innerHTML cho cả khối thay vì insertAdjacentHTML vì một số WebView
+// Android cũ không hỗ trợ hàm đó.
+var _drinkStatsExpanded = false;
+
+function toggleMoreDrinks() {
+    var container = document.getElementById('managerDrinkStats');
+    if (!container) return;
+    _drinkStatsExpanded = !_drinkStatsExpanded;
+    if (!_drinkStatsExpanded) {
+        // Thu gọn: dựng lại từ đầu để có tổng kết và nút "Xem thêm"
+        container.innerHTML = _buildDrinkStatsHtml(_drinkStatsAll, DRINK_STATS_INITIAL);
+        return;
+    }
+    // Mở rộng: hiện toàn bộ
+    var parts = ['<div class="stats-list" id="drinkStatsList">'];
+    for (var k = 0; k < _drinkStatsAll.length; k++) {
+        parts.push(_drinkStatsRowHtml(k + 1, _drinkStatsAll[k]));
+    }
+    parts.push('</div>');
+    parts.push('<div style="text-align:center;padding:6px 0;">' +
+        '<button class="cus-expand-btn" onclick="toggleMoreDrinks()">📋 Thu gọn về ' +
+        DRINK_STATS_INITIAL + ' món</button></div>');
+    container.innerHTML = parts.join('');
+}
+
+// Hàm gọi bằng onclick="" trong HTML phải có trong window
+window.toggleMoreDrinks = toggleMoreDrinks;
+window.renderDrinkStats = renderDrinkStats;
+
 // ========== CẢNH BÁO TỒN KHO THẤP ==========
-function renderLowStockAlert() {
+// NOTE: bản thứ 2 của renderLowStockAlert (bản dùng thật nằm ở manager-detail.js).
+// File này hiện KHÔNG được index.html load, nhưng đổi tên để tránh đè lên bản của
+// manager-detail.js nếu sau này được thêm vào danh sách script.
+function managerRenderLowStockAlert() {
     var container = document.getElementById('managerLowStockAlert');
     if (!container) return;
     var ingredients = window.ingredients || [];
@@ -1671,9 +2254,10 @@ async function createNewCategory(name, type) {
 // Render chi phí hôm nay
 function renderTodayCosts(container, totalSpan, transactions) {
     if (!container || !totalSpan) return;
-    var todayStr = new Date().toISOString().slice(0,10);
+    // FIX: dùng giờ VN thay vì toISOString (giờ UTC)
+    var todayStr = _toLocalDateStr(new Date());
     var todayTxs = transactions.filter(function(tx) {
-        return (tx.dateKey === todayStr) && !tx.deleted;
+        return (_itemDateStr(tx) === todayStr) && !tx.deleted;
     });
     todayTxs.sort(function(a,b) { return new Date(b.date) - new Date(a.date); });
     var total = 0;
@@ -1701,11 +2285,13 @@ function renderMonthCostSummary(container, transactions) {
     var now = new Date();
     var startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     var endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    var startStr = startDate.toISOString().slice(0,10);
-    var endStr = endDate.toISOString().slice(0,10);
+    // FIX: dùng giờ VN thay vì toISOString (giờ UTC)
+    var startStr = _toLocalDateStr(startDate);
+    var endStr = _toLocalDateStr(endDate);
     var monthTxs = transactions.filter(function(tx) {
-        var d = tx.dateKey || tx.date.slice(0,10);
-        return d >= startStr && d <= endStr && !tx.deleted;
+        // FIX: lấy ngày theo một cách duy nhất, tránh lỗi khi tx.date thiếu
+        var d = _itemDateStr(tx);
+        return d && d >= startStr && d <= endStr && !tx.deleted;
     });
     var categoryMap = {};
     for (var i = 0; i < monthTxs.length; i++) {

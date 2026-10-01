@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Khong dung AppCompat: app chi can WebView + hop thoai co ban.
+  Dung theme cua he thong de tranh keo them thu vien -> APK nho hon.
+-->
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">#f97316</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

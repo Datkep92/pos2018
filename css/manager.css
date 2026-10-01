@@ -147,6 +147,84 @@
     color: var(--primary);
 }
 
+/* ========== BÁO CÁO MẶT HÀNG BÁN RA ========== */
+/* Dòng tổng kết: tổng số ly, tổng tiền, số món */
+.stats-summary {
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: #334155;
+}
+.stats-summary b {
+    color: var(--primary);
+    font-size: 15px;
+}
+.stats-sum-sub {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+/* Mỗi món: tên bên trái, các kênh bán bên phải.
+   Trên màn hình hẹp (máy POS) tên ở dòng trên, kênh bán xuống dòng dưới
+   để không bị chữ bóp cụt. */
+.stats-item-item {
+    display: block;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border);
+}
+.drink-main {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.drink-stt {
+    color: #94a3b8;
+    font-size: 11px;
+    min-width: 18px;
+    flex-shrink: 0;
+}
+.drink-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+    flex: 1;
+    word-break: break-word;
+}
+.drink-variant {
+    font-weight: 500;
+    color: #64748b;
+    font-size: 13px;
+}
+.drink-channels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-left: 24px;
+    align-items: center;
+}
+.drink-ch {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #f1f5f9;
+    color: #475569;
+    white-space: nowrap;
+}
+.drink-ch-table { background: #eff6ff; color: #1d4ed8; }
+.drink-ch-takeaway { background: #fef3c7; color: #b45309; }
+.drink-ch-grab { background: #dcfce7; color: #15803d; }
+.drink-ch-debt { background: #fee2e2; color: #b91c1c; }
+.drink-total {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--primary);
+    white-space: nowrap;
+}
+
 .admin-expense-btn {
     background: var(--primary);
     color: white;

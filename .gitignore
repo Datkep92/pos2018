@@ -1,0 +1,39 @@
+# =====================================================================
+# .gitignore - pos2018
+# =====================================================================
+
+# --- File sinh ra khi build, khong can luu vao git ---
+# js.min/ va css.min/ van duoc COMMIT: index.html nap truc tiep hai thu
+# muc nay, may POS tai tu GitHub nen can chung trong repo.
+# (Neu xoa khoi git, app tai ve se khong chay.)
+
+# Thu muc lam viec cua script build APK
+android/build/
+
+# File APK. Dung Release cua GitHub de phat hanh, khong luu trong repo.
+# Luu trong git se lam repo nang them moi lan phat hanh.
+dist/
+*.apk
+*.apk.sha256
+*.idsig
+
+# KHOA KY APK - TUYET DOI KHONG COMMIT
+#
+# android/keystore/pos259.jks la khoa rieng biet de ky app. Repo nay PUBLIC:
+# commit file nay vao = BAT KY AI cung co the ky mot ban cap nhat "gia ma" va
+# may POS se tu chap nhan no.
+#
+# Giu file nay o may (da co san) va sao luu ra noi khac.
+# Mat file nay = khong the phat hanh ban cap nhat nua.
+android/keystore/
+
+# Ban sao luu
+*.bak
+*- Copy.js
+*-copy.js
+*- Copy.html
+
+# File he thong
+.DS_Store
+Thumbs.db
+desktop.ini

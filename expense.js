@@ -24,6 +24,44 @@ var _expenseSelectedIngredientName = '';
 var _expenseViewDate = new Date();
 var _expenseViewDateKey = '';
 
+// ========== TIỆN ÍCH DÙNG CHUNG ==========
+
+// Thêm số 0 phía trước cho giá trị 1 chữ số.
+// KHÔNG dùng padStart (ES2017) vì WebView Android 6 stock (Chrome 44) không có,
+// sẽ làm hỏng toàn bộ tab Chi phí trên máy cũ.
+function _pad2(n) {
+    var s = String(n);
+    return s.length < 2 ? ('0' + s) : s;
+}
+
+// Lấy ngày theo giờ Việt Nam, trả về chuỗi 'YYYY-MM-DD'.
+// TUYỆT ĐỐI không dùng new Date().toISOString().slice(0,10) vì toISOString trả
+// về giờ UTC: nửa đêm VN (00:00 +07) là 17:00 hôm trước ở UTC, nên toISOString
+// sẽ ra NGÀY HÔM TRƯỚC -> lệch 1 ngày, xoá nhầm khoảng ngày.
+function _vnDateKey(date) {
+    var d = date || new Date();
+    return d.getFullYear() + '-' + _pad2(d.getMonth() + 1) + '-' + _pad2(d.getDate());
+}
+
+// Sinh id an toàn, tránh trùng khi tạo nhiều bản ghi trong cùng mili-giây.
+// DB.create() KHÔNG kiểm tra id tồn tại, cứ ghi đè -> trùng id là mất dữ liệu.
+function _newId(prefix) {
+    return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// Khoá chống bấm nút 2 lần trong lúc thao tác đang chạy.
+// Trước đây bấm nhanh "+ Thêm" 2 lần sẽ chạy doSaveExpense() 2 lần ->
+// cộng tồn kho 2 lần và ghi 2 dòng cost_transactions -> trừ tiền 2 lần.
+var _expenseSaving = false;
+function _beginSave() {
+    if (_expenseSaving) return false;
+    _expenseSaving = true;
+    return true;
+}
+function _endSave() {
+    _expenseSaving = false;
+}
+
 // Hàm loại bỏ dấu tiếng Việt (dùng chung cho _filterBothGrids)
 function _removeVietnameseTones(str) {
     return str
@@ -591,12 +629,20 @@ function doSaveExpense() {
         }
 
         if (existingDeletedIng) {
-            // Tái sử dụng nguyên liệu đã xóa: bỏ đánh dấu deleted
+            // FIX P1 - NUỐT MẤT KHOẢN CHI:
+            // Trước đây chỉ bỏ cờ deleted rồi toast "thành công" và return.
+            // Không hỏi số lượng, không hỏi thành tiền, KHÔNG ghi cost_transactions
+            // -> người dùng tưởng đã ghi chi phí nhưng thực ra tiền chưa bao giờ
+            // được ghi. Bấm lại lại chỉ nhận thông báo thành công.
+            // Nay: khôi phục nguyên liệu rồi mở modal nhập số lượng / thành tiền,
+            // đi tiếp đúng quy trình ghi chi phí.
             var ingId = existingDeletedIng.id;
             DB.update('ingredients', ingId, { deleted: false }).then(function() {
                 existingDeletedIng.deleted = false;
-                showToast('✅ Đã khôi phục nguyên liệu: ' + ingredientName, 'success');
                 renderIngredientList();
+                showToast('✅ Đã khôi phục nguyên liệu: ' + ingredientName, 'success', 2000);
+                // Hỏi số lượng / thành tiền như nguyên liệu bình thường
+                _showExpenseInputModal('ingredient', ingId, ingredientName);
             }).catch(function(err) {
                 console.error('Restore ingredient error:', err);
                 showToast('Lỗi khi khôi phục nguyên liệu!', 'error');
@@ -702,10 +748,19 @@ function doSaveExpense() {
 
 // Hàm phụ: tạo nguyên liệu mới
 function _doSaveNewIngredient(ingredientName, qty, amount, fundSource) {
-    var ingredientId = Date.now().toString();
+    // id có random: Date.now().toString() dễ trùng khi tạo mục mới trong cùng
+    // mili-giây, DB.create() ghi đè không kiểm tra -> mất tên + lịch sử
+    var ingredientId = _newId('ing_');
     var newIng = { id: ingredientId, name: ingredientName, stock: 0, createdAt: Date.now() };
-    if (window.ingredients) window.ingredients.push(newIng);
+    
+    // FIX: ghi DB TRƯỚC, push cache SAU.
+    // Trước đây push vào window.ingredients trước khi DB.create. Nếu create
+    // thất bại thì cache có nguyên liệu ma; lần sau doSaveExpense() thấy tên đã
+    // tồn tại -> mở modal nhập -> addIngredientStock tìm thấy trong cache nên không
+    // reject, gọi DB.update -> throw 'Not found' -> chết, không có cost record.
     DB.create('ingredients', newIng).then(function() {
+        if (window.ingredients) window.ingredients.push(newIng);
+        if (typeof _invalidateLookups === 'function') _invalidateLookups();
         if (qty > 0 && amount > 0) {
             saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSource);
         } else {
@@ -729,7 +784,9 @@ function _showTypeSelectionModal(itemName, callback) {
 
     box.innerHTML =
         '<div style="font-size:15px;line-height:1.5;margin-bottom:16px;color:#1e293b;">' +
-            'Tên "<strong>' + itemName + '</strong>" đã tồn tại ở cả nguyên liệu và hao phí.<br><br>' +
+            // escapeHtml: itemName là text người dùng gõ, chèn thẳng vào innerHTML.
+            // Dùng escapeHtml của pos-app.js (đã load trước expense.js).
+            'Tên "<strong>' + escapeHtml(itemName) + '</strong>" đã tồn tại ở cả nguyên liệu và hao phí.<br><br>' +
             'Bạn muốn lưu vào loại nào?' +
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:center;">' +
@@ -826,13 +883,24 @@ function _showExpenseInputModal(type, id, name) {
 
 // ========== LƯU CHI PHÍ NGUYÊN LIỆU ==========
 function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSource) {
+    // FIX P0 - CHỐNG GHI TRÙNG:
+    // Bấm nhanh nút "Lưu" 2 lần sẽ chạy cả nhánh này 2 lần -> tồn kho cộng 2 lần,
+    // 2 dòng cost_transactions -> Két POS bị trừ 2 lần tiền.
+    if (!_beginSave()) {
+        showToast('Đang lưu, vui lòng chờ...', 'info', 1500);
+        return;
+    }
+
     var now = new Date();
-    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
-    var txId = Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
-    var invTxId = 'inv_' + txId;
+    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey(now);
+    // id có random để không trùng khi tạo trong cùng mili-giây
+    var txId = _newId('cost_');
+    var invTxId = _newId('inv_');
+    var stockIncreased = false;
 
     // Bước 1: Tăng tồn kho
     addIngredientStock(ingredientId, qty).then(function() {
+        stockIncreased = true;
         // Bước 2: Ghi inventory_transactions
         var invData = {
             id: invTxId,
@@ -892,6 +960,7 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
         } catch(e) {}
         return loadExpenseData();
     }).then(function() {
+        _endSave();
         showToast('✅ Đã thêm chi phí nguyên liệu ' + formatMoney(amount), 'success');
         // Reset form
         document.getElementById('expenseIngredientSearch').value = '';
@@ -904,14 +973,38 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
         renderMonthExpenseTotal();
     }).catch(function(err) {
         console.error('Save ingredient expense error:', err);
-        showToast('Lỗi khi lưu chi phí!', 'error');
+        _endSave();
+        // FIX P0 - HOÀN LẠI TỒN KHO:
+        // Nếu đã tăng kho xong mà ghi cost_transactions thất bại (mạng chết, hết
+        // quota) thì trước đây hàng nằm trong kho nhưng tiền chưa trừ, và
+        // ingredient_transactions còn dòng 'import' -> nhập kho ma.
+        // Nay trừ lại đúng số lượng đã cộng.
+        if (stockIncreased) {
+            addIngredientStock(ingredientId, -qty).then(function() {
+                return loadExpenseData();
+            }).then(function() {
+                renderIngredientList();
+                showToast('Lỗi khi lưu chi phí! Đã hoàn lại tồn kho.', 'error', 4000);
+            }).catch(function(e2) {
+                console.error('Rollback stock error:', e2);
+                showToast('Lỗi lưu chi phí VÀ hoàn kho thất bại. Kiểm tra tồn kho ' + ingredientName, 'error', 6000);
+            });
+        } else {
+            showToast('Lỗi khi lưu chi phí!', 'error');
+        }
     });
 }
 
 // ========== LƯU CHI PHÍ HAO PHÍ ==========
 function saveWasteExpense(categoryName, amount, fundSource) {
+    // Khoá chống bấm 2 lần: ghi trùng sẽ trừ tiền két POS 2 lần
+    if (!_beginSave()) {
+        showToast('Đang lưu, vui lòng chờ...', 'info', 1500);
+        return;
+    }
+
     var now = new Date();
-    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
+    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey(now);
 
     // Tìm category (kể cả đã bị xóa) để tái sử dụng tên
     var cat = null;
@@ -940,13 +1033,14 @@ function saveWasteExpense(categoryName, amount, fundSource) {
     var doSave = function(category) {
         // Nếu amount=0 thì chỉ tạo/kích hoạt tên, không ghi cost_transactions
         if (amount <= 0) {
+            _endSave();
             showToast('✅ Đã tạo hao phí: ' + categoryName, 'success');
             document.getElementById('expenseWasteSearch').value = '';
             renderWasteTypeList();
-            return;
+            return Promise.resolve();
         }
 
-        var txId = Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
+        var txId = _newId('cost_');
         var costData = {
             id: txId,
             categoryId: category.id,
@@ -973,7 +1067,9 @@ function saveWasteExpense(categoryName, amount, fundSource) {
     if (cat) {
         savePromise = Promise.resolve(cat).then(doSave);
     } else {
-        var newId = Date.now().toString();
+        // id có random: Date.now().toString() dễ trùng khi tạo nhiều mục trong
+        // cùng mili-giây, DB.create() ghi đè không kiểm tra -> mất dữ liệu
+        var newId = _newId('cat_');
         var newCat = { id: newId, name: categoryName, createdAt: Date.now(), createdBy: (DB.getCurrentUser() && DB.getCurrentUser().id) || window.currentDeviceId || '' };
         savePromise = DB.create('cost_categories', newCat).then(function() {
             expenseData.categories.push(newCat);
@@ -1001,6 +1097,7 @@ function saveWasteExpense(categoryName, amount, fundSource) {
             } catch(e) {}
             return loadExpenseData();
         }).then(function() {
+            _endSave();
             showToast('✅ Đã thêm chi phí ' + formatMoney(amount), 'success');
             document.getElementById('expenseWasteSearch').value = '';
 
@@ -1009,7 +1106,15 @@ function saveWasteExpense(categoryName, amount, fundSource) {
             renderWasteTypeList();
         }).catch(function(err) {
             console.error('Save waste expense error:', err);
+            _endSave();
             showToast('Lỗi khi lưu chi phí!', 'error');
+        });
+    } else {
+        // amount <= 0: doSave() đã tự _endSave(). Nhưng nếu DB.create lỗi thì
+        // khoá bị kẹt -> mọi lần lưu sau bị chặn im lặng. Đảm bảo luôn nhả.
+        savePromise.catch(function(err) {
+            console.error('Save waste category error:', err);
+            _endSave();
         });
     }
 }
@@ -1018,7 +1123,7 @@ function saveWasteExpense(categoryName, amount, fundSource) {
 function expenseUpdateDateDisplay() {
     var displayEl = document.getElementById('expenseDateDisplay');
     if (!displayEl) return;
-    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
+    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey();
     if (_expenseViewDateKey === today) {
         displayEl.textContent = '📅 Hôm nay';
     } else {
@@ -1079,7 +1184,7 @@ function renderExpensesByDate(dateKey) {
     var allTx = expenseData.transactions || [];
     var currentUser = DB.getCurrentUser();
     var _isAdmin = isAdminUser();
-    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
+    var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey();
 
     var filtered = [];
     for (var i = 0; i < allTx.length; i++) {
@@ -1129,7 +1234,7 @@ function renderExpensesByDate(dateKey) {
         if (tx.date) {
             try {
                 var d = new Date(tx.date);
-                timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+                timeStr = _pad2(d.getHours()) + ':' + _pad2(d.getMinutes());
             } catch(e) { timeStr = ''; }
         }
 
@@ -1601,6 +1706,15 @@ function _adminToggleMergeItem(id, el) {
 }
 
 function _adminConfirmMerge() {
+    // FIX P1 - THIẾU KIỂM TRA QUYỀN:
+    // Menu ngữ cảnh mở cho mọi role, _adminConfirmMerge không có check.
+    // Staff có thể gộp chi phí, đổi amount/categoryName của bản ghi và đặt tên
+    // gộp tự do - mọi báo cáo gom nhóm theo categoryName sẽ nhận giá trị đó.
+    if (!isAdminUser()) {
+        showToast('Chỉ quản lý mới được gộp chi phí!', 'warning');
+        return;
+    }
+
     if (_adminContextSelectedIds.length < 1) {
         showToast('Chưa chọn chi phí nào!', 'warning');
         return;
@@ -1610,16 +1724,27 @@ function _adminConfirmMerge() {
     var firstTx = _findTxInCache(ids[0]);
     if (!firstTx) return;
 
-    // Tính tổng tiền
+    // Tính tổng tiền. Chỉ gộp những id THỰC SỰ tìm thấy trong cache.
+    // Trước đây id không tìm thấy bị bỏ qua khi tính tổng/tên nhưng vẫn được
+    // đẩy vào promises với {deleted:true} -> xoá bản ghi chưa từng hiện cho user.
     var totalAmount = 0;
     var names = [];
+    var validIds = [];
     for (var i = 0; i < ids.length; i++) {
         var tx = _findTxInCache(ids[i]);
         if (tx) {
-            totalAmount += tx.amount;
+            totalAmount += tx.amount || 0;
             names.push(tx.categoryName);
+            validIds.push(ids[i]);
         }
     }
+    if (validIds.length === 0) {
+        showToast('Không tìm thấy chi phí nào để gộp!', 'error');
+        return;
+    }
+    ids = validIds;
+    firstTx = _findTxInCache(ids[0]);
+    if (!firstTx) return;
 
     // Cập nhật transaction đầu tiên với tổng tiền + tên gộp
     var mergedName = names.join(' + ');
@@ -1639,7 +1764,12 @@ function _adminConfirmMerge() {
         }
         updateData.ingredientQty = totalQty;
         updateData.quantity = totalQty;
-        updateData.ingredientUnitPrice = Math.round(totalAmount / totalQty);
+        // FIX: totalQty có thể bằng 0 khi gộp các bản ghi không có
+        // ingredientQty -> totalAmount / 0 = Infinity, ghi vào DB thành
+        // Infinity (JSON.stringify ra null) -> dữ liệu hỏng.
+        if (totalQty > 0) {
+            updateData.ingredientUnitPrice = Math.round(totalAmount / totalQty);
+        }
     }
 
     // Xóa các transaction còn lại (đánh dấu deleted)
@@ -1656,7 +1786,7 @@ function _adminConfirmMerge() {
     }).then(function() {
         showToast('✅ Đã gộp ' + ids.length + ' chi phí thành công', 'success');
         _adminCancelMerge();
-        renderTodayExpenses();
+        refreshExpenseListKeepDate();
         renderMonthExpenseTotal();
     }).catch(function(err) {
         console.error('Merge expense error:', err);
@@ -1988,6 +2118,12 @@ function _adminConfirmMergeIngredients() {
 }
 
 function _adminDoMergeIngredients() {
+    // Chặn quyền: gộp nguyên liệu xoá danh mục và chuyển tồn kho, staff không được
+    if (!isAdminUser()) {
+        showToast('Chỉ quản lý mới được gộp nguyên liệu!', 'warning');
+        return;
+    }
+
     var ids = _adminIngredientSelectedIds.slice();
     if (ids.length < 1) {
         showToast('Chưa chọn nguyên liệu nào!', 'warning');
@@ -2069,6 +2205,38 @@ function _adminDoMergeIngredients() {
         return Promise.all(invPromises);
     }));
 
+    // FIX P0 - MẤT TỒN KHO KHI GỘP:
+    // Trước đây chỉ set deleted:true cho các nguyên liệu bị gộp, KHÔNG chuyển
+    // tồn kho của chúng sang nguyên liệu đích -> hàng biến mất âm thầm.
+    // Ví dụ: gộp "Thịt heo" (tồn 5kg) vào "Thịt lợn" => mất 5kg.
+    // Nay: cộng stock của các mục bị gộp vào target TRƯỚC, rồi mới đánh dấu xoá.
+    // Dùng DB.update trực tiếp (không qua addIngredientStock) để KHÔNG ghi thêm
+    // dòng nhập kho - đây là gộp danh mục, không phải mua hàng.
+    var listForStock = window.ingredients || [];
+    var mergedStock = 0;
+    var movedStockCount = 0;
+    for (var s = 0; s < ids.length; s++) {
+        if (ids[s] === targetId) continue;
+        for (var t = 0; t < listForStock.length; t++) {
+            if (listForStock[t].id === ids[s]) {
+                mergedStock += (listForStock[t].stock || 0);
+                movedStockCount++;
+                break;
+            }
+        }
+    }
+    
+    if (movedStockCount > 0) {
+        var targetStock = 0;
+        for (var q = 0; q < listForStock.length; q++) {
+            if (listForStock[q].id === targetId) {
+                targetStock = listForStock[q].stock || 0;
+                break;
+            }
+        }
+        promises.push(DB.update('ingredients', targetId, { stock: targetStock + mergedStock }));
+    }
+    
     // Xóa các nguyên liệu còn lại (đánh dấu deleted)
     for (var k = 0; k < ids.length; k++) {
         if (ids[k] !== targetId) {
@@ -2081,9 +2249,18 @@ function _adminDoMergeIngredients() {
         return DB.getAll('ingredients');
     }).then(function(dbList) {
         window.ingredients = dbList;
-        showToast('✅ Đã gộp ' + ids.length + ' nguyên liệu thành công', 'success');
+        if (typeof _invalidateLookups === 'function') _invalidateLookups();
+        var msg = '✅ Đã gộp ' + ids.length + ' nguyên liệu thành công';
+        // Báo rõ đã chuyển tồn kho, tránh admin tưởng hàng bốc hơi
+        if (movedStockCount > 0) {
+            msg += ' (đã chuyển ' + Math.round(mergedStock * 10) / 10 + ' tồn kho)';
+        }
+        showToast(msg, 'success');
         _adminCancelMergeIngredients();
         renderIngredientList();
+        // Gộp xong phải render lại danh sách chi phí: tên/nguyên liệu đã đổi
+        refreshExpenseListKeepDate();
+        renderMonthExpenseTotal();
     }).catch(function(err) {
         console.error('Merge ingredients error:', err);
         showToast('Lỗi khi gộp nguyên liệu!', 'error');
@@ -2390,6 +2567,12 @@ function _adminConfirmMergeWaste() {
 }
 
 function _adminDoMergeWaste() {
+    // Chặn quyền: gộp hao phí sửa/xoá danh mục, staff không được
+    if (!isAdminUser()) {
+        showToast('Chỉ quản lý mới được gộp hao phí!', 'warning');
+        return;
+    }
+
     var ids = _adminWasteSelectedIds.slice();
     if (ids.length < 1) {
         showToast('Chưa chọn hao phí nào!', 'warning');
@@ -2472,6 +2655,10 @@ function _adminDoMergeWaste() {
         showToast('✅ Đã gộp ' + ids.length + ' hao phí thành công', 'success');
         _adminCancelMergeWaste();
         renderWasteTypeList();
+        // Gộp xong tên/categoryId đã đổi -> phải render lại danh sách chi phí,
+        // nếu không danh sách vẫn hiện tên cũ tới khi người dùng chuyển tab.
+        refreshExpenseListKeepDate();
+        renderMonthExpenseTotal();
     }).catch(function(err) {
         console.error('Merge waste categories error:', err);
         showToast('Lỗi khi gộp hao phí!', 'error');
@@ -2495,7 +2682,20 @@ function _adminCancelMergeWaste() {
 // Giữ alias cho tương thích
 function renderTodayExpenses() {
     _expenseViewDate = new Date();
-    _expenseViewDateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _expenseViewDate.toISOString().slice(0, 10);
+    _expenseViewDateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey(_expenseViewDate);
+    expenseUpdateDateDisplay();
+    renderExpensesByDate(_expenseViewDateKey);
+}
+
+// Render lại danh sách mà GIỮ ngày đang xem.
+// Trước đây mọi thao tác sửa/xoá/gộp đều gọi renderTodayExpenses() -> reset
+// về hôm nay. Admin lùi ngày về 03/10, sửa một khoản chi phí, bấm Lưu ->
+// màn hình nhảy về hôm nay, dòng vừa sửa biến mất -> tưởng lưu thất bại.
+function refreshExpenseListKeepDate() {
+    if (!_expenseViewDateKey) {
+        renderTodayExpenses();
+        return;
+    }
     expenseUpdateDateDisplay();
     renderExpensesByDate(_expenseViewDateKey);
 }
@@ -2582,7 +2782,7 @@ function renderMonthExpenseTotal() {
             if (tx2.date) {
                 try {
                     var td = new Date(tx2.date);
-                    timeStr = td.getHours().toString().padStart(2, '0') + ':' + td.getMinutes().toString().padStart(2, '0');
+                    timeStr = _pad2(td.getHours()) + ':' + _pad2(td.getMinutes());
                 } catch(e) { timeStr = ''; }
             }
             var detailStr = '';
@@ -2656,7 +2856,7 @@ function editExpense(id) {
     var currentUser = DB.getCurrentUser();
     var _isAdmin = isAdminUser();
     if (!_isAdmin) {
-        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
+        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey();
         if (tx.dateKey !== today) {
             showToast('Bạn chỉ được sửa chi phí trong ngày hôm nay!', 'warning');
             return;
@@ -2708,6 +2908,14 @@ function confirmEditExpense(id) {
         return;
     }
 
+    // Lấy bản ghi gốc TRƯỚC khi sửa. Cần để biết chênh lệch số lượng để cập
+    // nhật tồn kho cho khớp (xem ghi chú bên dưới).
+    var oldTx = _findTxInCache(id);
+    if (!oldTx) {
+        showToast('Không tìm thấy chi phí này!', 'error');
+        return;
+    }
+
     var updateData = {
         categoryName: newName,
         amount: newAmount
@@ -2730,31 +2938,57 @@ function confirmEditExpense(id) {
         }
     }
 
+    // FIX P0 - SỬA SỐ LƯỢNG PHẢI CẬP NHẬT TỒN KHO:
+    // Trước đây sửa ingredientQty chỉ ghi vào cost_transactions, không đụng tới
+    // ingredients.stock. Ví dụ chi phí gốc qty 5, sửa thành 10 => kho chỉ được
+    // +5 nhưng cost record ghi 10, lệch 5. Ngược chiều (10 -> 5) thì thiếu hàng.
+    // Nay tính chênh lệch rồi cộng/trừ tồn kho cho khớp với số lượng mới.
+    var qtyDelta = 0;
+    if (updateData.ingredientQty !== undefined && oldTx && oldTx.ingredientQty !== undefined) {
+        qtyDelta = updateData.ingredientQty - oldTx.ingredientQty;
+    }
+
     DB.update('cost_transactions', id, updateData).then(function() {
+        if (qtyDelta !== 0 && oldTx.ingredientId) {
+            return addIngredientStock(oldTx.ingredientId, qtyDelta);
+        }
+        return Promise.resolve();
+    }).then(function() {
         return loadExpenseData();
     }).then(function() {
         showToast('✅ Đã cập nhật chi phí', 'success');
         cancelEditExpense();
-        renderTodayExpenses();
+        // Giữ ngày đang xem, không nhảy về hôm nay
+        refreshExpenseListKeepDate();
         renderMonthExpenseTotal();
+        renderIngredientList();
     }).catch(function(err) {
         console.error('Edit expense error:', err);
-        showToast('Lỗi khi cập nhật!', 'error');
+        if (qtyDelta !== 0 && oldTx.ingredientId) {
+            // Đã sửa lịch sử nhưng cập nhật kho lỗi -> báo rõ để admin kiểm tra
+            showToast('Đã sửa chi phí nhưng cập nhật tồn kho LỖI. Kiểm tra tồn kho ' + oldTx.ingredientId, 'error', 5000);
+        } else {
+            showToast('Lỗi khi cập nhật!', 'error');
+        }
     });
 }
 
 // Helper: tìm transaction trong cache theo id
+// So sánh bằng String() vì id lấy từ inline handler là string, còn trong cache
+// có thể là number -> `===` sẽ không khớp và tìm ra null.
+// Bỏ qua bản ghi đã soft-delete để không sửa/xoá nhầm bản ghi đã ẩn.
 function _findTxInCache(id) {
     var txs = expenseData.transactions || [];
     for (var i = 0; i < txs.length; i++) {
-        if (txs[i].id === id) return txs[i];
+        if (String(txs[i].id) === String(id) && !txs[i].deleted) return txs[i];
     }
     return null;
 }
 
 function cancelEditExpense() {
     var overlay = document.getElementById('editExpenseOverlay');
-    if (overlay) {
+    // Guard contains(): nếu overlay đã bị đóng, removeChild sẽ throw
+    if (overlay && document.body.contains(overlay)) {
         document.body.removeChild(overlay);
     }
 }
@@ -2778,7 +3012,7 @@ function deleteExpense(id) {
     var currentUser = DB.getCurrentUser();
     var _isAdmin = isAdminUser();
     if (!_isAdmin) {
-        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
+        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : _vnDateKey();
         if (tx.dateKey !== today) {
             showToast('Bạn chỉ được xóa chi phí trong ngày hôm nay!', 'warning');
             return;
@@ -2786,7 +3020,9 @@ function deleteExpense(id) {
     }
 
     // Admin: cảnh báo nếu trong kỳ có chi phí khác
-    if (isAdminUser) {
+    // FIX: trước đây viết `if (isAdminUser)` (thiếu ngoặc) -> hàm luôn truthy
+    // -> staff cũng thấy modal cảnh báo kèm số lượng chi phí trong kỳ.
+    if (_isAdmin) {
         var periodCosts = _countPeriodCosts(tx);
         if (periodCosts > 0) {
             _showConfirmModal(
@@ -2866,25 +3102,34 @@ function _doDeleteConfirmSteps(tx, id) {
 }
 
 function doDeleteExpense(tx, id, revertStock) {
-    var deletePromise;
-    if (revertStock && tx.ingredientId && tx.ingredientQty) {
-        deletePromise = addIngredientStock(tx.ingredientId, -tx.ingredientQty);
-    } else {
-        deletePromise = Promise.resolve();
-    }
-
-    deletePromise.then(function() {
-        return DB.update('cost_transactions', id, { deleted: true });
+    // FIX THỨ TỰ (P0 - mất hàng):
+    // Trước đây hoàn kho chạy TRƯỚC, xoá lịch sử SAU. Nếu DB.update reject
+    // (bản ghi không có trong local -> db.js throw 'Not found') thì tồn kho đã
+    // bị trừ vĩnh viễn nhưng bản ghi chi phí vẫn còn -> vừa thiếu hàng vừa còn
+    // bị trừ tiền.
+    // Nay: đánh dấu xoá lịch sử TRƯỚC (thao tác không thể hoàn tác được),
+    // hoàn kho SAU. Nếu hoàn kho lỗi thì báo rõ để admin xử lý tay,
+    // còn hơn là mất hàng im lặng.
+    var needRevertStock = !!(revertStock && tx.ingredientId && tx.ingredientQty);
+    
+    DB.update('cost_transactions', id, { deleted: true }).then(function() {
+        if (!needRevertStock) return Promise.resolve();
+        return addIngredientStock(tx.ingredientId, -tx.ingredientQty);
     }).then(function() {
         return loadExpenseData();
     }).then(function() {
         showToast('🗑️ Đã xóa chi phí', 'success');
-        renderTodayExpenses();
+        refreshExpenseListKeepDate();
         renderMonthExpenseTotal();
         renderIngredientList();
     }).catch(function(err) {
         console.error('Delete expense error:', err);
-        showToast('Lỗi khi xóa chi phí!', 'error');
+        if (needRevertStock) {
+            // Lịch sử đã xoá nhưng hoàn kho lỗi -> nói rõ để không mất hàng âm thầm
+            showToast('Đã xoá chi phí nhưng HOÀN KHO LỖI. Kiểm tra tồn kho ' + tx.ingredientId, 'error', 5000);
+        } else {
+            showToast('Lỗi khi xóa chi phí!', 'error');
+        }
     });
 }
 
@@ -3120,6 +3365,15 @@ function attachExpenseEvents() {
 
 // ========== XÓA CHI PHÍ CŨ THEO NGÀY ==========
 function _showDeleteOldExpensesModal() {
+    // FIX P1 - THIẾU KIỂM TRA QUYỀN:
+    // Trước đây chỉ ẩn nút bằng display:none ở applyExpenseRoleRestrictions(),
+    // còn hàm này (và _doDeleteOldExpenses) được export ra window và không hề
+    // kiểm tra role. Đây là thao tác bulk ảnh hưởng trực tiếp số dư Két POS.
+    if (!isAdminUser()) {
+        showToast('Chỉ quản lý mới được xóa chi phí cũ!', 'warning');
+        return;
+    }
+
     var overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
     overlay.onclick = function(e) { if (e.target === overlay) { cleanup(); } };
@@ -3129,13 +3383,11 @@ function _showDeleteOldExpensesModal() {
     var yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
 
+    // Dùng _vnDateKey (giờ Việt Nam) thay vì toISOString (giờ UTC).
+    // toISOString lệch 1 ngày ở UTC+7: 00:00 ngày 30/09 ra thành 2026-09-29,
+    // khiến modal mở mặc định lệch ngày và admin có thể xoá nhầm.
     function fmt(d) {
-        // Dùng getTodayDateKey nếu là hôm nay, nếu không thì dùng toISOString
-        var now = new Date();
-        if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
-            return typeof getTodayDateKey === 'function' ? getTodayDateKey() : d.toISOString().slice(0, 10);
-        }
-        return d.toISOString().slice(0, 10);
+        return _vnDateKey(d);
     }
 
     var box = document.createElement('div');
@@ -3144,6 +3396,15 @@ function _showDeleteOldExpensesModal() {
     box.innerHTML =
         '<div style="font-size:17px;font-weight:600;margin-bottom:16px;color:#1e293b;">🗑️ Xóa chi phí cũ</div>' +
         '<div style="font-size:13px;color:#64748b;margin-bottom:16px;">Chọn khoảng ngày để xóa chi phí. Chi phí trong khoảng này sẽ bị xóa nhưng <b>danh sách tên nguyên liệu/hao phí vẫn được giữ nguyên</b>.</div>' +
+        // Nói rõ hậu quả: hàng đã mua VẪN còn trong kho. Nếu không cảnh báo,
+        // admin dễ tưởng xoá chi phí là hoàn hàng -> tồn kho sai và số dư két
+        // POS tăng lên mà không ai hiểu vì sao.
+        '<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;' +
+        'border-radius:8px;padding:10px 12px;margin-bottom:16px;line-height:1.5;">' +
+        '⚠️ <b>Lưu ý:</b> Thao tác này chỉ xóa dữ liệu chi phí (dùng để dọn sổ sai). ' +
+        '<b>Tồn kho KHÔNG thay đổi</b> - hàng đã mua vẫn nằm trong kho như cũ. ' +
+        'Số dư Két POS / QLTT sẽ tăng lên tương ứng với tổng chi phí bị xóa.' +
+        '</div>' +
         '<div style="margin-bottom:12px;">' +
             '<label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:4px;">Từ ngày</label>' +
             '<input type="date" id="deleteFromDate" value="' + fmt(firstDay) + '" style="width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;">' +
@@ -3219,12 +3480,28 @@ function _showDeleteOldExpensesModal() {
 }
 
 function _doDeleteOldExpenses(fromDate, toDate) {
+    // Chặn quyền ở đây NỮA, không chỉ ở hàm mở modal. Hàm này được export ra
+    // window nên bất kỳ ai cũng gọi được trực tiếp, bỏ qua nút bị ẩn.
+    if (!isAdminUser()) {
+        showToast('Chỉ quản lý mới được xóa chi phí cũ!', 'warning');
+        return;
+    }
+
     var txList = window.expenseData ? (window.expenseData.transactions || []) : [];
     var toDelete = [];
     var totalAmount = 0;
+    var skippedNoDate = 0;
     for (var i = 0; i < txList.length; i++) {
         var tx = txList[i];
-        if (tx.dateKey >= fromDate && tx.dateKey <= toDate && !tx.deleted) {
+        if (tx.deleted) continue;
+        // Bản ghi cũ không có dateKey sẽ so sánh thành chuỗi 'undefined' và rơi
+        // ra ngoài mọi khoảng ngày -> âm thầm không bị xoá, không ai biết.
+        // Đếm lại để báo cho admin biết có dữ liệu sót.
+        if (!tx.dateKey) {
+            skippedNoDate++;
+            continue;
+        }
+        if (tx.dateKey >= fromDate && tx.dateKey <= toDate) {
             toDelete.push(tx);
             totalAmount += tx.amount || 0;
         }
@@ -3236,7 +3513,12 @@ function _doDeleteOldExpenses(fromDate, toDate) {
     }
 
     _showConfirmModal(
-        'Bạn có chắc chắn muốn xóa <b>' + toDelete.length + '</b> giao dịch chi phí (tổng <b>' + formatMoney(totalAmount) + '</b>) trong khoảng từ <b>' + fromDate + '</b> đến <b>' + toDate + '</b>?<br><br>📌 <b>Danh sách tên nguyên liệu và hao phí sẽ được giữ nguyên.</b>',
+        'Bạn có chắc chắn muốn xóa <b>' + toDelete.length + '</b> giao dịch chi phí (tổng <b>' + formatMoney(totalAmount) + '</b>) trong khoảng từ <b>' + fromDate + '</b> đến <b>' + toDate + '</b>?<br><br>' +
+        '📌 <b>Danh sách tên nguyên liệu và hao phí sẽ được giữ nguyên.</b><br><br>' +
+        // Nhắc lại hậu quả để admin không hiểu nhầm là hoàn hàng.
+        '⚠️ <b>Tồn kho KHÔNG thay đổi</b> - hàng đã mua vẫn còn trong kho. ' +
+        'Số dư Két POS / QLTT sẽ tăng lên <b>' + formatMoney(totalAmount) + '</b>.' +
+        (skippedNoDate > 0 ? '<br><br>ℹ️ Có <b>' + skippedNoDate + '</b> giao dịch cũ thiếu ngày sẽ KHÔNG bị xóa.' : ''),
         'Xóa tất cả',
         'Hủy'
     ).then(function(confirmed) {
@@ -3258,11 +3540,19 @@ function _doDeleteOldExpenses(fromDate, toDate) {
         }
 
         Promise.all(promises).then(function() {
-            showToast('✅ Đã xóa ' + deletedCount + '/' + toDelete.length + ' giao dịch chi phí!', 'success');
+            // Báo rõ số thực sự xoá được, tránh báo "thành công" khi có bản ghi lỗi
+            if (deletedCount < toDelete.length) {
+                showToast('⚠️ Đã xóa ' + deletedCount + '/' + toDelete.length +
+                          ' giao dịch. Có bản ghi không cập nhật được, kiểm tra lại.', 'warning', 5000);
+            } else {
+                showToast('✅ Đã xóa ' + deletedCount + ' giao dịch chi phí!', 'success');
+            }
             // Reload dữ liệu
             loadExpenseData().then(function() {
                 renderTodayExpenses();
                 renderMonthExpenseTotal();
+                // Báo cáo két POS cũng cần cập nhật theo số dư mới
+                if (typeof loadPosCashData === 'function') loadPosCashData();
             });
         });
     });
@@ -3282,6 +3572,7 @@ window.deleteExpense = deleteExpense;
 window.initExpense = initExpense;
 window.loadExpenseData = loadExpenseData;
 window.renderTodayExpenses = renderTodayExpenses;
+window.refreshExpenseListKeepDate = refreshExpenseListKeepDate;
 window.renderExpensesByDate = renderExpensesByDate;
 window.renderMonthExpenseTotal = renderMonthExpenseTotal;
 window.toggleMonthDateDetail = toggleMonthDateDetail;

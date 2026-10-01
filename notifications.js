@@ -7,16 +7,10 @@ var NOTIFICATIONS_COLLECTION = 'notifications';
 var LUNAR_DISMISS_KEY = 'lunar_dismissed';
 var NOTIFICATION_TOGGLE_KEY = 'notification_toggle';
 
-// Helper: escape chuỗi cho JavaScript string (dùng trong onclick)
-function escapeJsString(str) {
-    if (typeof str !== 'string') return '';
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r');
-}
+// escapeJsString: định nghĩa DUY NHẤT ở pos-app.js (load sớm nhất trong nhóm).
+// messages.js và settings.js từng có bản trùng giống hệt; do load sau nên ghi đè
+// bản này. Nay gộp về một chỗ để tránh sửa nhầm bản chết.
+// Dùng cho: escape chuỗi chèn vào onclick='...' (escapeJsString).
 
 // Màu sắc cho thông báo
 var NOTIFICATION_COLORS = {

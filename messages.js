@@ -894,29 +894,11 @@ function formatChatTime(timestamp) {
     }
 }
 
-// Sử dụng escapeHtml từ settings.js (global) - tránh duplicate
-// Đã định nghĩa trong settings.js, nếu chưa có thì fallback
-if (typeof window.escapeHtml !== 'function') {
-    window.escapeHtml = function(str) {
-        if (typeof str !== 'string') return '';
-        return str
-            .replace(/&/g, '&')
-            .replace(/</g, '<')
-            .replace(/>/g, '>')
-            .replace(/"/g, '"')
-            .replace(/'/g, '&#039;');
-    };
-}
-
-function escapeJsString(str) {
-    if (typeof str !== 'string') return '';
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r');
-}
+// escapeHtml và escapeJsString đều định nghĩa DUY NHẤT ở pos-app.js.
+// Không khai báo lại ở đây.
+// - escapeHtml: fallback cũ ở đây có replace(/&/g,'&') -> identity, không escape
+//   gì cả; bản ở pos-app.js đã sửa đúng và load sớm hơn nên luôn thắng.
+// - escapeJsString: trùng y hệt với notifications.js và settings.js.
 
 // ========== GỬI THÔNG BÁO TELEGRAM KHI CÓ CHAT MỚI ==========
 function _notifyChatToTelegram(msgData) {

@@ -4,64 +4,64 @@
     ".write": true,
     "$shopId": {
       "info": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "transactions": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "daily_balances": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "cost_transactions": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "inventory_transactions": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "ingredient_transactions": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "manager_cash_pickups": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "employee_attendance": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "employee_salaries": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "delete_logs": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "drawer_sessions": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "notifications": {
-        ".indexOn": ["_version", "createdAt"]
+        ".indexOn": ["_version", "createdAt", "updatedAt"]
       },
       "tables": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "customers": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "menu": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "menu_categories": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "ingredients": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "staffs": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "cost_categories": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "messages": {
-        ".indexOn": ["_version"]
+        ".indexOn": ["_version", "updatedAt"]
       },
       "drawer_telegram_queue": {
         ".indexOn": ["timestamp"]

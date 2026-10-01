@@ -8,13 +8,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#f97316">
     <title>MILANO COFFEE 259 - Bán hàng</title>
-    <link rel="stylesheet" href="css/pos-base.css">
-    <link rel="stylesheet" href="css/report.css">
-    <link rel="stylesheet" href="css/menu.css">
-    <link rel="stylesheet" href="css/modals.css">
-    <link rel="stylesheet" href="css/manager.css">
-    <link rel="stylesheet" href="css/expense.css">
-    <link rel="stylesheet" href="css/manager-detail.css">
+    <link rel="stylesheet" href="css.min/pos-base.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/report.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/menu.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/modals.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/manager.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/expense.min.css?v=1790869905030">
+    <link rel="stylesheet" href="css.min/manager-detail.min.css?v=1790869905030">
 </head>
 <body>
     <!-- ========== LOADING SCREEN ========== -->
@@ -960,7 +960,7 @@
     <div class="modal" id="splitBillModal">
         <div class="modal-content"><div class="modal-header"><span class="modal-title">🧾 Chia hóa đơn</span><span class="modal-close" onclick="closeModal('splitBillModal')">&times;</span></div>
         <div class="modal-body"><div id="splitItemsList" class="split-items-list"></div><div class="split-total">Tổng phần chia: <span id="splitTotalAmount">0đ</span></div>
-        <div class="form-actions"><button class="btn-save" id="confirmSplitBtn">✅ Thanh toán phần đã chọn</button><button class="btn-cancel" onclick="closeModal('splitBillModal')">Hủy</button></div></div></div>
+        <div class="form-actions"><button class="btn-cancel" onclick="closeModal('splitBillModal')">Hủy</button></div></div></div>
     </div>
 
     <!-- MODAL CHUYỂN MÓN -->
@@ -1313,31 +1313,34 @@
 
     <div id="recentToast" class="recent-toast">
         <div class="recent-toast-header" onclick="toggleRecentToast()">
-            <span>🔄 GIAO DỊCH GẦN ĐÂY</span>
+            <span class="recent-toast-label">🔄 GIAO DỊCH GẦN ĐÂY</span>
+            <!-- Badge số lượng: hiện ở trạng thái THU GỌN thay cho chữ tiêu đề,
+                 để panel nhỏ gọn không che bàn. -->
+            <span id="recentToastCount" class="recent-toast-count">0</span>
             <span id="recentToastToggle" class="recent-toast-toggle">▲</span>
         </div>
         <div id="recentToastList" class="recent-toast-list"></div>
     </div>
 
     <!-- SCRIPTS - CHỈ LOAD NHỮNG GÌ POS CẦN -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="vendor/firebase-app.js"></script>
+    <script src="vendor/firebase-database.js"></script>
+    <script src="vendor/firebase-auth.js"></script>
     
     <!-- DB CHUNG -->
-    <script src="db.js?v=3"></script>
+    <script src="js.min/db.min.js?v=1790869905030"></script>
     <!-- Auth CHUNG -->
-    <script src="auth.js"></script>
+    <script src="js.min/auth.min.js?v=1790869905030"></script>
     
     <!-- POS-APP RÚT GỌN (thay thế app.js) -->
     <!-- index.html mặc định hiển thị tab Bàn, mangdi.html dùng tab Mang đi -->
     <script>window._defaultTab = 'tables';</script>
-    <script src="pos-app.js"></script>
+    <script src="js.min/pos-app.min.js?v=1790869905030"></script>
     <!-- REALTIME RÚT GỌN (thay thế realtime.js) -->
-    <script src="realtime-pos.js"></script>
+    <script src="js.min/realtime-pos.min.js?v=1790869905030"></script>
     
     <!-- INGREDIENTS - kiểm tra tồn kho, trừ nguyên liệu (cần cho order.js, tables.js) -->
-    <script src="ingredients.js"></script>
+    <script src="js.min/ingredients.min.js?v=1790869905030"></script>
     
     <!-- ESP32 Cash Drawer Audit - Định nghĩa handleCashPayment mặc định TRƯỚC order.js -->
     <!-- để order.js, tables.js, customers.js có thể gọi ngay cả khi esp32_audit.js chưa load -->
@@ -1356,30 +1359,30 @@
     </script>
     
     <!-- Notifications - Định nghĩa notifyPaymentToTelegram TRƯỚC order.js, tables.js, customers.js -->
-    <script src="notifications.js"></script>
+    <script src="js.min/notifications.min.js?v=1790869905030"></script>
     
     <!-- CORE MODULES DÙNG CHUNG -->
-    <script src="order.js"></script>
-    <script src="tables.js?v=2"></script>
-    <script src="split-transfer-merge.js"></script>
-    <script src="customers.js"></script>
-    <script src="history.js"></script>
-    <script src="print.js"></script>
-    <script src="draft-orders.js"></script>
-    <script src="fund-reconciliation.js"></script>
+    <script src="js.min/order.min.js?v=1790869905030"></script>
+    <script src="js.min/tables.min.js?v=1790869905030"></script>
+    <script src="js.min/split-transfer-merge.min.js?v=1790869905030"></script>
+    <script src="js.min/customers.min.js?v=1790869905030"></script>
+    <script src="js.min/history.min.js?v=1790869905030"></script>
+    <script src="js.min/print.min.js?v=1790869905030"></script>
+    <script src="js.min/draft-orders.min.js?v=1790869905030"></script>
+    <script src="js.min/fund-reconciliation.min.js?v=1790869905030"></script>
     <!-- Manager Detail - click vào manager-grid items + tab quản lý -->
-    <script src="manager-detail.js"></script>
+    <script src="js.min/manager-detail.min.js?v=1790869905030"></script>
     <!-- Inventory / Menu management -->
-    <script src="inventory-manager.js"></script>
-    <script src="expense.js"></script>
+    <script src="js.min/inventory-manager.min.js?v=1790869905030"></script>
+    <script src="js.min/expense.min.js?v=1790869905030"></script>
     <!-- Telegram notification integration -->
-    <script src="telegram.js"></script>
+    <script src="js.min/telegram.min.js?v=1790869905030"></script>
     
     <!-- ESP32 Cash Drawer Audit -->
-    <script src="esp32_audit.js"></script>
+    <script src="js.min/esp32_audit.min.js?v=1790869905030"></script>
     
     <!-- Chat nội bộ -->
-    <script src="messages.js"></script>
+    <script src="js.min/messages.min.js?v=1790869905030"></script>
     
     <!-- Lunar calendar -->
     <script src="https://cdn.jsdelivr.net/npm/lunar-javascript@1.6.1/lunar.min.js"></script>
@@ -1398,14 +1401,14 @@
     </script>
     
     <!-- Employees management - Modal quản lý nhân viên (thay thế staff logic trong auth.js, settings.js, manager-detail.js) -->
-    <script src="employees.js"></script>
+    <script src="js.min/employees.min.js?v=1790869905030"></script>
     
     <!-- Settings + Đếm tiền nhanh -->
-    <script src="settings.js"></script>
+    <script src="js.min/settings.min.js?v=1790869905030"></script>
     
     <!-- Master Config & User Management (Multi-tenant) -->
-    <script src="master-config.js"></script>
-    <script src="master-user-manager.js"></script>
+    <script src="js.min/master-config.min.js?v=1790869905030"></script>
+    <script src="js.min/master-user-manager.min.js?v=1790869905030"></script>
     
     <!-- HEADER DƯỚI ĐÁY -->
     <div class="header">

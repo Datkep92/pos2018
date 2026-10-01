@@ -24,12 +24,16 @@ function openManagerPickupModal() {
     loadFundReconciliationData().then(function() {
         var modal = document.getElementById('managerCashPickupModal');
         if (!modal) {
-            showToast('Không tìm thấy modal!', 'error');
+            // #managerCashPickupModal không tồn tại trong HTML hiện tại.
+            // Báo rõ cho người dùng biết phải nhập ở đâu thay vì "Không tìm thấy modal!".
+            showToast('ℹ️ Nhập tiền QL nhận tại mục "💰 Tiền QL nhận" trong tab Đối soát két', 'warning');
             return;
         }
 
-        document.getElementById('managerPickupAmount').value = '';
-        document.getElementById('managerPickupNote').value = '';
+        var amountEl = document.getElementById('managerPickupAmount');
+        var noteEl = document.getElementById('managerPickupNote');
+        if (amountEl) amountEl.value = '';
+        if (noteEl) noteEl.value = '';
 
         renderManagerPickupHistory();
         modal.style.display = 'flex';
@@ -37,52 +41,13 @@ function openManagerPickupModal() {
 }
 
 // ========== LƯU LẦN NHẬN TIỀN ==========
-var _savingPickup = false;
-function saveManagerPickup() {
-    if (_savingPickup) return;
-    _savingPickup = true;
-
-    var btn = document.getElementById('saveManagerPickupBtn');
-    if (btn) btn.disabled = true;
-
-    // Ưu tiên settings (mgrPickupInput) trước, sau đó modal (managerPickupAmount)
-    var amountEl = document.getElementById('mgrPickupInput') || document.getElementById('managerPickupAmount');
-    var amount = amountEl ? (parseFloat(amountEl.value) || 0) : 0;
-    var note = document.getElementById('managerPickupNote').value.trim();
-
-    if (amount <= 0) {
-        showToast('Số tiền phải lớn hơn 0!', 'warning');
-        _savingPickup = false;
-        if (btn) btn.disabled = false;
-        return;
-    }
-
-    var now = new Date();
-    var dateKey = typeof getTodayDateKey === 'function' ? getTodayDateKey() : now.toISOString().slice(0, 10);
-
-    var data = {
-        id: 'pickup_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
-        amount: amount,
-        note: note || 'Quản lý nhận tiền',
-        date: now.toISOString(),
-        dateKey: dateKey,
-        createdAt: Date.now(),
-        createdBy: window.currentDeviceId || ''
-    };
-
-    DB.create('manager_cash_pickups', data).then(function() {
-        showToast('✅ Đã lưu: ' + formatMoney(amount), 'success');
-        // Đóng popup - realtime subscription sẽ tự cập nhật stat-row và đối soát
-        closeModal('managerCashPickupModal');
-        _savingPickup = false;
-        if (btn) btn.disabled = false;
-    }).catch(function(err) {
-        console.error('Save pickup error:', err);
-        showToast('Lỗi khi lưu!', 'error');
-        _savingPickup = false;
-        if (btn) btn.disabled = false;
-    });
-}
+// XOÁ bản định nghĩa cũ ở đây.
+// Lý do: settings.js đã có bản duy nhất (và là bản load sau nên thắng).
+// Bản cũ ở file này gọi document.getElementById('managerPickupNote').value.trim()
+// không null-check trong khi #managerPickupNote không tồn tại trong HTML -> throw,
+// và cờ _savingPickup chỉ được reset ở nhánh then/catch nên `if (_savingPickup) return;`
+// kẹt vĩnh viễn => nút 💾 Lưu bấm mãi không có phản hồi.
+// Ngoài ra nó không ghi lên Firebase nên máy khác không bao giờ thấy realtime.
 
 // ========== HIỂN THỊ LỊCH SỬ NHẬN TIỀN ==========
 function renderManagerPickupHistory() {
@@ -103,7 +68,7 @@ function renderManagerPickupHistory() {
         return;
     }
 
-    var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
+    var isAdmin = typeof _resolveIsAdmin === 'function' ? _resolveIsAdmin() : (typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin());
     var total = 0;
     var html = '';
     for (var i = 0; i < todayPickups.length; i++) {
@@ -133,23 +98,9 @@ function renderManagerPickupHistory() {
 }
 
 // ========== XÓA LẦN NHẬN TIỀN (ADMIN) ==========
-function deleteManagerPickup(id) {
-    if (!confirm('Xóa lần nhận tiền này?')) return;
-    DB.remove('manager_cash_pickups', id).then(function() {
-        // Cập nhật danh sách
-        managerCashPickups = managerCashPickups.filter(function(p) { return p.id !== id; });
-        renderManagerPickupHistory();
-        // Cập nhật lại khu vực đối soát
-        var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
-        if (typeof renderReconciliation === 'function') {
-            renderReconciliation(today);
-        }
-        showToast('✅ Đã xóa', 'success');
-    }).catch(function(err) {
-        console.error('Delete pickup error:', err);
-        showToast('Lỗi khi xóa!', 'error');
-    });
-}
+// XOÁ bản định nghĩa cũ ở đây - dùng bản duy nhất trong settings.js
+// (bản settings.js cập nhật _pickupsCache, xoá trên Firebase, chờ kết quả
+//  rồi mới báo, và render lại cả bảng đối soát).
 
 // ========== LẤY SỐ DƯ ĐẦU KỲ ==========
 function getOpeningBalance(dateStr) {
@@ -716,6 +667,99 @@ function closeDay(dateStr) {
     });
 }
 
+// ========== GỬI TELEGRAM (shim nối sang API thật) ==========
+// SỬA LỖI: cả file này gọi sendTelegramMessage() ở 4 chỗ (L490 nhánh cảnh
+// báo, L523 nhánh thường, L650 sau khi chốt ngày, L725 auto-chốt 6h sáng)
+// nhưng KHÔNG tồn tại hàm sendTelegramMessage trong bất kỳ file nào của repo.
+// Hệ quả: mọi thông báo Telegram về đối soát quỹ / chốt ngày đều KHÔNG BAO GIỜ
+// được gửi — kể cả cảnh báo "nhân viên điều chỉnh số dư" và cảnh báo lệch quỹ.
+// Các nhánh còn lại có guard typeof nên chỉ im lặng, nhưng nhánh L490->L519
+// nằm trong callback DB.getTransactionsByDate() nên lỗi ở đó cũng chỉ hiện
+// trong console.
+//
+// telegram.js export các hàm: notifyTelegramWarning(msg)  -> token cảnh báo
+//                             notifyTelegramCustom(msg)   -> token chính
+// shim dưới đây tự chọn kênh theo nội dung để giữ nguyên ý định gốc.
+function sendTelegramMessage(message) {
+    if (!message) return;
+    var isWarning = (message.indexOf('CẢNH BÁO') !== -1)
+                 || (message.indexOf('⚠️') !== -1)
+                 || (message.indexOf('🔴') !== -1)
+                 || (message.indexOf('🚨') !== -1);
+    try {
+        if (isWarning && typeof notifyTelegramWarning === 'function') {
+            notifyTelegramWarning(message);
+        } else if (typeof notifyTelegramCustom === 'function') {
+            notifyTelegramCustom(message);
+        } else {
+            console.warn('[fund-reconciliation] telegram.js chưa sẵn sàng, bỏ qua thông báo');
+        }
+    } catch (e) {
+        // KHÔNG để lỗi gửi Telegram làm hỏng luồng chốt ngày
+        console.error('[fund-reconciliation] Lỗi gửi Telegram:', e);
+    }
+}
+
+// ========== GHI NHẬN THIẾU TIỀN MẶT VÀO QUỸ THƯỞNG ==========
+// SỬA LỖI: fund-reconciliation.js gọi handleCashShortage() khi chốt ngày có
+// chênh lệch âm, nhưng hàm đó nằm trong bonus_fund.js — file KHÔNG được load
+// trong index.html. Guard typeof khiến nhánh này im lặng bỏ qua: quản lý
+// chốt ngày thiếu 30.000 mà không hề có dấu vết, quỹ thưởng không bị trừ.
+//
+// Ở đây ghi thẳng bản ghi DB (giống bonus_fund.js làm) nên không phụ thuộc các
+// biến closure-private của bonus_fund.js. Dữ liệu đúng ngay, và khi bật lại
+// bonus_fund.js thì getBonusFundTotal() đọc từ DB sẽ thấy luôn.
+//
+// IDEMPOTENT: autoCloseDay() chạy setInterval mỗi 60 giây và closeDay() có
+// thể bấm lại nhiều lần. Nếu không kiểm tra theo dateKey thì mỗi lần chạy lại
+// sẽ tạo thêm 1 bản ghi trừ tiền cho cùng một khoản thiếu → quỹ thưởng bị
+// trừ âm (âm vô lý). Vì vậy kiểm tra bản ghi đã có cho ngày đó trước khi ghi.
+function handleCashShortage(dateStr, difference) {
+    // Chỉ xử lý khi THIẾU tiền. difference luôn <= 0 ở call site nhưng chống
+    // nhầm ở các đường gọi mới sau này.
+    if (!difference || difference >= 0) return Promise.resolve(null);
+    // dateStr bắt buộc: nếu không có ngày thì không tạo bản ghi "mồ côi"
+    if (!dateStr) {
+        console.warn('[cashShortage] Thiếu dateStr, bỏ qua ghi quỹ thưởng');
+        return Promise.resolve(null);
+    }
+    if (typeof DB === 'undefined' || !DB.getAll) return Promise.resolve(null);
+
+    return DB.getAll('bonus_fund').then(function(records) {
+        var list = records || [];
+        for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            if (r && r.deleted !== true && r.type === 'cash_shortage' && r.dateKey === dateStr) {
+                console.log('[cashShortage] Ngày ' + dateStr + ' đã có bản ghi thiếu tiền, bỏ qua (chống trùng)');
+                return null;
+            }
+        }
+        var data = {
+            id: 'bf_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+            type: 'cash_shortage',
+            amount: difference,              // số âm
+            note: 'Trừ thiếu tiền mặt tại POS',
+            dateKey: dateStr,
+            createdAt: Date.now(),
+            createdBy: (window.currentDeviceId || ''),
+            difference: difference,
+            deleted: false,
+            editedAt: null,
+            editedBy: null
+        };
+        return DB.create('bonus_fund', data).then(function() {
+            showToast('⚠️ Quỹ thưởng bị trừ ' + formatMoney(Math.abs(difference)) + ' do thiếu tiền mặt', 'warning', 3000);
+            return data;
+        }).catch(function(err) {
+            console.error('[cashShortage] Lỗi ghi quỹ thưởng:', err);
+            return null;
+        });
+    }).catch(function(err) {
+        console.error('[cashShortage] Lỗi đọc quỹ thưởng:', err);
+        return null;
+    });
+}
+
 // ========== LẤY CHI PHÍ THEO LOẠI (cho report.js) ==========
 function getCostsByType(dateStr) {
     return DB.getAll('cost_transactions').then(function(allCosts) {
@@ -793,8 +837,12 @@ setInterval(autoCloseDay, 60000);
 setTimeout(autoCloseDay, 5000);
 
 // Export global
+// LƯU Ý: saveManagerPickup / deleteManagerPickup KHÔNG export ở đây.
+// Bản định nghĩa duy nhất nằm trong settings.js (load sau) — trước đây file này
+// cũng định nghĩa lại rồi gán đè lên window, gây ra 2 bản cùng tên và làm
+// nút 💾 Lưu bị "chết" khi bản của file này chạy (nó đọc #managerPickupNote
+// không tồn tại -> throw, cờ _savingPickup kẹt vĩnh viễn).
 window.openManagerPickupModal = openManagerPickupModal;
-window.saveManagerPickup = saveManagerPickup;
 window.renderManagerPickupHistory = renderManagerPickupHistory;
 window.calculateExpectedClosing = calculateExpectedClosing;
 window.renderReconciliation = renderReconciliation;
@@ -803,6 +851,5 @@ window.closeDay = closeDay;
 window.saveActualClosing = saveActualClosing;
 window.getCostsByType = getCostsByType;
 window.loadFundReconciliationData = loadFundReconciliationData;
-window.deleteManagerPickup = deleteManagerPickup;
 window.managerCashPickups = managerCashPickups;
 window.inventoryTransactions = inventoryTransactions;

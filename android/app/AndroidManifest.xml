@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MANIFEST - MILANO COFFEE POS
+
+  Goc dich:
+  1. WebView nap web app tu trong chung cap assets/ cua APK.
+     Dung domain gia "https://appassets.androidplatform.net" thay vi file://
+     => Firebase Auth / Database chap nhan (file:// khong duoc Firebase cho phep).
+  2. Cap quyen cai dat de tu cap nhat phien ban moi.
+  3. Internet + truy cap tep de check ban moi va tai APK moi.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.milano.pos259"
+    android:versionCode="1"
+    android:versionName="1.0.0">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Tu cap nhat: tai APK moi ve roi mo man hinh cai dat -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="true"
+        android:supportsRtl="false"
+        android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true">
+
+        <!-- Tra file APK da tai cho man hinh cai dat cua Android -->
+        <provider
+            android:name=".ApkProvider"
+            android:authorities="com.milano.pos259.apk"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

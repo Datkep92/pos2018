@@ -282,7 +282,17 @@ function repeatChar(ch, count) {
 function printViaSunmi(data) {
     return new Promise(function(resolve, reject) {
         try {
-            var escLines = buildReceiptESC(data);
+            // Chọn builder theo loại phiếu. Trước đây MỌI phiếu (kể cả phiếu
+            // chốt ca / phiếu QL nhận) đều đi qua buildReceiptESC, hàm dựng hoá
+            // đơn BÁN HÀNG => giấy in ra bị bọc thêm "Tài cho", tiêu đề cột
+            // "Ten mon | SL | Don gia | T.tien" và "Cam on quy khach!".
+            var escLines;
+            if (data && data.escLines) {
+                // Đã dựng sẵn (phiếu chốt ca, phiếu QL nhận)
+                escLines = data.escLines;
+            } else {
+                escLines = buildReceiptESC(data);
+            }
             var bytes = escLinesToBytes(escLines);
             var base64Data = bytesToBase64(bytes);
 
@@ -447,6 +457,156 @@ function buildDebtHistoryReceipt(data) {
     lines.push([0x1B, 0x64, 0x04]); // ESC d 4 (4 line feeds)
     lines.push([0x1D, 0x56, 0x00]); // GS V 0 (full cut)
     return lines;
+}
+
+// ========== PHIẾU ĐỐI SOÁT (CHỐT CA / QL NHẬN) ==========
+// Không phải hoá đơn bán hàng: không có "Tài cho", không có bảng món,
+// không có "Cảm ơn quý khách!".
+// data = { title, dateLabel, rows: [[nhan, giaTri], ...], footer: [dong, ...] }
+function buildReportReceiptESC(data) {
+    var lines = [];
+    // Reset
+    lines.push([0x1B, 0x40]);                 // ESC @
+
+    // ===== HEADER: tên quán can giua, in đôi cao =====
+    lines.push([0x1B, 0x61, 0x01]);           // center
+    lines.push([0x1B, 0x45, 0x01]);           // bold ON
+    if (data.storeName) {
+        lines.push([0x1B, 0x21, 0x10]);       // double height
+        lines.push(removeAccent(data.storeName));
+        lines.push([0x1B, 0x21, 0x00]);       // normal
+    }
+    lines.push([0x1B, 0x45, 0x00]);           // bold OFF
+    lines.push([0x1B, 0x61, 0x00]);           // left
+    if (data.storeAddress) lines.push(removeAccent(data.storeAddress));
+    if (data.storePhone) lines.push('Tel: ' + data.storePhone);
+    lines.push('');
+
+    // ===== TIÊU ĐỀ PHIẾU =====
+    lines.push([0x1B, 0x61, 0x01]);           // center
+    lines.push([0x1B, 0x45, 0x01]);           // bold ON
+    lines.push(removeAccent(data.title || 'PHIEU'));
+    lines.push([0x1B, 0x45, 0x00]);           // bold OFF
+    if (data.dateLabel) lines.push(removeAccent(data.dateLabel));
+    lines.push([0x1B, 0x61, 0x00]);           // left
+    lines.push('');
+
+    // ===== CÁC DÒNG SỐ LIỆU =====
+    var sep = repeatChar('-', PW);
+    lines.push(sep);
+    for (var i = 0; i < (data.rows || []).length; i++) {
+        var row = data.rows[i];
+        // Dòng tiêu đề nhóm: chỉ có 1 phần tử => in đậm, không can phải
+        if (row.length === 1) {
+            lines.push([0x1B, 0x45, 0x01]);
+            lines.push(removeAccent(row[0]));
+            lines.push([0x1B, 0x45, 0x00]);
+            continue;
+        }
+        // Dòng số liệu: nhãn trái, giá trị phải
+        lines.push(padRight(removeAccent(row[0]), 22) + padLeft(removeAccent(String(row[1])), 20));
+    }
+    lines.push(sep);
+
+    // ===== FOOTER =====
+    lines.push('');
+    for (var f = 0; f < (data.footer || []).length; f++) {
+        var fl = data.footer[f];
+        if (fl.length === 1) {
+            lines.push([0x1B, 0x45, 0x01]);
+            lines.push(padLeft(removeAccent(fl[0]), PW));
+            lines.push([0x1B, 0x45, 0x00]);
+        } else {
+            lines.push(padRight(removeAccent(fl[0]), 22) + padLeft(removeAccent(String(fl[1])), 20));
+        }
+    }
+
+    lines.push('');
+    if (data.printedAtLabel) {
+        lines.push([0x1B, 0x61, 0x01]);       // center
+        lines.push(removeAccent(data.printedAtLabel));
+        lines.push([0x1B, 0x61, 0x00]);       // left
+    }
+
+    // Xuống dòng + cắt giấy
+    lines.push([0x1B, 0x64, 0x04]);           // ESC d 4
+    lines.push([0x1D, 0x56, 0x00]);           // GS V 0 (full cut)
+    return lines;
+}
+
+// In phiếu đối soát. Tái sử dụng code gửi ESC/POS của printViaSunmi.
+function printReportThermal(data) {
+    return new Promise(function(resolve, reject) {
+        try {
+            var escLines = buildReportReceiptESC(data);
+            var bytes = escLinesToBytes(escLines);
+            var base64Data = bytesToBase64(bytes);
+            if (typeof Android !== 'undefined' && typeof Android.printSunmi === 'function') {
+                var result = Android.printSunmi(base64Data);
+                if (result === 'ok') resolve(true);
+                else reject(new Error(result));
+            } else {
+                reject(new Error('Android bridge not available'));
+            }
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// In phiếu đối soát, có fallback mở cửa sổ in khi không có bridge Android.
+// LƯU Ý: printReportThermal LUÔN tồn tại (khai báo function ở top-level), nên
+// phải kiểm tra `typeof Android !== 'undefined'` chứ không kiểm tra
+// `typeof printX === 'function'` — nếu không nhánh fallback sẽ là code chết.
+function printReportOrWindow(data, winTitle) {
+    return printReportThermal(data).then(function() {
+        return true;
+    }).catch(function(err) {
+        // Không có bridge Android (chạy desktop/laptop) -> mở cửa sổ in
+        if (!err || err.message !== 'Android bridge not available') {
+            console.warn('Print report failed:', err);
+            showToast('⚠️ In thất bại: ' + (err && err.message ? err.message : 'Lỗi'), 'error');
+            return false;
+        }
+        var text = _reportRowsToText(data);
+        var pw = window.open('', '_blank', 'width=420,height=700');
+        if (!pw) {
+            showToast('⚠️ Không thể mở cửa sổ in. Hãy sao chép nội dung.', 'warning');
+            return false;
+        }
+        pw.document.write('<html><head><title>' + winTitle + '</title>');
+        pw.document.write('<style>body{font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;word-break:break-word;}@media print{@page{margin:0;}}</style>');
+        pw.document.write('</head><body>');
+        pw.document.write('<pre>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
+        pw.document.write('<script>window.onload=function(){window.print();}<\/script>');
+        pw.document.write('</body></html>');
+        pw.document.close();
+        return true;
+    });
+}
+
+// Dựng lại nội dung phiếu dạng text từ rows/footer (dùng cho fallback & sao chép)
+function _reportRowsToText(data) {
+    var out = [];
+    if (data.storeName) out.push(data.storeName);
+    if (data.dateLabel) out.push(data.dateLabel);
+    out.push(repeatChar('=', 32));
+    out.push(data.title || '');
+    out.push(repeatChar('=', 32));
+    out.push('');
+    var rows = data.rows || [];
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].length === 1) { out.push('--- ' + rows[i][0] + ' ---'); continue; }
+        out.push('  ' + rows[i][0] + ': ' + rows[i][1]);
+    }
+    out.push(repeatChar('-', 32));
+    var footer = data.footer || [];
+    for (var f = 0; f < footer.length; f++) {
+        if (footer[f].length === 1) out.push('  ' + footer[f][0]);
+        else out.push('  ' + footer[f][0] + ': ' + footer[f][1]);
+    }
+    if (data.printedAtLabel) { out.push(''); out.push(data.printedAtLabel); }
+    return out.join('\n');
 }
 
 function printDebtHistoryThermal(data) {

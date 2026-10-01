@@ -53,7 +53,12 @@ function saveExpense() {
             amount: amount, 
             quantity: 1, 
             date: now.toISOString(), 
-            dateKey: now.toISOString().slice(0, 10), 
+            // FIX: dateKey phải theo GIỜ VIỆT NAM, không phải giờ UTC.
+            // Trước đây dùng toISOString().slice(0,10) -> lấy ngày UTC, lệch 7
+            // tiếng. Giao dịch lúc 00:00-07:00 sáng bị ghi nhận sang HÔM TRƯỚC,
+            // đồng thời lệch với date (cũng là UTC nhưng khác điểm cắt).
+            // Giờ lấy ngày theo giờ máy cho khớp với các nơi khác trong dự án.
+            dateKey: now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2), 
             createdAt: Date.now(), 
             deleted: false 
         };

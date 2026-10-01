@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- File da tai ve trong thu muc cache, dung cho FileProvider khi cai dat APK moi -->
+<paths>
+    <cache-path name="downloads" path="downloads/" />
+    <external-cache-path name="ext-downloads" path="Download/" />
+</paths>

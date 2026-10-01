@@ -234,6 +234,7 @@ body {
 .float-label { font-size: 9px; margin-top: 2px; font-weight: 600; }
 
 /* ========== TOAST ========== */
+/* Chỉ 1 toast tại một thời điểm: không tự tắt, toast mới sẽ thay thế toast cũ. */
 .toast-container {
     position: fixed;
     bottom: calc(80px + var(--safe-bottom));
@@ -260,12 +261,55 @@ body {
 .toast.error { background: #ef4444; }
 .toast.warning { background: #f59e0b; }
 
+/* Nội dung toast bấm được để tắt thủ công */
+.toast-text {
+    cursor: pointer;
+    word-break: break-word;
+}
+
+/* Dòng phụ trong toast (vd: ghi chú tiền dư) */
+.toast-extra {
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px solid rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    opacity: 0.95;
+}
+
+/* Nút ✕ tắt toast */
+.toast-close {
+    margin-left: 10px;
+    padding: 0 2px;
+    border: none;
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1.2;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-appearance: none;
+    appearance: none;
+    font-family: inherit;
+}
+.toast-close:active { background: rgba(255, 255, 255, 0.45); }
+
 /* ========== RECENT TOAST ========== */
+/* ============================================================
+   PANEL "GIAO DỊCH GẦN ĐÂY"
+   Bản gọn (collapsed): 1 huy hiệu nhỏ ~62px, không che bàn
+   Bản mở (expanded)  : panel gọn gàng bên phải, cuộn được, không tràn màn hình
+   ============================================================ */
 .recent-toast {
     position: fixed;
     bottom: calc(80px + var(--safe-bottom));
     right: 16px;
-    width: 220px;
+    /* KHÔNG dùng min(): WebView Android 6 (Chrome 51-56) chưa hỗ trợ ->
+       width bị bỏ qua. Dùng width + max-width cho tương thích mọi máy. */
+    width: 480px;
+    max-width: calc(100vw - 32px);
     background: #1e293b;
     border-radius: 16px;
     padding: 8px 12px;
@@ -273,6 +317,59 @@ body {
     z-index: 200;
     border-left: 3px solid #f97316;
     pointer-events: auto;
+    /* Hơi trong suốt: vẫn đọc được nhưng không che khuất tab đang dùng.
+       Rõ hơn khi rê chuột / chạm vào. */
+    opacity: 0.94;
+    transition: opacity 0.15s;
+}
+.recent-toast:hover, .recent-toast:focus-within { opacity: 1; }
+
+/* ---------- TRẠNG THÁI THU GỌN: 1 huy hiệu nhỏ, không che bàn ---------- */
+.recent-toast.collapsed {
+    /* co lại đúng bằng nội dung huy hiệu */
+    width: auto;
+    max-width: none;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border-left-width: 3px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    /* mờ đi cho bớt chói, rõ hơn khi rê chuột/tiếp xúc */
+    opacity: 0.82;
+    transition: opacity 0.15s;
+}
+.recent-toast.collapsed:hover { opacity: 1; }
+.recent-toast.collapsed .recent-toast-header {
+    margin-bottom: 0;
+    justify-content: center;
+    gap: 4px;
+    height: 18px;
+    /* chữ tiêu đề bị ẩn, chỉ còn icon + số lượng */
+    font-size: 0;
+}
+/* Nhãn tiêu đề ẩn hoàn toàn khi thu gọn */
+.recent-toast.collapsed .recent-toast-label {
+    display: none;
+}
+/* Huy hiệu số lượng: chỉ hiện khi thu gọn */
+.recent-toast-count {
+    display: none;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #f97316;
+    color: #1e293b;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 15px;
+    text-align: center;
+    letter-spacing: 0;
+}
+.recent-toast.collapsed .recent-toast-count { display: inline-block; }
+/* Mũi tên thu gọn nhỏ gọn */
+.recent-toast.collapsed .recent-toast-toggle {
+    font-size: 8px;
+    color: #cbd5e1;
 }
 
 .recent-toast-header {
@@ -286,7 +383,15 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 6px;
     user-select: none;
+}
+/* Nhãn + toggle khi mở rộng: toggle dồn sang phải */
+.recent-toast-label {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .recent-toast-toggle {
     font-size: 8px;
@@ -734,47 +839,86 @@ body {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    /* Giới hạn chiều cao + cuộn: nhiều giao dịch không tràn ra ngoài màn hình
+       và không đẩy panel lên sát mép trên. */
+    max-height: 30vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .recent-toast-item {
     font-size: 11px;
     color: #e2e8f0;
     display: flex;
-    justify-content: space-between;
     align-items: center;
     cursor: pointer;
-    padding: 4px 6px;              /* giảm padding từ 6px 8px xuống 4px 6px */
+    padding: 4px 6px;
     border-bottom: 1px solid #334155;
     transition: background 0.15s;
     border-radius: 6px;
-    gap: 4px;                      /* thêm gap để kiểm soát khoảng cách giữa các phần tử */
+    gap: 6px;
+}
+
+/* Giao dịch đã hủy: làm mờ */
+.recent-toast-item.is-refunded .toast-info,
+.recent-toast-item.is-refunded .toast-meta {
+    opacity: 0.55;
+    text-decoration: line-through;
 }
 
 .toast-time {
     color: #94a3b8;
-    min-width: 15px;               /* giảm từ 55px xuống 35px */
-    flex-shrink: 0;
+    flex: 0 0 62px;                /* cố định bề rộng để "15p trước:" thẳng hàng */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .toast-info {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;                  /* BẮT BUỘC để text-overflow ellipsis hoạt động trong flex */
     color: #e2e8f0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin: 0 2px;                 /* giảm từ 6px xuống 2px */
     display: flex;
-    align-items: center;
-    gap: 2px;                      /* giảm từ 4px xuống 2px */
+    align-items: baseline;
+    gap: 4px;
+}
+
+/* Danh sách món rút gọn - bị cắt nếu dài */
+.toast-items {
+    color: #94a3b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .toast-amount {
     font-weight: 700;
     color: #f97316;
     white-space: nowrap;
-    flex-shrink: 0;
-    min-width: 50px;               /* thêm min-width để số tiền thẳng hàng */
+    flex: 0 0 auto;
     text-align: right;
+}
+
+/* Phương thức thanh toán - vai trò · tên */
+/* Phương thức thanh toán - vai trò · tên.
+   flex: 0 1 auto (co được) + max-width để nhường chỗ cho cột tên bàn/món khi
+   phương thức dài, thay vì khoá cứng 132px làm cột info bị bóp. */
+.toast-meta {
+    flex: 0 1 auto;
+    max-width: 150px;
+    color: #cbd5e1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+}
+
+.toast-actor {
+    color: #94a3b8;
 }
 
 /* ----- Staff indicators (ai thanh toán, ai tạo bàn) ----- */
@@ -1072,17 +1216,76 @@ body {
     .float-btn { width: 64px; height: 64px; }
     .float-icon { font-size: 18px; }
     .float-label { font-size: 8px; }
+
+    /* ---------- PANEL GIAO DỊCH GẦN ĐÂY TRÊN MOBILE ----------
+       Bản cũ ép width: 240px trong khi 3 cột cố định (time 62 + amount 42
+       + meta 132) đã ngốn 236px -> cột .toast-info bị co về 0px nên TÊN BÀN
+       và TÊN MÓN biến mất hoàn toàn. Nay:
+         - vẫn nằm bên PHẢI (không tràn ngang màn hình)
+         - hẹp vừa đủ, mỗi giao dịch xuống 2 DÒNG: dòng 1 = thời gian + món
+           + tiền, dòng 2 = phương thức - vai trò · tên
+         - thu gọn còn 1 huy hiệu tròn nhỏ, không che bàn */
     .recent-toast {
-        bottom: calc(100px + var(--safe-bottom));
+        bottom: calc(56px + var(--bottom-nav-h, 54px) + var(--safe-bottom));
         right: 8px;
         left: auto;
-        width: 240px;
-        padding: 6px 10px;
+        width: 260px;
+        max-width: calc(100vw - 16px);
+        padding: 5px 8px;
+        border-radius: 14px;
+    }
+    .recent-toast.collapsed {
+        width: auto;
+        padding: 3px 8px;
+    }
+    .recent-toast-list { max-height: 24vh; gap: 4px; }
+    .recent-toast-header { font-size: 9px; margin-bottom: 4px; }
+    .recent-toast-item {
+        flex-wrap: wrap;
+        row-gap: 1px;
+        padding: 4px 3px;
+    }
+    .toast-time {
+        flex: 0 0 auto;
+        min-width: 58px;
+        font-size: 10px;
+    }
+    .toast-info {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 11px;
+    }
+    .toast-amount {
+        flex: 0 0 auto;
+        text-align: right;
+    }
+    /* Dòng 2: chiếm hết chiều rộng (bỏ max-width 150px của desktop) */
+    .toast-meta {
+        flex: 0 0 100%;
+        max-width: 100%;
+        text-align: right;
+        font-size: 10px;
+        color: #94a3b8;
     }
 }
 
 @media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
     .main-content { padding: 16px 20px; }
+    /* Tablet dọc: hẹp hơn desktop -> bỏ cột meta xuống dòng 2 để cột tên bàn/món
+       không bị bóp về 0px. Vẫn giữ bên phải. */
+    .recent-toast {
+        width: 380px;
+        max-width: calc(100vw - 24px);
+        right: 12px;
+        left: auto;
+    }
+    .recent-toast-item { flex-wrap: wrap; row-gap: 2px; }
+    .toast-meta {
+        flex: 0 0 100%;
+        max-width: 100%;
+        text-align: right;
+        font-size: 10px;
+    }
 }
 
 @media (orientation: landscape) and (min-width: 768px) and (max-width: 1024px) {
@@ -2873,8 +3076,8 @@ body.modal-open {
 .tables-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 28px;
-    padding: 12px;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
 }
 
 @media (max-width: 900px) { .tables-grid { grid-template-columns: repeat(4, 1fr); } }
@@ -3557,13 +3760,9 @@ body.modal-open {
 .recent-info { flex: 1; color: var(--text); margin: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recent-amount { font-weight: 700; color: var(--primary); }
 
-/* Recent toast list */
-.recent-toast-list { display: flex; flex-direction: column; gap: 4px; }
-.recent-toast-item { font-size: 11px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 4px; border-bottom: 1px solid #334155; }
+/* Recent toast list - khối rule trùng lặp đã được gộp vào phần RECENT TOAST ở trên.
+   Giữ lại :last-child vì file cũ có nó và không có ở khối chính. */
 .recent-toast-item:last-child { border-bottom: none; }
-.recent-toast-time { color: #94a3b8; min-width: 40px; }
-.recent-toast-info { flex: 1; margin: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.recent-toast-amount { font-weight: 700; color: #f97316; }
 
 /* ========== ORDER MODAL HEADER ACTIONS ========== */
 #orderHeaderActions { display: none; }
@@ -3814,11 +4013,18 @@ body.modal-open {
 }
 
 /* ========== TOAST ========== */
+/* FIX: rule này đặt `left: 50%` + `transform: translateX(-50%)` nhưng KHÔNG
+   xoá `right: 16px` còn sót lại từ rule .toast-container ở trên. Kết quả:
+   container bị kẹp còn 100% - 50% - 16px = 179px trên màn 390px -> toast
+   nổi cuộn trong 179px, vỡ thành 4-5 dòng, đè lên header.
+   Nay trải hết chiều ngang rồi canh giữa bằng align-items. */
 .toast-container {
     position: fixed;
     top: 16px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    right: 0;
+    transform: none;
+    align-items: center;
     z-index: 99999;
     display: flex;
     flex-direction: column;
@@ -3837,6 +4043,16 @@ body.modal-open {
     animation: toastIn 0.3s ease;
     pointer-events: auto;
     max-width: 90vw;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0 10px;
+}
+/* Dòng phụ + nút ✕ phải chiếm trọn 1 dòng khi toast xuống hàng */
+.toast .toast-extra {
+    flex: 0 0 100%;
     text-align: center;
 }
 
@@ -3864,6 +4080,17 @@ body.modal-open {
     .modal-title { font-size: 16px; }
 }
 
+/* ============================================================
+   ẨN TOAST NỔI TRÊN MOBILE MÀN HÌNH DỌC
+   Yêu cầu: toast nổi (thanh toán / rút tiền / xoá bàn) gây chiếm chỗ và che
+   nội dung khi dùng điện thoại dọc -> ẩn hẳn. Khi xoay ngang (landscape) vẫn
+   hiển thị vì đó là tư thế dùng quầy cầm tay.
+   Chỉ ẩn TOAST NỔI; panel "Giao dịch gần đây" (.recent-toast) vẫn hiện.
+   ============================================================ */
+@media (orientation: portrait) and (max-width: 768px) {
+    .toast-container { display: none; }
+}
+
 @media (min-width: 481px) and (max-width: 768px) and (orientation: portrait) {
     .header { padding: 0 12px; }
     .header h1 { font-size: 18px; }
@@ -3878,6 +4105,46 @@ body.modal-open {
     .modal:not(#orderModal) .modal-content {
         max-width: 60vw;
         width: 60vw;
+    }
+}
+
+/* ============================================================
+   MÀN HÌNH NGANG, CHIỀU CAO THẤP (điện thoại xoay ngang)
+   Chiều cao chỉ ~320-430px nên phải siết mạnh: danh sách ngắn lại,
+   panel bám góc phải, thu gọn còn huy hiệu tối giản để không che bàn.
+   ============================================================ */
+@media (orientation: landscape) and (max-height: 520px) {
+    .recent-toast {
+        bottom: calc(56px + var(--bottom-nav-h, 54px) + var(--safe-bottom));
+        right: 8px;
+        left: auto;
+        width: 300px;
+        max-width: calc(100vw - 16px);
+        padding: 5px 8px;
+        border-radius: 14px;
+    }
+    .recent-toast.collapsed {
+        width: auto;
+        padding: 3px 8px;
+    }
+    /* Chiều cao thấp -> danh sách ngắn, cuộn để xem thêm */
+    .recent-toast-list { max-height: 28vh; gap: 4px; }
+    .recent-toast-header { font-size: 9px; margin-bottom: 4px; }
+    .recent-toast-item {
+        padding: 4px 3px;
+        /* BẮT BUỘC: không có wrap thì .toast-meta (flex-basis 100%) chiếm hết
+           hàng và cột .toast-info bị bóp về 0px -> mất tên bàn/món. */
+        flex-wrap: wrap;
+        row-gap: 1px;
+    }
+    /* Cột meta xuống dòng 2, nếu không nó chiếm 150px trên cùng dòng và
+       bóp cột tên bàn/món còn ~77px (không đọc được). */
+    .toast-meta {
+        flex: 0 0 100%;
+        max-width: 100%;
+        text-align: right;
+        font-size: 10px;
+        color: #94a3b8;
     }
 }
 
@@ -7799,4 +8066,1122 @@ html, body, .app, .main-content {
     text-align: center;
     line-height: 1.4;
     max-width: 280px;
+}
+/* ==========================================================================
+   POS UI v2 - DESIGN SYSTEM CHO MÃY POS Cáº¤U HÃŒNH THáº¤P
+   --------------------------------------------------------------------------
+   Ghi Ä‘Ã¨ cÃ¡c style cÅ© trong chÃ­nh file nÃ y (Ä‘áº·t CUá»I file nÃªn tháº¯ng theo thá»©
+   tá»± nguá»“n). HTML khÃ´ng Ä‘á»•i.
+
+   NguyÃªn táº¯c thiáº¿t káº¿:
+   1. PHáº¢N Há»’I NHANH - chá»‰ animate transform/opacity (cháº¡y trÃªn GPU).
+      KhÃ´ng animate width/height/top/left/box-shadow vÃ¬ Ã©p trÃ¬nh duyá»‡t tÃ­nh
+      láº¡i layout má»—i khung hÃ¬nh -> giáº­t trÃªn mÃ¡y yáº¿u.
+   2. VÃ™NG CHáº M ÄÃšNG CHUáº¨N - nÃºt chÃ­nh 48px, nÃºt phá»¥ 40px. Chuáº©n khuyáº¿n nghá»‹
+      lÃ  44px; POS dÃ¹ng tay nhanh nÃªn láº¥y cao hÆ¡n chÃºt.
+   3. MÃ€U RÃ• - tÆ°Æ¡ng pháº£n chá»¯ >= 4.5:1, tráº¡ng thÃ¡i bÃ n phÃ¢n biá»‡t báº±ng mÃ u
+      + chá»¯ (khÃ´ng chá»‰ mÃ u) Ä‘á»ƒ ngÆ°á»i máº­t thá»‹ lá»±a chá»n váº«n Ä‘á»c Ä‘Æ°á»£c.
+   4. ÃT TÃCH: contain + will-change cÃ³ chá»n lá»c, khÃ´ng blur, khÃ´ng gradient
+      náº·ng trÃªn vÃ¹ng scroll.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- TOKENS */
+:root {
+    /* MÃ u ná»n tÃ´ng láº¡nh, dá»‹u máº¯t khi lÃ m viá»‡c ca dÃ i */
+    /* Mau nen sang, it mot va mat chong khi lam viec ca dai */
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --surface-3: #f1f5f9;
+
+    --text: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+
+    /* Cam thuong hieu - giong ban cu */
+    --primary: #f97316;
+    --primary-dark: #ea580c;
+    --primary-soft: #fff7ed;
+
+    --success: #10b981;
+    --success-soft: #ecfdf5;
+    --danger: #ef4444;
+    --danger-soft: #fef2f2;
+    --warning: #f59e0b;
+    --warning-soft: #fffbeb;
+    --info: #3b82f6;
+    --info-soft: #eff6ff;
+
+    /* Trang thai ban - sang, doc nhanh bang mat + nen */
+    --st-free: #94a3b8;      /* ban trong */
+    --st-used: #f97316;      /* dang dung */
+    --st-lock: #ef4444;      /* da khoa */
+    --st-paid: #10b981;      /* da thanh toan */
+
+    /* Thang khoáº£ng cÃ¡ch - bá»™i sá»‘ cá»§a 4px, giá»¯ nhá»‹p thá»‹ giÃ¡c */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+
+    /* Chá»¯ - dÃ¹ng font há»‡ thá»‘ng: khÃ´ng táº£i webfont, khÃ´ng chá», khÃ´ng nhÃ²e */
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --fs-xs: 11px;
+    --fs-sm: 13px;
+    --fs-md: 15px;
+    --fs-lg: 17px;
+    --fs-xl: 21px;
+    --fs-2xl: 27px;
+    --fs-3xl: 34px;
+
+    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-lg: 18px;
+    --radius-pill: 999px;
+
+    /* Äá»• bÃ³ng nháº¹: dÃ¹ng 1 táº§ng, trÃ¡nh box-shadow nhiá»u táº§ng gÃ¢y vá»¡ repaint */
+    --sh-1: 0 1px 2px rgba(16, 32, 55, .08);
+    --sh-2: 0 2px 6px rgba(16, 32, 55, .10);
+    --sh-3: 0 8px 24px rgba(16, 32, 55, .16);
+
+    /* VÃ¹ng cháº¡m */
+    --tap: 48px;
+    --tap-sm: 40px;
+    --tap-lg: 56px;
+
+    /* Chuyá»ƒn Ä‘á»™ng - ngáº¯n Ä‘á»ƒ cáº£m giÃ¡c "báº¥m lÃ  pháº£n há»“i ngay" */
+    --dur-1: 90ms;
+    --dur-2: 140ms;
+    --dur-3: 200ms;
+    --ease: cubic-bezier(.2, .8, .3, 1);
+
+    --header-h: 56px;
+    --bottom-nav-h: 64px;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ------------------------------------------------------- RESET + CÆ  Sá»ž */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    /* overscroll-behavior cháº·n hiá»‡u á»©ng "kÃ©o xuá»‘ng lÃ m má»›i" cá»§a trÃ¬nh duyá»‡t,
+       hay xáº£y ra khi vuá»‘t trÃªn POS vÃ  gÃ¢y cáº£m giÃ¡c app bá»‹ lag */
+    overscroll-behavior: none;
+}
+
+body {
+    font-family: var(--font);
+    font-size: var(--fs-md);
+    line-height: 1.45;
+    color: var(--text);
+    background: var(--bg);
+    /* Bá» dáº¥u nháº¥p xanh máº·c Ä‘á»‹nh, thay báº±ng pháº£n há»“i :active do ta tá»± váº½ */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* touch-action: manipulation = bá» Ä‘á»™ trá»… 300ms cá»§a trÃ¬nh duyá»‡t khi báº¥m.
+   ÄÃ¢y lÃ  thá»© khiáº¿n nÃºt "pháº£n há»“i cháº­m" trÃªn mÃ¡y POS nhiá»u nháº¥t. */
+button,
+[role="button"],
+.tab-btn,
+.table-card,
+.customer-item,
+.history-item,
+.filter-chip,
+.nav-btn,
+.table-act-btn,
+.addon-btn,
+.menu-item {
+    touch-action: manipulation;
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+}
+
+/* Sá»‘ tiá»n/giá»: dÃ¹ng chá»¯ sá»‘ Ä‘á»u nhau (tabular) Ä‘á»ƒ cÃ¡c dÃ²ng so sÃ¡nh thá»‹ giÃ¡c
+   dá»… hÆ¡n - nhÃ¬n tá»•ng nhanh mÃ  khÃ´ng bá»‹ "nháº£y" sá»‘. */
+.amount,
+.total,
+.table-total,
+.debt-summary span,
+.hist-amount,
+.cost-amount,
+.price,
+.qty,
+input[type="number"],
+.date-display {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+}
+
+/* áº¨n con trá» text khi báº¥m giá»¯ lÃ¢u (long-press dÃ¹ng cho menu ngá»¯ cáº£nh) */
+button, .tab-btn, .table-card, .menu-item, .table-act-btn {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* VÃ²ng focus rÃµ rÃ ng CHá»ˆ khi dÃ¹ng bÃ n phÃ­m - khÃ´ng hiá»‡n khi cháº¡m tay,
+   trÃ¡nh váº½ rÃ¡c trÃªn mÃ n hÃ¬nh cáº£m á»©ng. */
+:focus { outline: none; }
+:focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+/* ================================================== NÃšT - PHáº¢N Há»’I RÃ• RÃ€NG */
+/* NguyÃªn táº¯c: báº¥m xuá»‘ng -> lÃ¹i + tá»‘i láº¡i NGAY. Tháº£ ra -> náº£y vá».
+   DÃ¹ng transform vÃ¬ GPU xá»­ lÃ½ Ä‘Æ°á»£c, CPU khÃ´ng pháº£i tÃ­nh láº¡i layout. */
+.btn-save,
+.auth-btn,
+.btn-add-customer,
+.btn-outline,
+.btn-small,
+.btn-cancel,
+.table-act-btn,
+.table-create-btn .btn,
+.modal-box button,
+.expense-footer button {
+    position: relative;
+    overflow: hidden;
+    transition:
+        transform var(--dur-1) var(--ease),
+        background-color var(--dur-2) var(--ease),
+        box-shadow var(--dur-2) var(--ease),
+        opacity var(--dur-2) var(--ease);
+    will-change: transform;
+}
+
+.btn-save:active,
+.auth-btn:active,
+.btn-add-customer:active,
+.btn-outline:active,
+.btn-small:active,
+.btn-cancel:active,
+.modal-box button:active {
+    transform: scale(.965);
+}
+
+/* VÃ²ng sÃ¡ng lan nháº¹ tá»« tÃ¢m nÃºt khi báº¥m (ripple giáº£ láº­p báº±ng ::after).
+   KhÃ´ng cáº§n JS, chá»‰ Ä‘á»•i opacity -> ráº». */
+.btn-save::after,
+.auth-btn::after,
+.btn-add-customer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, .30);
+    opacity: 0;
+    transition: opacity var(--dur-2) var(--ease);
+    pointer-events: none;
+}
+.btn-save:active::after,
+.auth-btn:active::after,
+.btn-add-customer:active::after { opacity: 1; }
+
+.btn-save {
+    width: 100%;
+    min-height: var(--tap);
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: #fff;
+    background: var(--primary);
+    border-radius: var(--radius);
+    box-shadow: var(--sh-2);
+}
+.btn-save:active { background: var(--primary-dark); }
+.btn-save:disabled,
+.auth-btn:disabled {
+    opacity: .45;
+    pointer-events: none;
+}
+
+.btn-cancel {
+    min-height: var(--tap);
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--surface-3);
+    border-radius: var(--radius);
+}
+.btn-cancel:active { background: #dfe5ee; }
+
+.btn-small {
+    min-height: var(--tap-sm);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+}
+.btn-small:active { background: #dfe5ee; }
+
+.btn-small.btn-save,
+.btn-save.btn-small {
+    width: auto;
+    color: #fff;
+    background: var(--primary);
+}
+
+.btn-outline {
+    min-height: var(--tap-sm);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: var(--radius-sm);
+}
+.btn-outline:active { background: #ffe3cd; }
+
+/* NÃºt phá»¥ táº¯c - dÃ¹ng khi há»§y, quay láº¡i */
+.btn-ghost {
+    min-height: var(--tap);
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+}
+.btn-ghost:active { background: var(--surface-3); }
+
+/* ====================================================== Ã” NHáº¬P LIá»†U */
+/* Cao tá»‘i thiá»ƒu 48px + font >=16px á»Ÿ input number: iOS tá»± zoom náº¿u nhá» hÆ¡n,
+   zoom lÃ m vá»¡ layout POS. */
+.form-input,
+.search-input,
+.inv-search-input,
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+select,
+textarea {
+    width: 100%;
+    min-height: var(--tap);
+    padding: var(--sp-3);
+    font-family: var(--font);
+    font-size: 16px;             /* >=16px Ä‘á»ƒ iOS khÃ´ng tá»± zoom */
+    line-height: 1.3;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    /* transition border-color thay vÃ¬ all: trÃ¡nh repaint ná»n khi Ä‘ang gÃµ */
+    transition: border-color var(--dur-2) var(--ease),
+                box-shadow var(--dur-2) var(--ease);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-soft);
+}
+input::placeholder,
+textarea::placeholder { color: var(--text-muted); }
+
+/* áº¨n nÃºt tÄƒng/giáº£m máº·c Ä‘á»‹nh cá»§a input number: cháº¡m nháº§m ráº¥t dá»… trÃªn POS */
+input[type="number"] { -moz-appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* ======================================================== THANH TAB */
+/* Cá»‘ Ä‘á»‹nh trÃªn cÃ¹ng, cuá»™n ngang khi nhiá»u tab. Tab Ä‘ang chá»n ná»•i báº­t báº±ng
+   ná»n + chá»¯ Ä‘áº­m, khÃ´ng dá»±a vÃ o :hover (mÃ¡y cáº£m á»©ng khÃ´ng cÃ³ hover). */
+.main-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    display: flex;
+    gap: var(--sp-1);
+    padding: var(--sp-2);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.main-tabs::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+    flex: 0 0 auto;
+    min-width: 76px;
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-4);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    background: transparent;
+    border-radius: var(--radius-pill);
+    transition:
+        background-color var(--dur-2) var(--ease),
+        color var(--dur-2) var(--ease),
+        transform var(--dur-1) var(--ease);
+    will-change: transform;
+}
+.tab-btn:active { transform: scale(.94); }
+.tab-btn.active {
+    color: #fff;
+    background: var(--primary);
+    box-shadow: var(--sh-1);
+}
+
+/* Ná»™i dung tab: chá»‰ váº½ tab Ä‘ang xem, khÃ´ng dÃ¹ng display:none trÃªn cáº£ chá»¥c
+   pháº§n tá»­ (váº«n ráº» hÆ¡n nhiá»u so vá»›i hiá»ƒn thá»‹ cÃ¹ng lÃºc). */
+.main-content {
+    flex: 1;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ==================================================== THáºº BÃ€N - MÃ€N HÃŒNH CHÃNH */
+/* Chá»‰ transform + opacity chuyá»ƒn Ä‘á»™ng. contain giá»›i háº¡n vÃ¹ng repaint Ä‘á»ƒ
+   má»™t tháº» Ä‘á»•i tráº¡ng thÃ¡i khÃ´ng lÃ m cáº£ lÆ°á»›i váº½ láº¡i. */
+.tables-grid {
+    display: grid;
+    /* RONG TOI THIEU 198px. Do thuc te tren may that:
+       trong the can 169px cho hang 4 nut (4 x 40px + 3 khe 3px),
+       va 165px cho dong '1 mon / tong tien / nguoi tao'.
+       Neu hep hon (150px nhu truoc) -> chi con 136px ben trong -> ten ban
+       bi cat thanh 'Ban...', TONG TIEN bi cat thanh '25....', va nut CK
+       tran ra ngoai the, de len the ben canh. */
+    grid-template-columns: repeat(auto-fill, minmax(214px, 1fr));
+    /* Cá»™t + hÃ ng cá»‘ Ä‘á»‹nh giÃºp tháº» khÃ´ng nháº£y khi ná»™i dung dÃ i/ngáº¯n */
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    /* Cot + hang co dinh gian thang khong nhay khi noi dung dai/ngang */
+    grid-auto-rows: minmax(140px, auto);
+}
+
+.table-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-height: 140px;
+    padding: var(--sp-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    /* Dáº£i mÃ u bÃªn trÃ¡i = tráº¡ng thÃ¡i, Ä‘á»c nhanh báº±ng thá»‹ giÃ¡c */
+    border-left: 5px solid var(--st-free);
+    border-radius: var(--radius);
+    box-shadow: var(--sh-1);
+    cursor: pointer;
+    /* TÃ¡ch lá»›p váº½ cá»§a tháº» khá»i pháº§n cÃ²n láº¡i cá»§a trang */
+    contain: layout style paint;
+    transition:
+        transform var(--dur-2) var(--ease),
+        box-shadow var(--dur-2) var(--ease);
+    will-change: transform;
+}
+/* Báº¥m tháº» -> lÃ¹i nháº¹. Pháº£n há»“i rÃµ mÃ  khÃ´ng nháº¥p nhÃ¡y. */
+.table-card:active {
+    transform: scale(.975);
+    box-shadow: var(--sh-1);
+}
+
+/* Tráº¡ng thÃ¡i bÃ n */
+.table-card.table-locked { border-left-color: var(--st-lock); }
+.table-admin-created { border-left-color: var(--st-used); }
+.table-staff-created { border-left-color: var(--st-used); }
+.table-create-btn {
+    border-style: dashed;
+    border-left-style: solid;
+    border-left-color: var(--border-strong);
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
+.table-create-btn:active { background: var(--surface-2); }
+
+/* TÃªn bÃ n: lá»›n, Ä‘áº­m, cáº¯t gá»n 1 dÃ²ng */
+.table-name {
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+.table-time {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Tá»•ng tiá»n: Ä‘iá»ƒm nhÃ¬n thá»© hai, dÃ¹ng tabular-nums */
+.table-total {
+    margin-top: auto;
+    font-size: var(--fs-xl);
+    font-weight: 800;
+    color: var(--primary);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* HÃ ng nÃºt thao tÃ¡c trÃªn tháº» bÃ n.
+   CAO Tá»I THIá»‚U 40px - báº£n cÅ© 28px quÃ¡ nhá», cháº¡m nháº§m ráº¥t hay. */
+.table-act-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--tap-sm);
+    min-height: var(--tap-sm);
+    flex: 1 1 0;
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    color: #fff;
+    background: var(--primary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--sh-1);
+}
+.table-act-btn:active {
+    transform: scale(.92);
+    box-shadow: none;
+    filter: brightness(.9);
+}
+/* PhÃ¢n biá»‡t báº±ng MÃ€U + KÃ HIá»†U, khÃ´ng chá»‰ mÃ u: ngÆ°á»i máº­t thá»‹ lá»±a chá»n
+   váº«n phÃ¢n biá»‡t Ä‘Æ°á»£c tiá»n máº·t / chuyá»ƒn khoáº£n. */
+.table-act-add     { background: var(--primary); }
+.table-act-cash    { background: var(--success); }
+.table-act-transfer{ background: var(--info); }
+.table-act-debt    { background: var(--danger); }
+.table-act-print   { background: var(--text-secondary); }
+
+/* ============================================================
+   CHONG TRAN THONG TIN - thu ban (do duoc tren may that)
+
+   Van de: the ban chi rong 198px, trong con ~182px. Nhung:
+     - 4 nut can 169px (4 x 40px + 3 khe 3px)
+     - dong thong ke can 165px ('1 mon' + '25.000d' + 'Master')
+   Neu bat ky thuoc tinh nao co min-width cua chinh no, no se DAY nhung
+   phan khac ra -> 'Ban...' '25....' va nut CK tran ra ngoai the.
+
+   Cach sua: KHONG dung min-width. Dung flex-shrink de cac phan chia nhau
+   cho du khe giua cac the, va luon de phan quan trong khong bi cat:
+     - TEN BAN va TONG TIEN: duoc cat dau, nhung phai con mot do dai doc
+     - HANG BUT: duot xuong, khong bao gio cat con so tien
+   ============================================================ */
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--sp-1);
+    min-width: 0;
+}
+.table-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: none;            /* bo max-width:70% cu - gay cat ten ban */
+}
+.table-time {
+    flex: 0 0 auto;
+    /* Do 19:59 la dai hon '21:18 - 2p'. Khi khong du cho, rut ngan thay vi cat. */
+    max-width: 58%;
+}
+.table-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--sp-1);
+    min-width: 0;
+}
+.table-item-count,
+.table-creator {
+    flex: 0 1 auto;            /* giu kich thuoc that cu chu, chi rut khi that su khong du */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.table-total {
+    flex: 0 0 auto;            /* TONG TIEN khong bao gio bi cat - thieu tiền la loi nghiem trong */
+    /* So mon va nguoi tao se bi rut lai truoc (xem rule ben tren) */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.table-actions {
+    min-width: 0;
+}
+.table-act-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    width: 100%;
+    min-width: 0;
+}
+.table-act-btn {
+    flex: 1 1 0;
+    min-width: 0;               /* bo min-width:40px cu - day nut CK tran the */
+    min-height: var(--tap-sm);  /* chi can CAO toi thieu de khong cham nham sai */
+    padding: 0 2px;
+    overflow: hidden;
+}
+
+
+/* ============================================ DANH SÃCH KHÃCH / Lá»ŠCH Sá»¬ */
+.debt-summary,
+.customer-header,
+.history-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+.debt-summary {
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: var(--text);
+}
+.debt-summary span:last-child { color: var(--danger); }
+
+.customer-search-bar,
+.history-search {
+    display: flex;
+    gap: var(--sp-2);
+    flex: 1;
+    min-width: 0;
+}
+.customer-search-bar .search-input,
+.history-search .search-input { flex: 1; min-width: 0; }
+
+.btn-add-customer {
+    flex: 0 0 auto;
+    min-height: var(--tap);
+    padding: var(--sp-2) var(--sp-4);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    background: var(--primary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--sh-1);
+}
+.btn-add-customer:active { background: var(--primary-dark); }
+
+/* NÃºt chuyá»ƒn ngÃ y trong lá»‹ch sá»­ */
+.nav-btn {
+    flex: 0 0 auto;
+    min-width: var(--tap);
+    min-height: var(--tap);
+    font-size: var(--fs-lg);
+    color: var(--text);
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+    transition: transform var(--dur-1) var(--ease), background-color var(--dur-2) var(--ease);
+}
+.nav-btn:active { transform: scale(.9); background: #dfe5ee; }
+
+.date-display {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-1);
+    min-height: var(--tap);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.date-display:active { background: #dfe5ee; }
+
+/* Chip lá»c: tráº¡ng thÃ¡i chá»n ná»•i báº­t, kÃ­ch thÆ°á»›c cháº¡m thoáº£i mÃ¡i */
+.history-filter-chips,
+.history-staff-chips {
+    display: flex;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+.history-filter-chips::-webkit-scrollbar,
+.history-staff-chips::-webkit-scrollbar { display: none; }
+
+.filter-chip {
+    flex: 0 0 auto;
+    min-width: var(--tap);
+    min-height: var(--tap-sm);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-md);
+    color: var(--text-secondary);
+    background: var(--surface-3);
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+    transition:
+        background-color var(--dur-2) var(--ease),
+        color var(--dur-2) var(--ease),
+        transform var(--dur-1) var(--ease);
+}
+.filter-chip:active { transform: scale(.93); }
+.filter-chip.active {
+    color: #fff;
+    background: var(--primary);
+    font-weight: 700;
+}
+
+/* DÃ²ng danh sÃ¡ch */
+.history-item,
+.customer-item,
+.history-list > *,
+.customer-list > * {
+    display: block;
+    margin: 0 var(--sp-3) var(--sp-2);
+    padding: var(--sp-3);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border-strong);
+    border-radius: var(--radius);
+    cursor: pointer;
+    contain: layout style;
+    transition:
+        transform var(--dur-1) var(--ease),
+        background-color var(--dur-2) var(--ease),
+        border-color var(--dur-2) var(--ease);
+}
+.history-item:active,
+.customer-item:active {
+    transform: scale(.99);
+    background: var(--surface-2);
+}
+/* Loáº¡i giao dá»‹ch nháº­n diá»‡n báº±ng dáº£i mÃ u trÃ¡i */
+.history-item.type-dinein,
+.history-item[data-type="dinein"] { border-left-color: var(--primary); }
+.history-item.type-takeaway,
+.history-item[data-type="takeaway"] { border-left-color: var(--info); }
+.history-item.type-grab,
+.history-item[data-type="grab"] { border-left-color: #7c3aed; }
+.history-item.type-debt,
+.history-item[data-type="debt"] { border-left-color: var(--danger); }
+.history-item.type-delete_table,
+.history-item[data-type="delete_table"] { border-left-color: var(--text-muted); }
+
+/* ============================================================ THáºº (card) */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--sh-1);
+    overflow: hidden;
+    margin: var(--sp-3);
+}
+.card-header {
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: var(--text);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+}
+.card-body { padding: var(--sp-3); }
+
+/* ==================================================== Há»˜P THOáº I (modal) */
+/* Overlay tá»‘i giáº£n, khÃ´ng blur (blur ráº¥t náº·ng trÃªn mÃ¡y yáº¿u vÃ  gÃ¢y giáº­t). */
+.modal-overlay,
+.admin-context-overlay,
+.custom-denom-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-4);
+    background: rgba(15, 25, 40, .55);
+    -webkit-overflow-scrolling: touch;
+}
+.modal-box,
+.custom-denom-modal {
+    width: 100%;
+    max-width: 520px;
+    max-height: 88vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--sp-5);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-3);
+    /* Vá»«a hiá»‡n vá»«a nhÃ­ch lÃªn nháº¹ - cáº£m giÃ¡c má»Ÿ nhanh */
+    animation: modal-in var(--dur-3) var(--ease);
+    will-change: transform, opacity;
+}
+@keyframes modal-in {
+    from { transform: translateY(14px) scale(.985); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+
+.modal-title {
+    margin: 0 0 var(--sp-4);
+    font-size: var(--fs-xl);
+    font-weight: 700;
+    color: var(--text);
+}
+.modal-box button,
+.custom-denom-footer button {
+    min-height: var(--tap);
+    min-width: var(--tap);
+    padding: var(--sp-3) var(--sp-5);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    color: #fff;
+    background: var(--primary);
+    border-radius: var(--radius);
+    transition: transform var(--dur-1) var(--ease), background-color var(--dur-2) var(--ease);
+}
+.modal-box button:active,
+.custom-denom-footer button:active {
+    transform: scale(.95);
+    background: var(--primary-dark);
+}
+.custom-denom-cancel-btn,
+.modal-box button.btn-cancel { background: var(--surface-3); color: var(--text-secondary); }
+.custom-denom-cancel-btn:active { background: #dfe5ee; }
+
+.custom-denom-input {
+    width: 100%;
+    min-height: var(--tap-lg);
+    padding: var(--sp-3);
+    font-family: var(--font);
+    font-size: 26px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 2px solid var(--border-strong);
+    border-radius: var(--radius);
+}
+.custom-denom-suggestions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-2);
+    margin-top: var(--sp-3);
+}
+.denom-suggest-btn {
+    min-height: var(--tap);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: var(--radius-sm);
+    transition: transform var(--dur-1) var(--ease), background-color var(--dur-2) var(--ease);
+}
+.denom-suggest-btn:active { transform: scale(.94); background: #ffe3cd; }
+
+/* ============================================================== TOAST */
+/* Toast náº±m trÃªn cÃ¹ng, khÃ´ng cháº·n thao tÃ¡c. */
+.toast-container,
+#toastContainer {
+    position: fixed;
+    left: 50%;
+    top: calc(var(--header-h) + var(--sp-2));
+    transform: translateX(-50%);
+    z-index: 900;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+    width: min(560px, calc(100vw - var(--sp-6)));
+    pointer-events: none;
+}
+.toast {
+    max-width: 100%;
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    line-height: 1.35;
+    color: #fff;
+    background: #16202e;
+    border-radius: var(--radius);
+    box-shadow: var(--sh-3);
+    pointer-events: auto;
+    animation: toast-in var(--dur-3) var(--ease);
+    will-change: transform, opacity;
+}
+@keyframes toast-in {
+    from { transform: translateY(-10px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+}
+.toast.success     { background: var(--success); }
+.toast.error,
+.toast.danger      { background: var(--danger); }
+.toast.warning     { background: var(--warning); }
+.toast.info        { background: var(--info); }
+
+/* Khá»‘i "giao dá»‹ch gáº§n Ä‘Ã¢y" - gÃ³c pháº£i, khÃ´ng che tháº» bÃ n */
+.recent-toast {
+    position: fixed;
+    right: var(--sp-3);
+    bottom: calc(var(--bottom-nav-h) + var(--safe-bottom));
+    left: auto;
+    width: min(420px, calc(100vw - var(--sp-6)));
+    padding: var(--sp-3);
+    color: #fff;
+    background: #16202e;
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    box-shadow: var(--sh-3);
+    z-index: 850;
+    opacity: 1;
+    transition: transform var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
+    will-change: transform, opacity;
+}
+
+/* Toast tiá»n dÆ° - thÃ´ng tin quan trá»ng, ná»•i báº­t */
+.change-toast {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 950;
+    width: min(420px, calc(100vw - var(--sp-6)));
+    padding: var(--sp-5);
+    text-align: center;
+    color: #fff;
+    background: #16202e;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-3);
+    animation: modal-in var(--dur-3) var(--ease);
+}
+.change-amount {
+    font-size: var(--fs-3xl);
+    font-weight: 800;
+    color: #4ade80;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+.change-toast button {
+    min-height: var(--tap);
+    padding: var(--sp-3);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    border-radius: var(--radius-pill);
+    transition: transform var(--dur-1) var(--ease), filter var(--dur-2) var(--ease);
+}
+.change-toast button:active { transform: scale(.94); filter: brightness(.92); }
+
+/* ==================================================== LOADING / ÄÄ‚NG NHáº¬P */
+.loading-overlay,
+.auth-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--sp-4);
+    background: var(--bg);
+}
+.auth-overlay { z-index: 1900; background: linear-gradient(180deg, #eef1f6 0%, #e3e8f0 100%); }
+.loading-overlay.hidden { display: none; }
+
+.loading-container,
+.auth-container {
+    width: 100%;
+    max-width: 420px;
+    padding: var(--sp-6);
+    text-align: center;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--sh-2);
+}
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto var(--sp-4);
+    border: 4px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    /* transform + opacity thay vÃ¬ rotate trÃªn width: GPU xá»­ lÃ½, khÃ´ng reflow */
+    animation: spin .8s linear infinite;
+    will-change: transform;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-title { font-size: var(--fs-xl); font-weight: 800; color: var(--text); }
+.loading-text  { margin-top: var(--sp-2); font-size: var(--fs-md); color: var(--text-secondary); }
+
+.auth-form { text-align: left; }
+.auth-logo  { font-size: 46px; text-align: center; line-height: 1; }
+.auth-title { margin: var(--sp-2) 0 var(--sp-1); font-size: var(--fs-xl); text-align: center; color: var(--text); }
+.auth-subtitle { margin: 0 0 var(--sp-5); text-align: center; font-size: var(--fs-md); color: var(--text-secondary); }
+.auth-field { margin-bottom: var(--sp-3); }
+.auth-field label { display: block; margin-bottom: var(--sp-1); font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); }
+.auth-error {
+    min-height: 20px;
+    margin: var(--sp-2) 0;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--danger);
+}
+.auth-btn {
+    width: 100%;
+    min-height: var(--tap-lg);
+    margin-top: var(--sp-2);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: #fff;
+    background: var(--primary);
+    border-radius: var(--radius);
+    box-shadow: var(--sh-2);
+    position: relative;
+    overflow: hidden;
+}
+.auth-btn:active { background: var(--primary-dark); }
+.auth-switch { margin-top: var(--sp-4); text-align: center; font-size: var(--fs-sm); color: var(--text-secondary); }
+.auth-switch span { color: var(--primary-dark); font-weight: 700; cursor: pointer; }
+
+/* ThÃ´ng bÃ¡o dáº£i trÃªn */
+.header-notification-bar,
+.lunar-notification-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: #7c2d12;
+    background: var(--warning-soft);
+    border-bottom: 1px solid #fcd34d;
+}
+.lunar-notification-btn {
+    min-height: 36px;
+    margin-left: auto;
+    padding: var(--sp-1) var(--sp-3);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    color: #fff;
+    background: var(--success);
+    border-radius: var(--radius-pill);
+}
+.lunar-notification-btn:active { filter: brightness(.92); }
+.header-notification-close { cursor: pointer; font-size: var(--fs-md); padding: var(--sp-1); }
+
+/* ================================================== Tá»I Æ¯U MÃY Yáº¾U */
+/* 1. TÃ´n trá»ng thiáº¿t láº­p giáº£m chuyá»ƒn Ä‘á»™ng cá»§a há»‡ Ä‘iá»u hÃ nh:
+      ngÆ°á»i dÃ¹ng nháº¡y cáº£m chuyá»ƒn Ä‘á»™ng cÃ³ thá»ƒ Ä‘Ã£ báº­t - tÃ´n trá»ng Ä‘iá»u Ä‘Ã³. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+    }
+    .loading-spinner { animation: none; border-top-color: var(--primary); }
+}
+
+/* 2. Thiáº¿t bá»‹ cáº¥u hÃ¬nh tháº¥p: bÃ¡o hiá»‡u báº±ng biáº¿n mÃ´i trÆ°á»ng phÃ­a JS
+      (xem ghi chÃº cuá»‘i file). Khi báº­t -> bá» box-shadow vÃ  will-change Ä‘á»ƒ giáº£m
+      Ã¡p lá»±c váº½. */
+html.low-end {
+    --sh-1: none;
+    --sh-2: none;
+    --sh-3: 0 0 0 1px rgba(16, 32, 55, .12);
+}
+html.low-end .table-card,
+html.low-end .modal-box,
+html.low-end .toast,
+html.low-end .table-act-btn,
+html.low-end .tab-btn {
+    will-change: auto;
+}
+html.low-end .table-card,
+html.low-end .modal-box { animation: none; }
+html.low-end .loading-spinner { animation-duration: 1.4s; }
+
+/* 3. MÃ n hÃ¬nh POS thÆ°á»ng lÃ  tablet/Ä‘iá»‡n thoáº¡i ngang - Æ°u tiÃªn bá» ngang */
+@media (orientation: landscape) and (max-height: 560px) {
+    .table-card { min-height: 124px; padding: var(--sp-2); }
+    .tables-grid { grid-auto-rows: minmax(124px, auto); }
+    .table-total { font-size: var(--fs-lg); }
+    .modal-box { max-height: 92vh; padding: var(--sp-4); }
+}
+
+/* 4. MÃ¡y nhá»: giáº£m khoáº£ng cÃ¡ch nhÆ°ng GIá»® vÃ¹ng cháº¡m tá»‘i thiá»ƒu */
+@media (max-width: 420px) {
+    .tables-grid {
+    grid-template-columns: repeat(auto-fill, minmax(214px, 1fr));
+        gap: var(--sp-2);
+        padding: var(--sp-2);
+    }
+    .tab-btn { min-width: 66px; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); }
+    .table-total { font-size: var(--fs-lg); }
+}
+
+/* 5. VÃ¹ng cuá»™n chÃ­nh: giá»¯ momentum trÃªn iOS */
+.main-content,
+.history-list,
+.customer-list,
+.inv-ingredient-list,
+.menu-grid,
+.modal-box {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+/* 6. In: bá» trang trÃ­, chá»‰ in ná»™i dung */
+@media print {
+    .main-tabs,
+    .recent-toast,
+    .toast-container,
+    .change-toast,
+    .table-act-btn,
+    .loading-overlay,
+    .auth-overlay { display: none !important; }
+    body { background: #fff; }
+    .table-card { box-shadow: none; border: 1px solid #999; }
 }

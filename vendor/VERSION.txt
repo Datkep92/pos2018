@@ -1,0 +1,4 @@
+﻿firebase 8.10.1 (compat / ES5)
+Tu goc: https://www.npmjs.com/package/firebase/v/8.10.1
+Ban compat cua Firebase 9.6.10 (gstatic) chi ho tro trinh duot moi.
+Bang 8.10.1 la ES5 thuan -> chay duoc tren WebView mac dinh cua Android 6 (Chrome 44).

@@ -53,6 +53,138 @@ function _displayName(name) {
     return name;
 }
 
+// ========== DỰNG DÒNG TÓT NHẤT ==========
+// Một dòng giao dịch duy nhất, ví dụ:
+//   "15p trước: | bàn 7 cf sữa máy, bánh mì… | 50.000đ | Tiền mặt - POS · An"
+
+// Nhãn phương thức thanh toán (chữ, không dùng icon -> dễ đọc khi in/nhìn nhanh)
+function _paymentMethodLabel(tx) {
+    if (!tx) return '';
+    if (tx.refunded) return 'Đã hủy';
+    switch (tx.paymentMethod) {
+        case 'cash':    return 'Tiền mặt';
+        case 'transfer': return 'Chuyển khoản';
+        case 'debt':    return 'Ghi nợ';
+        case 'grab':    return 'Grab';
+        case 'delete':  return 'Xóa bàn';
+        default: break;
+    }
+    switch (tx.type) {
+        case 'takeaway':     return 'Mang đi';
+        case 'debt_payment': return 'Trả nợ';
+        case 'prepaid':      return 'Trả trước';
+        case 'delete_table': return 'Xóa bàn';
+        default: return '';
+    }
+}
+
+// Vai trò người thao tác -> nhãn ngắn
+function _roleLabel(role) {
+    switch (role) {
+        case 'master_admin': return 'Master';
+        case 'admin':        return 'Admin';
+        case 'pos_admin':    return 'POS';
+        case 'staff':        return 'POS';
+        case 'pos':          return 'POS';
+        default:             return '';
+    }
+}
+
+// "Tiền mặt - POS · An" (bỏ phần nào không có, không lặp vai trò trùng tên)
+function _actorLabel(tx) {
+    var role = _roleLabel(tx && tx.createdByRole);
+    var name = _displayName((tx && tx.createdByName) || '');
+    // Tên đã rút gọn trùng vai trò (VD: role=Master, name="Master Admin - X" -> "Master")
+    if (role && name) {
+        if (role.toLowerCase() === name.toLowerCase()) return role;
+        return role + ' · ' + name;
+    }
+    return role || name || '';
+}
+
+// Nhãn đầu dòng: bàn / khách / kênh bán / loại tiền
+function _txSubjectLabel(tx) {
+    if (!tx) return '';
+    if (tx.type === 'delete_table' || tx.paymentMethod === 'delete') {
+        return tx.tableName ? ('xoá ' + tx.tableName.toLowerCase()) : 'Xóa bàn';
+    }
+    // Quản lý rút tiền từ két POS (manager_cash_pickups)
+    if (tx.type === 'manager_pickup' || tx.type === 'pickup' || tx.type === 'manager_pickup_undo') {
+        var base = (tx.type === 'manager_pickup_undo') ? 'xoá QL rút tiền' : 'QL rút tiền';
+        var note = (tx.note || '').trim();
+        // Note mặc định không cần hiện vì đã trùng nhãn
+        if (note && note.toLowerCase() !== 'quản lý nhận tiền mặt' && note.toLowerCase() !== 'admin rút quỹ') {
+            return base + ' (' + note.toLowerCase() + ')';
+        }
+        return base;
+    }
+    if (tx.type === 'withdraw' || tx.type === 'withdrawal') return 'rút quỹ';
+    if (tx.tableName) return tx.tableName.toLowerCase();
+    if (tx.customer && tx.customer.name) return tx.customer.name;
+    if (tx.type === 'takeaway') return 'mang đi';
+    if (tx.type === 'grab') return 'đơn grab';
+    if (tx.type === 'debt_payment') return 'trả nợ';
+    if (tx.type === 'prepaid') return 'trả trước';
+    return '';
+}
+
+// Rút gọn danh sách món thành 1 chuỗi ngắn để đưa vào 1 dòng
+function _abbrevItemList(items, maxLen) {
+    if (!items || !items.length) return '';
+    maxLen = maxLen || 34;
+    var parts = [];
+    for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        if (!it || !it.name) continue;
+        var nm = it.name;
+        // Bỏ phần size trong ngoặc: "Cà phê (Nhỏ)" -> "Cà phê"
+        nm = nm.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        if (nm.length > 12) nm = nm.substring(0, 11) + '…';
+        if (it.qty > 1) nm += ' x' + it.qty;
+        parts.push(nm);
+    }
+    if (!parts.length) return '';
+    var s = parts.join(', ');
+    if (s.length > maxLen) s = s.substring(0, maxLen - 1) + '…';
+    else if (parts.length > 3) s += '…';
+    return s;
+}
+
+// Chuỗi mô tả đầy đủ một giao dịch (dùng cho cả toast nổi lẫn title)
+function describeTx(tx) {
+    if (!tx) return '';
+    var bits = [];
+    var subject = _txSubjectLabel(tx);
+    if (subject) bits.push(subject);
+    var items = _abbrevItemList(tx.items);
+    if (items) bits.push(items);
+    if (tx.customer && tx.customer.name && !subject) bits.push(tx.customer.name);
+    var desc = bits.join(' ');
+    var amount = formatMoney(tx.amount || 0);
+    var method = _paymentMethodLabel(tx);
+    var actor = _actorLabel(tx);
+    var tail = amount + (method ? ' ' + method : '') + (actor ? ' - ' + actor : '');
+    return (desc ? desc + ' ' : '') + tail;
+}
+
+// Toast nổi (1 dòng) cho thanh toán / rút tiền / xóa bàn
+function showActivityToast(icon, tx, type, duration) {
+    return showToast(icon + ' ' + describeTx(tx), type || 'success', duration || 3500);
+}
+
+// Thời gian tương đối: "vừa xong", "15p trước", "2h trước", "3 ngày trước"
+function _relTimeText(ts) {
+    var diff = Date.now() - ts;
+    if (diff < 0) diff = 0;
+    var mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'vừa xong';
+    if (mins < 60) return mins + 'p trước';
+    var hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h trước';
+    var days = Math.floor(hours / 24);
+    return days + ' ngày trước';
+}
+
 function _debounceRealtime(key, fn, delay) {
     delay = delay || 100;
     if (_realtimeTimers[key]) clearTimeout(_realtimeTimers[key]);
@@ -68,21 +200,6 @@ function _renderNow(key, fn) {
     fn();
 }
 
-// ========== TOGGLE RECENT TOAST (thu gọn / mở rộng) ==========
-function toggleRecentToast() {
-    var container = document.getElementById('recentToast');
-    if (!container) return;
-    container.classList.toggle('collapsed');
-    var toggleIcon = document.getElementById('recentToastToggle');
-    if (toggleIcon) {
-        toggleIcon.textContent = container.classList.contains('collapsed') ? '▼' : '▲';
-    }
-    // Lưu trạng thái vào localStorage
-    try {
-        localStorage.setItem('recentToastCollapsed', container.classList.contains('collapsed') ? '1' : '0');
-    } catch(e) {}
-}
-
 // Khôi phục trạng thái recentToast từ localStorage
 function restoreRecentToastState() {
     var container = document.getElementById('recentToast');
@@ -91,22 +208,54 @@ function restoreRecentToastState() {
         var collapsed = localStorage.getItem('recentToastCollapsed');
         if (collapsed === '1') {
             container.classList.add('collapsed');
+            // Thu gọn -> mũi tên chỉ hướng mở ra
             var toggleIcon = document.getElementById('recentToastToggle');
-            if (toggleIcon) toggleIcon.textContent = '▼';
+            if (toggleIcon) toggleIcon.textContent = '▲';
         }
     } catch(e) {}
 }
 
+// ========== BADGE SỐ LƯỢNG ==========
+// Khi panel thu gọn, tiêu đề bị ẩn, chỉ còn huy hiệu "🔄 N ▼".
+// N là số giao dịch hôm nay (không giới hạn 6 như danh sách hiển thị),
+// để người dùng biết có giao dịch mới mà không mở ra xem.
+function _updateRecentToastCount() {
+    var el = document.getElementById('recentToastCount');
+    if (!el) return;
+    var list = document.getElementById('recentToastList');
+    var n = 0;
+    if (list) {
+        var rows = list.querySelectorAll('.recent-toast-item');
+        n = rows.length;
+    }
+    el.textContent = n > 99 ? '99+' : String(n);
+}
+
+// ========== TOGGLE RECENT TOAST (thu gọn / mở rộng) ==========
+function toggleRecentToast() {
+    var container = document.getElementById('recentToast');
+    if (!container) return;
+    container.classList.toggle('collapsed');
+    var isCollapsed = container.classList.contains('collapsed');
+    var toggleIcon = document.getElementById('recentToastToggle');
+    if (toggleIcon) {
+        // Mũi tên chỉ hướng: thu gọn -> mở ra (▲), mở rộng -> thu lại (▼)
+        toggleIcon.textContent = isCollapsed ? '▲' : '▼';
+    }
+    // Lưu trạng thái vào localStorage
+    try {
+        localStorage.setItem('recentToastCollapsed', isCollapsed ? '1' : '0');
+    } catch(e) {}
+}
+
 // ========== UPDATE RECENT TOAST ==========
+// Mỗi dòng: <thời gian> | <bàn/khách + món rút gọn> | <số tiền> | <phương thức - vai trò · tên>
 function updateRecentToast() {
     var now = new Date();
     var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
     DB.getTransactionsByDate(todayStr).then(function(transactions) {
-        // FIX: Hiển thị cả giao dịch hủy (refund) trong recentToast
-        // Chỉ lọc bỏ các transaction bị đánh dấu trùng lặp tự động (có note chứa 'Tự động')
-        var validTx = transactions.filter(function(tx) {
-            // Giữ lại giao dịch refunded do người dùng chủ động hủy
-            // Chỉ lọc bỏ nếu refunded và có note 'Tự động đánh dấu trùng lặp'
+        // Bỏ giao dịch bị đánh dấu trùng lặp tự động, giữ lại giao dịch hủy thủ công
+        var validTx = (transactions || []).filter(function(tx) {
             if (tx.refunded && tx.note && tx.note.indexOf('Tự động') !== -1) {
                 return false;
             }
@@ -115,79 +264,50 @@ function updateRecentToast() {
         validTx.sort(function(a, b) {
             return new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date);
         });
-        var recent = validTx.slice(0, 5); // Tăng lên 5 để có chỗ cho cả giao dịch hủy
+        // Chỉ giữ 5 giao dịch gần nhất để panel gọn, có cuộn để xem thêm nếu cần.
+        // Con số tổng vẫn hiển thị ở huy hiệu khi thu gọn.
+        var recent = validTx.slice(0, 5);
         var container = document.getElementById('recentToastList');
         if (!container) return;
-        
+
         if (recent.length === 0) {
             container.innerHTML = '<div style="font-size: 10px; color: #64748b; text-align:center;">📋 Chưa có giao dịch hôm nay</div>';
+            _updateRecentToastCount();
             return;
         }
-        
+
         var html = '';
         for (var i = 0; i < recent.length; i++) {
             var tx = recent[i];
-            var txTime = new Date(tx.createdAt || tx.date).getTime();
-            var timeDiff = Math.floor((Date.now() - txTime) / 60000);
-            var timeText = '';
-            if (timeDiff < 1) timeText = 'vừa xong';
-            else if (timeDiff < 60) timeText = timeDiff + 'p';
-            else timeText = Math.floor(timeDiff / 60) + 'h';
-            
-            // Xác định icon chính dựa trên loại giao dịch
-            var mainIcon = '';
-            var labelSuffix = '';
-            if (tx.refunded) {
-                mainIcon = '↩️';
-            } else if (tx.type === 'debt_payment') {
-                mainIcon = tx.paymentMethod === 'debt' ? '📝' : '💢';
-            } else if (tx.type === 'credit') {
-                mainIcon = '💰';
-            } else if (tx.tableName) {
-                mainIcon = '🍽️';
-                labelSuffix = (tx.customer && tx.customer.name) ? tx.customer.name : tx.tableName;
-            } else if (tx.type === 'takeaway') {
-                mainIcon = '🛵';
-            } else if (tx.type === 'grab') {
-                mainIcon = '🚕';
-            } else {
-                mainIcon = '🍽️';
-            }
-            
-            // Icon phương thức thanh toán (nếu không phải refund)
-            var methodIcon = '';
-            if (!tx.refunded) {
-                if (tx.paymentMethod === 'cash') methodIcon = '💰';
-                else if (tx.paymentMethod === 'transfer') methodIcon = '💳';
-                else if (tx.paymentMethod === 'debt') methodIcon = '📝';
-                else if (tx.paymentMethod === 'grab') methodIcon = '🚕';
-                else methodIcon = '💵';
-            }
-            
-            // Đếm tổng số món
-            var totalItems = 0;
-            if (tx.items && tx.items.length) {
-                for (var j = 0; j < tx.items.length; j++) totalItems += tx.items[j].qty;
-            }
-            var itemInfo = totalItems > 0 ? totalItems + ' món' : '';
-            
-            var staffHtml = tx.createdByName ? ' <span class="toast-staff">👤 ' + escapeHtml(_displayName(tx.createdByName)) + '</span>' : '';
-            
-            // Gom các phần tử lại: icon + nhãn + số món + staff
-            var infoParts = [];
-            infoParts.push(mainIcon);
-            if (labelSuffix) infoParts.push(labelSuffix);
-            if (itemInfo) infoParts.push(itemInfo);
-            if (methodIcon && methodIcon !== mainIcon) infoParts.push(methodIcon);
-            var infoText = infoParts.join(' ');
-            
-            html += '<div class="recent-toast-item" onclick="showTransactionDetail(\'' + tx.id + '\')" data-tx-time="' + txTime + '">' +
-                '<span class="toast-time">' + timeText + '</span>' +
-                '<span class="toast-info">' + infoText + staffHtml + '</span>' +
-                '<span class="toast-amount">' + formatMoney(tx.amount) + '</span>' +
+            var ts = new Date(tx.createdAt || tx.date).getTime();
+            if (isNaN(ts)) ts = Date.now();
+
+            var subject = _txSubjectLabel(tx);
+            var items = _abbrevItemList(tx.items);
+            var amount = formatMoney(tx.amount || 0);
+            var method = _paymentMethodLabel(tx);
+            var actor = _actorLabel(tx);
+
+            html += '<div class="recent-toast-item' + (tx.refunded ? ' is-refunded' : '') + '"' +
+                ' onclick="showTransactionDetail(\'' + tx.id + '\')"' +
+                ' data-tx-time="' + ts + '"' +
+                ' title="' + escapeHtml(describeTx(tx)) + '">' +
+                '<span class="toast-time">' + escapeHtml(_relTimeText(ts)) + '</span>' +
+                '<span class="toast-info">' +
+                    (subject ? escapeHtml(subject) : '') +
+                    (items ? '<span class="toast-items">' + escapeHtml(items) + '</span>' : '') +
+                '</span>' +
+                '<span class="toast-amount">' + amount + '</span>' +
+                '<span class="toast-meta">' +
+                    (method ? escapeHtml(method) : '') +
+                    (actor ? '<span class="toast-actor"> - ' + escapeHtml(actor) + '</span>' : '') +
+                '</span>' +
             '</div>';
         }
         container.innerHTML = html;
+    }).then(function() {
+        // Cập nhật huy hiệu số lượng (hiện ở trạng thái thu gọn)
+        _updateRecentToastCount();
     });
 }
 
@@ -253,30 +373,19 @@ function createTableCard(table) {
     div.setAttribute('data-start-time', table.startTime || '');
     div.onclick = function(id) { return function() { showTableDetail(id); }; }(table.id);
     
-    // FIX: Luôn hiển thị nút Thêm món, kể cả khi bàn chưa có startTime
-    // Nút thanh toán chỉ hiện khi bàn có items
+    // Luôn hiện nút Thêm món, kể cả khi bàn đã khoá (nghiệp vụ: khoá bàn chỉ chặn
+    // xoá món / xoá bàn / chia-chuyển-gộp bàn, KHÔNG chặn thêm món).
+    // Nút thanh toán chỉ hiện khi bàn có items.
     var actionBtnsHtml = '';
     var hasItems = itemCount > 0;
     
-    // Nếu bàn bị khóa: chỉ ẩn nút Thêm món, vẫn hiện In + Tiền mặt + Chuyển khoản
-    if (isLocked) {
-        // Khi khóa: chỉ hiện nút thanh toán nếu có items
-        if (hasItems) {
-            actionBtnsHtml +=
-                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
-                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
-        }
-    } else {
-        // Không khóa: hiện Thêm món + In + thanh toán (nếu có items)
+    actionBtnsHtml +=
+        '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
+    if (hasItems) {
         actionBtnsHtml +=
-            '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
-        if (hasItems) {
-            actionBtnsHtml +=
-                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
-                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
-        }
+            '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
+            '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+            '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
     }
     
     // Bọc trong table-act-row nếu có action buttons
@@ -377,25 +486,14 @@ function updateTableCard(card, table) {
         var hasItems = itemCount > 0;
         var newActionBtns = '';
         
-        // Nếu bàn bị khóa: chỉ ẩn nút Thêm món, vẫn hiện In + Tiền mặt + Chuyển khoản
-        if (isLocked) {
-            // Khi khóa: chỉ hiện nút thanh toán nếu có items
-            if (hasItems) {
-                newActionBtns +=
-                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
-                    '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-                    '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
-            }
-        } else {
-            // Không khóa: hiện Thêm món + In + thanh toán (nếu có items)
+        // Luôn hiện nút Thêm món, kể cả bàn đã khoá (khớp với createTableCard).
+        newActionBtns +=
+            '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
+        if (hasItems) {
             newActionBtns +=
-                '<span class="table-act-btn table-act-add" onclick="event.stopPropagation(); openAddMenuForTable(\'' + table.id + '\')" title="Thêm món">➕</span>';
-            if (hasItems) {
-                newActionBtns +=
-                    '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
-                    '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
-                    '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
-            }
+                '<span class="table-act-btn table-act-print" onclick="event.stopPropagation(); doPrintThermal(\'' + table.id + '\')" title="In hóa đơn nhiệt">🖨️</span>' +
+                '<span class="table-act-btn table-act-cash" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'cash\')" title="Tiền mặt">💵 TM</span>' +
+                '<span class="table-act-btn table-act-transfer" onclick="event.stopPropagation(); paymentAtTable(\'' + table.id + '\',\'transfer\')" title="Chuyển khoản">💳 CK</span>';
         }
         
         if (newActionBtns) {
@@ -412,6 +510,11 @@ function updateTableCard(card, table) {
 
 // ========== UPDATE TABLES DIFF (optimized) ==========
 // P2: Cache _version của mỗi table card để tránh update không cần thiết
+// ⚠️ Key của mọi cache ở đây (_tableVersionCache, _tableCardCache,
+// _tableCardElCache, _tableVersionCache) đều dùng String(id) để thống nhất với
+// data-id trên DOM (luôn là chuỗi). Trước đây một số chỗ gán bằng table.id thô,
+// nên bàn có id number tạo ra 2 entry riêng cho cùng 1 bàn -> cache phình và
+// card không được update đúng lúc.
 var _tableVersionCache = {};
 // FIX ĐỒNG BỘ: lưu id các bàn đã bị XÓA THẬT SỰ (sự kiện 'removed' từ Firebase),
 // kể cả khi lúc đó không đứng ở tab Bàn -> mở tab là thẻ bàn được gỡ ngay.
@@ -520,14 +623,21 @@ function updateTablesDiff(newTables) {
         existingCards = grid.querySelectorAll('.table-card:not(.table-create-btn)');
     }
     
+    // FIX KHÓA ID: existingIds lấy key từ getAttribute('data-id') -> LUÔN là chuỗi.
+    // còn newIds nếu gán bằng table.id thô thì key có thể là number. Trong JS,
+    // obj[123] và obj['123'] thực ra cùng một key nên newIds ổn, NHƯNG khi tra
+    // existingIds[table.id] với table.id là number thì tên biến trong object lại
+    // tự chuyển thành chuỗi -> vẫn khớp. Vấn đề thật nằm ở chỗ khác: nếu id chứa
+    // ký tự đặc biệt hoặc undefined/null thì key sẽ lệch. Chuẩn hoá bằng String()
+    // ở cả hai vế để so khớp luôn đúng.
     var existingIds = {};
     for (var i = 0; i < existingCards.length; i++) {
-        existingIds[existingCards[i].getAttribute('data-id')] = existingCards[i];
+        existingIds[String(existingCards[i].getAttribute('data-id'))] = existingCards[i];
     }
     
     var newIds = {};
     for (var i = 0; i < activeTables.length; i++) {
-        newIds[activeTables[i].id] = activeTables[i];
+        newIds[String(activeTables[i].id)] = activeTables[i];
     }
     
     // FIX Android 6 + ĐỒNG BỘ: danh sách mới ít hơn số thẻ đang hiển thị thì KHÔNG bỏ qua
@@ -539,19 +649,30 @@ function updateTablesDiff(newTables) {
         for (var _mid in existingIds) {
             if (_mid && !newIds[_mid]) _missingIds.push(_mid);
         }
-        if (!_missingIds.length) return;
-        console.warn('[Realtime] Tables count giảm từ ' + existingCards.length + ' xuống ' + activeTables.length + ' - xác minh ' + _missingIds.length + ' bàn trước khi gỡ');
-        _confirmRemovedTables(_missingIds);
-        return;
+        if (_missingIds.length) {
+            console.warn('[Realtime] Tables count giảm từ ' + existingCards.length + ' xuống ' + activeTables.length + ' - xác minh ' + _missingIds.length + ' bàn trước khi gỡ');
+            _confirmRemovedTables(_missingIds);
+        }
+        // FIX BUG THIẾU THẺ BÀN: trước đây `return` ở đây, nghĩa là khi số bàn giảm
+        // (vừa thanh toán 1 bàn) thì cả vòng add/update bên dưới bị bỏ qua -> bàn mới
+        // tạo ở máy khác không hiện cho tới khi có event tiếp theo. Nay vẫn chạy
+        // tiếp phần thêm/cập nhật; phần gỡ thẻ đã xác minh sẽ tự xử lý riêng.
     }
     
-    // Xóa bàn không còn
-    for (var id in existingIds) {
-        if (!newIds[id]) {
-            existingIds[id].remove();
-            // P1: Đánh dấu cache dirty
-            _tableCardCacheDirty = true;
-            delete _tableVersionCache[id];
+    // Gỡ thẻ bàn không còn.
+    // FIX: trước đây gỡ thẳng 100% mọi thẻ không có trong danh sách mới. Điều này
+    // SAI khi IndexedDB đọc thiếu (lỗi Android 6) hoặc khi suppressRealtime đang
+    // giữ dữ liệu cũ -> bàn đang mở bị xóa khỏi màn hình rồi tự nhảy lại.
+    // Nay: chỉ gỡ thẻ khi KHÔNG có bằng chứng bàn đó vẫn tồn tại, hoặc khi
+    // danh sách mới đã xác nhận đầy đủ (không phải trường hợp đang xác minh).
+    if (activeTables.length >= existingCards.length) {
+        for (var id in existingIds) {
+            if (!newIds[id]) {
+                existingIds[id].remove();
+                // P1: Đánh dấu cache dirty
+                _tableCardCacheDirty = true;
+                delete _tableVersionCache[id];
+            }
         }
     }
     
@@ -559,14 +680,15 @@ function updateTablesDiff(newTables) {
     var fragment = null;
     for (var i = 0; i < activeTables.length; i++) {
         var table = activeTables[i];
-        var existingCard = existingIds[table.id];
+        var tid = String(table.id);
+        var existingCard = existingIds[tid];
         if (existingCard) {
             // P2: Chỉ update nếu _version thay đổi (tránh update không cần thiết)
-            var oldVersion = _tableVersionCache[table.id];
+            var oldVersion = _tableVersionCache[tid];
             var newVersion = table._version || table.updatedAt || 0;
             if (oldVersion !== newVersion) {
                 updateTableCard(existingCard, table);
-                _tableVersionCache[table.id] = newVersion;
+                _tableVersionCache[tid] = newVersion;
             }
         } else {
             if (!fragment) fragment = document.createDocumentFragment();
@@ -575,7 +697,7 @@ function updateTablesDiff(newTables) {
             // P1: Đánh dấu cache dirty
             _tableCardCacheDirty = true;
             // P2: Cache version cho card mới
-            _tableVersionCache[table.id] = table._version || table.updatedAt || 0;
+            _tableVersionCache[tid] = table._version || table.updatedAt || 0;
         }
     }
     if (fragment) grid.appendChild(fragment);
@@ -660,10 +782,16 @@ function startTableTimer() {
             var ss = secs < 10 ? '0' + secs : '' + secs;
             var timeDisplay = start.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' - ' + hh + ':' + mm + (skipSeconds ? '' : ':' + ss);
             
+            // FIX: so sánh id bằng String().
+            // `id` ở đây lấy từ data-id của DOM (luôn là chuỗi), còn
+            // cachedTables[j].id từ Firebase thường là chuỗi nhưng bàn tạo trong
+            // merge/chuyển món có thể là number. So sánh === giữa "123" và 123 luôn
+            // false -> bàn đó KHÔNG BAO GIỜ hiện biểu tượng 🔒 dù đã quá giờ, tức là
+            // nhân viên vẫn thêm/xoá món được trên bàn đã quá thời gian.
             var isLocked = false;
             if (cachedTables) {
                 for (var j = 0; j < cachedTables.length; j++) {
-                    if (cachedTables[j].id === id) {
+                    if (String(cachedTables[j].id) === String(id)) {
                         if (typeof isTableLocked === 'function') {
                             isLocked = isTableLocked(cachedTables[j]);
                         } else {
@@ -721,13 +849,8 @@ function _updateRecentToastTimes() {
         var item = items[i];
         var txTime = item.getAttribute('data-tx-time');
         if (!txTime) continue;
-        var timeDiff = Math.floor((Date.now() - parseInt(txTime)) / 60000);
-        var timeText = '';
-        if (timeDiff < 1) timeText = 'vừa xong';
-        else if (timeDiff < 60) timeText = timeDiff + 'p';
-        else timeText = Math.floor(timeDiff / 60) + 'h';
         var timeSpan = item.querySelector('.toast-time');
-        if (timeSpan) timeSpan.textContent = timeText;
+        if (timeSpan) timeSpan.textContent = _relTimeText(parseInt(txTime));
     }
 }
 
@@ -767,32 +890,41 @@ function initRealtime() {
         if (currentTab !== 'tables') return;
         var grid = document.getElementById('tablesGrid');
         if (!grid) return;
+        // Chuẩn hoá id một lần: key của cache và selector DOM phải dùng cùng dạng
+        // với data-id trên thẻ bàn (luôn là chuỗi).
+        var evId = String(item.id);
         if (event.type === 'added') {
-            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            var existingCard = grid.querySelector('.table-card[data-id="' + evId + '"]');
             if (!existingCard) {
                 grid.appendChild(createTableCard(item));
                 _tableCardCacheDirty = true;
                 // P2: Cache version cho card mới
-                _tableVersionCache[item.id] = item._version || item.updatedAt || 0;
+                _tableVersionCache[evId] = item._version || item.updatedAt || 0;
             }
         } else if (event.type === 'changed') {
             // P2: Kiểm tra version trước khi update
-            var oldVersion = _tableVersionCache[item.id];
+            var oldVersion = _tableVersionCache[evId];
             var newVersion = item._version || item.updatedAt || 0;
             if (oldVersion === newVersion) return;
-            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            var existingCard = grid.querySelector('.table-card[data-id="' + evId + '"]');
             if (existingCard) {
                 updateTableCard(existingCard, item);
-                _tableVersionCache[item.id] = newVersion;
+                _tableVersionCache[evId] = newVersion;
             } else {
                 grid.appendChild(createTableCard(item));
                 _tableCardCacheDirty = true;
-                _tableVersionCache[item.id] = newVersion;
+                _tableVersionCache[evId] = newVersion;
             }
         } else if (event.type === 'removed') {
-            delete _tableVersionCache[item.id];
-            delete _tablesRemovedIds[String(item.id)];
-            var existingCard = grid.querySelector('.table-card[data-id="' + item.id + '"]');
+            delete _tableVersionCache[evId];
+            delete _tablesRemovedIds[evId];
+            // FIX: bàn bị xóa ở máy khác mà modal chi tiết đang mở -> modal đứng
+            // yên với dữ liệu cũ, mọi nút bấm im lặng không làm gì. Đóng modal luôn.
+            if (currentTableDetailId && String(currentTableDetailId) === evId) {
+                if (typeof closeModal === 'function') closeModal('tableDetailModal');
+                showToast('🗑️ Bàn ' + (item.name || '') + ' đã được xóa ở thiết bị khác', 'warning');
+            }
+            var existingCard = grid.querySelector('.table-card[data-id="' + evId + '"]');
             if (existingCard && existingCard.parentNode) {
                 existingCard.remove();
                 _tableCardCacheDirty = true;
@@ -855,27 +987,73 @@ function initRealtime() {
                     var selSearch = document.getElementById('customerSelectorSearch');
                     renderCustomerSelectorList(selSearch ? selSearch.value : '');
                 }
+                // FIX REALTIME: modal chi tiết khách hàng (màn hình công nợ) phải vẽ lại.
+                // Thiếu đoạn này là số nợ trong modal cũ tới khi tải lại trang.
+                // Logic này tồn tại trong realtime.js cũ nhưng file đó đã bị thay bằng
+                // realtime-pos.js nên mất khi rút gọn.
+                var detailModal = document.getElementById('customerDetailModal');
+                if (detailModal && detailModal.style.display === 'flex') {
+                    var detailContent = document.getElementById('customerDetailContent');
+                    var detailId = detailContent ? detailContent.getAttribute('data-customer-id') : null;
+                    // Khách đang xem có thể đã bị xoá ở thiết bị khác -> đóng modal
+                    var stillExists = false;
+                    for (var ci = 0; ci < list.length; ci++) {
+                        if (list[ci].id === detailId) { stillExists = true; break; }
+                    }
+                    if (!stillExists) {
+                        closeModal('customerDetailModal');
+                    } else if (detailId && typeof showCustomerDetail === 'function') {
+                        showCustomerDetail(detailId);
+                    }
+                }
+                // Tab Quản lý: danh sách công nợ do managerApplyFilter() dựng,
+                // không gọi renderManagerDebtList ở đây để tránh tính lại
+                // hai lần. onManagerDBUpdate (db_update) sẽ lo phần cập nhật.
+                if (currentTab === 'manager' && typeof _invalidateCustomerCalcCache === 'function') {
+                    _invalidateCustomerCalcCache();
+                }
             };
             if (cached && cached.length > 0) applyCustomers(cached);
             else DB.getAll('customers').then(applyCustomers);
-        }, 100);
+        }, 30);
     });
     // NÂNG CẤP: Khi fullSync hoàn thành, re-render customers
+    // FIX: bỏ điều kiện `if (currentTab !== 'customers') return;`.
+    // Trước đây nếu đang ở tab Bàn/Quản lý mà có modal chi tiết khách hàng mở,
+    // dữ liệu đã sync về nhưng UI không vẽ lại -> số nợ cũ tới khi tải lại trang.
     DB.on('customers:synced', function() {
-        if (currentTab !== 'customers') return;
+        if (typeof _invalidateCustomerCalcCache === 'function') _invalidateCustomerCalcCache();
+        var applySynced = function(list) {
+            customers = list;
+            window.customers = customers;
+            if (currentTab === 'customers') renderCustomerList();
+            // Vẽ lại modal chi tiết nếu đang mở
+            var detailModal = document.getElementById('customerDetailModal');
+            if (detailModal && detailModal.style.display === 'flex') {
+                var detailContent = document.getElementById('customerDetailContent');
+                var detailId = detailContent ? detailContent.getAttribute('data-customer-id') : null;
+                var stillExists = false;
+                for (var ci = 0; ci < list.length; ci++) {
+                    if (list[ci].id === detailId) { stillExists = true; break; }
+                }
+                if (!stillExists) {
+                    closeModal('customerDetailModal');
+                } else if (detailId && typeof showCustomerDetail === 'function') {
+                    showCustomerDetail(detailId);
+                }
+            }
+            // Tab Quản lý: không gọi renderManagerDebtList ở đây.
+            // Hàm đó cần danh sách {id, name, totalDebt} do managerComputeStats
+            // dựng, truyền danh sách khách thô sẽ vẽ sai (thiếu totalDebt).
+            // Việc cập nhật tab Quản lý do onManagerDBUpdate (db_update) đảm nhiệm.
+            if (currentTab === 'manager' && typeof _invalidateCustomerCalcCache === 'function') {
+                _invalidateCustomerCalcCache();
+            }
+        };
         // FIX: Dùng memory cache trước để ko block UI
         var cached = DB.getMemoryCache('customers');
-        if (cached && cached.length > 0) {
-            customers = cached;
-            window.customers = customers;
-            renderCustomerList();
-        } else {
-            DB.getAll('customers').then(function(list) {
-                customers = list;
-                window.customers = customers;
-                renderCustomerList();
-            });
-        }
+        if (cached && cached.length > 0) applySynced(cached);
+        else DB.getAll('customers').then(applySynced);
     });
 
     // ============================================================
@@ -893,10 +1071,20 @@ function initRealtime() {
                     return orderA - orderB;
                 });
                 window.menuItems = menuItems;
+                // FIX: menu vừa đổi (sửa giá/đổi tên/thêm/xoá món) -> xoá cache HTML
+                // của modal đơn. Không có bước này, cache cũ vẫn khớp và modal hiện
+                // giá cũ -> POS chốt sai giá so với menu vừa sửa.
+                if (typeof _invalidateOrderMenuCache === 'function') _invalidateOrderMenuCache();
                 // Cập nhật menu trong order modal nếu đang mở
                 var orderModal = document.getElementById('orderModal');
                 if (orderModal && orderModal.style.display === 'flex') {
                     renderMenuByCategory(currentMenuCategory);
+                }
+                // Re-render tab Menu - Tồn kho nếu đang mở
+                if (currentTab === 'inventory') {
+                    if (typeof _invalidateLookups === 'function') _invalidateLookups();
+                    if (typeof renderInventoryMenu === 'function') renderInventoryMenu();
+                    if (typeof renderInventoryCategoryFilter === 'function') renderInventoryCategoryFilter();
                 }
             });
         }, 100);
@@ -911,9 +1099,15 @@ function initRealtime() {
                 return orderA - orderB;
             });
             window.menuItems = menuItems;
+            // FIX: xoá cache modal đơn (xem giải thích ở handler menu:* ở trên)
+            if (typeof _invalidateOrderMenuCache === 'function') _invalidateOrderMenuCache();
             var orderModal = document.getElementById('orderModal');
             if (orderModal && orderModal.style.display === 'flex') {
                 renderMenuByCategory(currentMenuCategory);
+            }
+            if (currentTab === 'inventory') {
+                if (typeof _invalidateLookups === 'function') _invalidateLookups();
+                if (typeof renderInventoryMenu === 'function') renderInventoryMenu();
             }
         });
     });
@@ -927,10 +1121,17 @@ function initRealtime() {
         _debounceRealtime('menu_categories_ui', function() {
             DB.getAll('menu_categories').then(function(list) {
                 menuCategories = list;
+                window.menuCategories = list;
                 // Cập nhật danh mục trong order modal nếu đang mở
                 var orderModal = document.getElementById('orderModal');
                 if (orderModal && orderModal.style.display === 'flex') {
                     renderOrderCategoriesColumn();
+                }
+                // Re-render tab Menu - Tồn kho nếu đang mở
+                if (currentTab === 'inventory') {
+                    if (typeof renderInventoryCategoryFilter === 'function') renderInventoryCategoryFilter();
+                    if (typeof renderInventoryCategories === 'function') renderInventoryCategories();
+                    if (typeof renderInventoryMenu === 'function') renderInventoryMenu();
                 }
             });
         }, 100);
@@ -1045,7 +1246,7 @@ function initRealtime() {
         window.managerCashPickups = data || [];
         _debounceRealtime('manager_cash_pickups', function() {
             if (currentTab === 'report') {
-                renderReport(currentReportDate);
+                refreshReportIfAvailable();
             }
         }, 100);
     });
@@ -1054,7 +1255,7 @@ function initRealtime() {
         if (!event || !event.data) return;
         _debounceRealtime('manager_cash_pickups_ui', function() {
             if (currentTab === 'report') {
-                renderReport(currentReportDate);
+                refreshReportIfAvailable();
             }
         }, 100);
     });
@@ -1089,6 +1290,11 @@ function initRealtime() {
         _debounceRealtime('ingredients_ui', function() {
             DB.getAll('ingredients').then(function(list) {
                 window.ingredients = list;
+                // Đồng bộ biến global để các đoạn code đọc `ingredients` trực tiếp
+                // không bị stale
+                if (typeof ingredients !== 'undefined') {
+                    try { ingredients = list; } catch (e) { /* global readonly */ }
+                }
                 if (typeof _invalidateLookups === 'function') _invalidateLookups();
                 if (currentTab === 'cost') {
                     if (typeof renderIngredientList === 'function') renderIngredientList();
@@ -1300,7 +1506,7 @@ function initRealtime() {
     // NÂNG CẤP: Khi fullSync manager_cash_pickups hoàn thành
     DB.on('manager_cash_pickups:synced', function() {
         if (currentTab === 'report') {
-            renderReport(currentReportDate);
+            refreshReportIfAvailable();
         }
     });
 
@@ -1315,6 +1521,9 @@ function initRealtime() {
     DB.on('ingredients:synced', function() {
         DB.getAll('ingredients').then(function(list) {
             window.ingredients = list;
+            if (typeof ingredients !== 'undefined') {
+                try { ingredients = list; } catch (e) { /* global readonly */ }
+            }
             if (typeof _invalidateLookups === 'function') _invalidateLookups();
             if (currentTab === 'cost') {
                 if (typeof renderIngredientList === 'function') renderIngredientList();
@@ -1434,6 +1643,8 @@ function initRealtime() {
                 return orderA - orderB;
             });
             window.menuItems = menuItems;
+            // FIX: xoá cache modal đơn (xem giải thích ở handler menu:* ở trên)
+            if (typeof _invalidateOrderMenuCache === 'function') _invalidateOrderMenuCache();
             var orderModal = document.getElementById('orderModal');
             if (orderModal && orderModal.style.display === 'flex') {
                 renderMenuByCategory(currentMenuCategory);

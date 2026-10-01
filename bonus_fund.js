@@ -116,7 +116,10 @@ function _bfInitRevenueListener() {
                     // Ưu tiên cash+transfer+grab nếu có
                     if (dayData.cash !== undefined || dayData.transfer !== undefined || dayData.grab !== undefined) {
                         revenue = (dayData.cash || 0) + (dayData.transfer || 0) + (dayData.grab || 0);
-                    } else if (dayData.total) {
+                    } else if (dayData.total !== undefined && dayData.total !== null) {
+                        // FIX: trước đây dùng `if (dayData.total)` nên khi
+                        // doanh thu về 0 thì rơi xuống ngoài và bị coi như
+                        // không có dữ liệu. Phải kiểm tra có tồn tại hay không.
                         revenue = dayData.total;
                     }
                 }
@@ -148,10 +151,28 @@ function _bfSyncRevenuePercent() {
     for (var dateStr in _bonusFundRevenueCache) {
         if (_bonusFundRevenueCache.hasOwnProperty(dateStr)) {
             var revenue = _bonusFundRevenueCache[dateStr];
-            if (revenue <= 0) continue;
 
             // BỎ QUA các ngày đã bị admin xóa revenue_percent
             if (_bonusFundDeletedRevenueDates[dateStr]) continue;
+
+            // FIX: trước đây `if (revenue <= 0) continue;` khiến ngày doanh
+            // thu về 0 (đơn bị huỷ, bàn bị xoá) bị bỏ qua, nên record
+            // revenue_percent của ngày đó vẫn giữ số tiền cũ và tổng quỹ
+            // thưởng bị thổi phồng vĩnh viễn. Nay nếu ngày đó về 0 mà đang có
+            // record thì đặt record về 0 cho khớp.
+            if (revenue <= 0) {
+                var zeroRec = _bonusFundRevenueRecords[dateStr];
+                if (zeroRec && (zeroRec.amount || 0) !== 0 && _bonusFundDeletedRevenueDates[dateStr] !== true) {
+                    pendingDates.push({
+                        dateStr: dateStr,
+                        percentAmount: 0,
+                        revenue: 0,
+                        id: zeroRec.id,
+                        isUpdate: true
+                    });
+                }
+                continue;
+            }
 
             // Dùng Math.round() giống employees.js (dòng 2066)
             var percentAmount = Math.round(revenue * 0.01);

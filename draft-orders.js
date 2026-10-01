@@ -253,15 +253,9 @@ function confirmDraftOrder(draftId, options) {
         if (orderType === 'dinein' || options.createTable) {
             // Tạo bàn mới trên Firebase
             return DB.getAll('tables').then(function(allTables) {
-                var numbers = [];
-                for (var i = 0; i < allTables.length; i++) {
-                    var name = allTables[i].name;
-                    var num = parseInt(name.replace(/\D/g, ''));
-                    if (!isNaN(num)) numbers.push(num);
-                }
-                var maxNum = numbers.length > 0 ? Math.max.apply(null, numbers) : 0;
-                var nextNum = maxNum + 1;
-                var tableName = 'Bàn ' + nextNum;
+                // FIX: dùng chung _nextTableNumber/_buildTableName như order.js
+                var nextNum = _nextTableNumber(allTables);
+                var tableName = _buildTableName(nextNum);
                 var tableId = Date.now().toString();
 
                 var currentUser = DB.getCurrentUser();

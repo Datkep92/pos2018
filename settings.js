@@ -1,4 +1,4 @@
-﻿// settings.js - Cài đặt ứng dụng + Tiền mặt tại POS
+// settings.js - Cài đặt ứng dụng + Tiền mặt tại POS
 // ES5, tương thích Android 6, iOS 12
 
 // ============================================================
@@ -65,6 +65,9 @@
             var infoData = detail.data;
             var config = Array.isArray(infoData) ? (infoData[0] || {}) : infoData;
             if (config.id === 'shop_config') {
+                // Cấu hình đã tới: báo cho các hàm lưu trong tab Cài đặt biết
+                // là được phép lưu (trước đó form có thể còn trống vì mở sớm).
+                window._shopConfigReady = true;
                 // Cập nhật window.shopConfig
                 window.shopConfig.telegramBotToken = config.telegramBotToken || '';
                 window.shopConfig.telegramChatId = config.telegramChatId || '';
@@ -91,46 +94,80 @@
 
     // Cũng lắng nghe trực tiếp từ Firebase (nếu firebase sẵn sàng)
     // Đảm bảo dữ liệu được cập nhật ngay cả khi db_update chưa kịp dispatch
-    setTimeout(function() {
+    //
+    // PHẢI chờ và THỬ LẠI, không dùng setTimeout 1 lần:
+    //  - Firebase CDN chậm hơn 3s (mạng VN chập chờn) => không gắn được gì,
+    //    và vĩnh viễn không thử lại => Telegram config + thông tin quán không
+    //    bao giờ sync realtime.
+    //  - Nếu đăng nhập chưa xong ở giây thứ N thì DB.getShopId() trả về
+    //    'shop_default' (giá trị fallback của db.js) => listener gắn vào SAI
+    //    shop và đẩy token Telegram của shop_default vào window.shopConfig
+    //    => tin nhắn của shop thật đi sai chat.
+    // => Chờ tới khi firebase sẵn sàng VÀ đã đăng nhập, tối đa 60 lần thử.
+    var _settingsRtTries = 0;
+    var _waitSettingsRt = setInterval(function() {
+        _settingsRtTries++;
         try {
+            if (typeof firebase === 'undefined' || !firebase.database) {
+                if (_settingsRtTries >= 60) clearInterval(_waitSettingsRt);
+                return;
+            }
             var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : localStorage.getItem('current_shop_id');
-            if (shopId && typeof firebase !== 'undefined' && firebase.database) {
-                // Lắng nghe collection 'info'
-                var infoRef = firebase.database().ref(shopId + '/info');
-                infoRef.on('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var src = snapshot.val() || {};
-                    window.shopConfig.telegramBotToken = src.telegramBotToken || '';
-                    window.shopConfig.telegramChatId = src.telegramChatId || '';
-                    window.shopConfig.telegramShiftCloseToken = src.telegramShiftCloseToken || '';
-                    window.shopConfig.telegramWarningToken = src.telegramWarningToken || '';
-                    window.shopConfig.telegramExpenseToken = src.telegramExpenseToken || '';
-                    // Cập nhật UI
-                    _updateTelegramUI(src);
-                    _updateShopInfoUI(src);
-                });
 
-                // Lắng nghe collection 'shop_info'
-                var shopInfoRef = firebase.database().ref(shopId + '/shop_info');
-                shopInfoRef.on('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var src = snapshot.val() || {};
-                    // shop_info là object, lấy item đầu tiên
-                    for (var key in src) {
-                        if (src.hasOwnProperty(key)) {
-                            var item = src[key];
-                            if (item && item.id === 'shop_info') {
-                                window.shopInfo = item;
-                                _updateShopInfoUI(item);
-                            }
+            // FIX: trước đây chặn khi shopId === 'shop_default'. Nhưng
+            // 'shop_default' vừa là giá trị fallback CHƯA ĐĂNG NHẬP, vừa là
+            // shop id thật của một số POS. Với shop có id đúng là
+            // 'shop_default', listener không bao giờ gắn được, thử 60 lần rồi
+            // bỏ -> cấu hình Telegram không đồng bộ realtime, đổi token trên máy
+            // khác thì máy này không nhận.
+            //
+            // Điều kiện đúng là "đã đăng nhập hay chưa", không phải tên shop.
+            var loggedIn = (typeof DB !== 'undefined' && DB.isLoggedIn) ? DB.isLoggedIn() : false;
+            if (!shopId || !loggedIn) {
+                if (_settingsRtTries >= 60) clearInterval(_waitSettingsRt);
+                return;
+            }
+
+            clearInterval(_waitSettingsRt);
+
+            // Lắng nghe collection 'info'
+            var infoRef = firebase.database().ref(shopId + '/info');
+            infoRef.on('value', function(snapshot) {
+                if (!snapshot.exists()) return;
+                var src = snapshot.val() || {};
+                window._shopConfigReady = true;
+                window.shopConfig.telegramBotToken = src.telegramBotToken || '';
+                window.shopConfig.telegramChatId = src.telegramChatId || '';
+                window.shopConfig.telegramShiftCloseToken = src.telegramShiftCloseToken || '';
+                window.shopConfig.telegramWarningToken = src.telegramWarningToken || '';
+                window.shopConfig.telegramExpenseToken = src.telegramExpenseToken || '';
+                // Cập nhật UI
+                _updateTelegramUI(src);
+                _updateShopInfoUI(src);
+            });
+
+            // Lắng nghe collection 'shop_info'
+            var shopInfoRef = firebase.database().ref(shopId + '/shop_info');
+            shopInfoRef.on('value', function(snapshot) {
+                if (!snapshot.exists()) return;
+                var src = snapshot.val() || {};
+                // shop_info là object, phải xét TẤT CẢ phần tử.
+                // Trước đây dùng `break` nên chỉ kiểm tra phần tử đầu tiên rồi thoát.
+                for (var key in src) {
+                    if (src.hasOwnProperty(key)) {
+                        var item = src[key];
+                        if (item && item.id === 'shop_info') {
+                            window.shopInfo = item;
+                            _updateShopInfoUI(item);
                             break;
                         }
                     }
-                });
-            }
+                }
+            });
         } catch (e) {
+            if (_settingsRtTries >= 60) clearInterval(_waitSettingsRt);
         }
-    }, 3000); // Đợi 3s cho Firebase khởi tạo
+    }, 1000);
 })();
 
 // ============================================================
@@ -196,7 +233,7 @@
                     _costTxCache[key] = val;
                     _costTxCacheLoaded = true;
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
@@ -209,7 +246,7 @@
                     _costTxCache[key] = val;
                     _costTxCacheLoaded = true;
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
@@ -218,7 +255,7 @@
                 if (_costTxCache && _costTxCache[key]) {
                     delete _costTxCache[key];
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
@@ -233,7 +270,7 @@
                     _pickupsCache[key] = val;
                     _pickupsCacheLoaded = true;
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
@@ -246,7 +283,7 @@
                     _pickupsCache[key] = val;
                     _pickupsCacheLoaded = true;
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
@@ -255,10 +292,13 @@
                 if (_pickupsCache && _pickupsCache[key]) {
                     delete _pickupsCache[key];
                     if (!_selectedCloseDate) {
-                        loadPosCashData();
+                        _schedulePosCashReload();
                     }
                 }
             });
+
+            // Gửi lại các lần nhận tiền lần trước bị ghi lỗi do mất mạng
+            setTimeout(_flushPendingPickups, 1500);
         } catch(e) {}
     }, 1000);
 })();
@@ -268,10 +308,26 @@
 // ============================================================
 // Kiểm tra xem hôm nay đã chốt ngày chưa
 // Dùng để chặn refund/xóa món/xóa bàn sau khi chốt
-var _dayClosedCache = false;
+// null = CHƯA BIẾT (dữ liệu chốt ngày chưa tải xong)
+// true  = đã chốt    false = chưa chốt
+//
+// Trước đây khởi tạo bằng false và chỉ được set khi loadPosCashData() xong.
+// Trong khoảng thời gian đó isDayClosed() trả false, nên các chốt an toàn ở
+// tables.js / history.js / split-transfer-merge.js KHÔNG kích hoạt => nhân viên
+// có thể xoá món / hoàn tác / gộp bàn không cần mật khẩu trong vài giây đầu,
+// kể cả khi ngày thực sự đã chốt.
+var _dayClosedCache = null;
 
+// true nếu đã chốt, false nếu chưa, null nếu chưa tải được dữ liệu
 function isDayClosed() {
-    return _dayClosedCache;
+    return _dayClosedCache === true;
+}
+
+// Chặn thao tác ghi khi chưa biết ngày đã chốt hay chưa.
+// Dùng cho các thao tác nguy hiểm (xoá món, refund, gộp/xoá bàn) để không để
+// lọt trong lúc dữ liệu chốt ngày chưa sẵn sàng.
+function isDayClosedUnknown() {
+    return _dayClosedCache === null;
 }
 
 // Cập nhật cache từ dữ liệu _posCashData
@@ -299,9 +355,13 @@ var cashCounts = {};
 var _posCashData = null; // Cache dữ liệu đối soát
 
 // === Lưu/Khôi phục số đếm tiền mặt vào localStorage (tránh mất khi chuyển tab) ===
+// Key phải chứa shopId: app hỗ trợ đổi shop trên cùng một máy/ngày.
+// Trước đây key chỉ có ngày => đổi shop sẽ nạp số đếm của shop cũ vào shop mới
+// rồi tiếp tục ghi đè lên key đó.
 function _getCashCountStorageKey() {
     var today = typeof getTodayDateKey === 'function' ? getTodayDateKey() : new Date().toISOString().slice(0, 10);
-    return 'pos_cash_counts_' + today;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? (DB.getShopId() || 'shop_default') : 'shop_default';
+    return 'pos_cash_counts_' + shopId + '_' + today;
 }
 
 function _saveCashCountsToLocal() {
@@ -334,6 +394,14 @@ function _loadCashCountsFromLocal() {
     } catch(e) {}
 }
 
+// Xoá sạch số đếm trong RAM (dùng khi chuyển sang ngày khác)
+function _resetCashCountsInMemory() {
+    cashCounts = {};
+    for (var i = 0; i < CASH_DENOMS.length; i++) {
+        cashCounts[CASH_DENOMS[i].value] = 0;
+    }
+}
+
 // Gọi khôi phục ngay khi load
 _loadCashCountsFromLocal();
 var _selectedCloseDate = null; // Ngày đang chọn để chốt (null = hôm nay)
@@ -358,11 +426,8 @@ function initQuickCashCounter() {
         return;
     }
 
-    cashCounts = {};
-    for (var i = 0; i < CASH_DENOMS.length; i++) {
-        cashCounts[CASH_DENOMS[i].value] = 0;
-    }
     // Khôi phục số đếm đã lưu trong localStorage (nếu có)
+    _resetCashCountsInMemory();
     _loadCashCountsFromLocal();
     _posCashData = null;
     _selectedCloseDate = null;
@@ -372,11 +437,15 @@ function initQuickCashCounter() {
     // Khi admin hủy chốt từ thiết bị khác, nhân viên sẽ thấy ngay
     _subscribeDayClosedRealtime();
 
-    // Tự động fix dữ liệu cũ: các ngày đã chốt nhưng thiếu cashKept
-    // Chỉ chạy 1 lần khi khởi tạo, không block UI
-    setTimeout(function() {
-        fixMissingCashKept();
-    }, 2000);
+    // Tự động fix dữ liệu cũ: các ngày đã chốt nhưng thiếu cashKept.
+    // Chỉ chạy 1 lần cho cả phiên: nếu không, mỗi lần mở tab lại tạo thêm timer
+    // và mỗi timer quét/ghi lại toàn bộ daily_balances.
+    if (!_fixCashKeptScheduled) {
+        _fixCashKeptScheduled = true;
+        setTimeout(function() {
+            fixMissingCashKept();
+        }, 2000);
+    }
 }
 
 // Lắng nghe realtime thay đổi daily_balances (chốt ngày, chênh lệch, hủy chốt...)
@@ -386,19 +455,68 @@ var _costTxCache = null; // { id: item, ... }
 var _pickupsCache = null; // { id: item, ... }
 var _costTxCacheLoaded = false;
 var _pickupsCacheLoaded = false;
+// Bộ đếm thứ tự request của loadPosCashData - chống response cũ ghi đè response mới
+var _loadPosCashSeq = 0;
+// Cờ: fixMissingCashKept chỉ chạy 1 lần cho cả phiên (tránh tích tụ timer mỗi lần mở tab)
+var _fixCashKeptScheduled = false;
+// Ref của listener daily_balances/<hôm nay> - dùng để off() trước khi đăng ký lại
+var _dayClosedSubRef = null;
+// Gom các lần gọi loadPosCashData() liên tiếp trong 200ms.
+// Firebase fire lại 'child_added' cho TOÀN BỘ node đã tồn tại khi đăng ký listener,
+// nên shop có vài trăm cost_transactions/manager_cash_pickups sẽ bắn vài trăm lần
+// loadPosCashData() liên tiếp -> vài trăm lần dựng lại innerHTML dù tab đang ẩn.
+var _posCashReloadTimer = null;
+function _schedulePosCashReload() {
+    if (_posCashReloadTimer) clearTimeout(_posCashReloadTimer);
+    _posCashReloadTimer = setTimeout(function() {
+        _posCashReloadTimer = null;
+        loadPosCashData();
+    }, 200);
+}
+
+// ========== PHÂN QUYỀN ỔN ĐỊNH KHI RENDER ==========
+// currentUser trong DB là null lúc auth chưa resolve xong (token refresh,
+// vừa đổi shop, vừa logout). Nếu renderCashCounter() dựa vào giá trị đó thì
+// chỉ một event realtime rơi đúng khoảnh khắc đó sẽ dựng lại HTML và làm
+// MẤT panel "💰 Tiền QL nhận" (ô nhập + nút 💾 Lưu) -> người dùng bấm Lưu
+// thì `if (!input) return;` chạy và im lặng, không có phản hồi gì.
+// => Ghi nhớ: đã xác nhận là admin trong phiên đăng nhập này thì giữ UI admin,
+//    chỉ reset khi thực sự logout.
+var _isAdminLatched = false;
+
+function _resolveIsAdmin() {
+    var loggedIn = typeof DB !== 'undefined' && DB.isLoggedIn && DB.isLoggedIn();
+    if (!loggedIn) {
+        _isAdminLatched = false; // đã logout -> reset
+        return false;
+    }
+    var isAdminNow = !!(typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin());
+    if (isAdminNow) _isAdminLatched = true;
+    return isAdminNow || _isAdminLatched === true;
+}
 
 function _subscribeDayClosedRealtime() {
     try {
         var today = getTodayDateKey();
         var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
         var dbRef = firebase.database().ref(shopId);
+        var childRef = dbRef.child('daily_balances/' + today);
+
+        // Chống đăng ký listener trùng.
+        // initQuickCashCounter() gọi lại hàm này mỗi lần mở tab Settings (khi cache
+        // không khớp ngày) -> không dedup thì mỗi lần thêm 1 listener 'value', và mỗi
+        // listener lại gọi loadPosCashData() -> render lại cả panel nhiều lần.
+        if (_dayClosedSubRef) {
+            try { _dayClosedSubRef.off('value'); } catch (e) {}
+            _dayClosedSubRef = null;
+        }
 
         // Lắng nghe thay đổi trên daily_balances hôm nay
         // Khi nhân viên A chốt ngày (ghi difference + isClosed lên Firebase),
         // nhân viên B và admin sẽ nhận được cập nhật realtime và reload UI
         // LƯU Ý: cost_transactions và manager_cash_pickups đã được lắng nghe
         // bởi _initGlobalRealtime() ngay khi settings.js load (xem phần đầu file)
-        dbRef.child('daily_balances/' + today).on('value', function(snapshot) {
+        childRef.on('value', function(snapshot) {
             var data = snapshot.val();
             if (data) {
                 var newIsClosed = data.isClosed === true;
@@ -409,8 +527,14 @@ function _subscribeDayClosedRealtime() {
                 if (!_selectedCloseDate) {
                     loadPosCashData();
                 }
+            } else {
+                // Node bị xoá hẳn (ví dụ admin dọn dữ liệu) -> phải trả cache về
+                // "chưa chốt". Nếu giữ _dayClosedCache = true thì cả app kẹt ở
+                // trạng thái "đã chốt" tới khi F5.
+                _dayClosedCache = false;
             }
         });
+        _dayClosedSubRef = childRef;
     } catch (e) {
     }
 }
@@ -419,7 +543,15 @@ function loadPosCashData(targetDate) {
     try {
     // FIX: Dùng hàm getTodayDateKey() để lấy ngày theo giờ Việt Nam (UTC+7), tránh lỗi timezone
     var today = targetDate || getTodayDateKey();
-    var isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
+    // KHÔNG capture isAdmin ở đây: hàm bên dưới là bất đồng bộ, tới lúc .then()
+    // chạy thì currentUser có thể đã đổi. renderCashCounter() sẽ tự resolve lúc render.
+    //
+    // Số thứ tự request: chỉ lần gọi MỚI NHẤT được quyền ghi _posCashData.
+    // loadPosCashData() được gọi liên tục bởi realtime (child_*, db_update) và
+    // bởi selectCloseDate(). Trước đây response cũ bay chậm hơn response mới thì
+    // ghi đè _posCashData bằng dữ liệu cũ -> managerPickupTotal/expectedClosing sai,
+    // và staffCloseDay() có thể ghi cashKept của ngày hôm nay vào ngày đang xem.
+    var mySeq = ++_loadPosCashSeq;
 
     // Lấy ngày hôm trước để tính số dư đầu kỳ
     // FIX: Dùng Date.UTC để tránh lỗi timezone (toISOString trả về UTC, trong khi setDate tính theo local time)
@@ -446,7 +578,10 @@ function loadPosCashData(targetDate) {
     } else {
         costTxPromise = dbRef.child('cost_transactions').once('value').then(function(snapshot) {
             var data = snapshot.val() || {};
-            _costTxCache = {};
+            // GHI ĐÈ lên cache cũ sẽ nuốt mất các mục mà listener realtime
+            // (child_added) đã chèn vào trong lúc request đang bay.
+            // => Merge vào object sẵn có, không tạo object mới.
+            if (!_costTxCache) _costTxCache = {};
             for (var k in data) {
                 if (data.hasOwnProperty(k)) {
                     var item = data[k];
@@ -465,7 +600,8 @@ function loadPosCashData(targetDate) {
     } else {
         pickupsPromise = dbRef.child('manager_cash_pickups').once('value').then(function(snapshot) {
             var data = snapshot.val() || {};
-            _pickupsCache = {};
+            // Merge, không thay thế - xem giải thích ở cost_transactions phía trên
+            if (!_pickupsCache) _pickupsCache = {};
             for (var k in data) {
                 if (data.hasOwnProperty(k)) {
                     var item = data[k];
@@ -492,6 +628,9 @@ function loadPosCashData(targetDate) {
         // Bàn đang hoạt động
         DB.getAll('tables')
     ]).then(function(results) {
+        // Bỏ qua nếu đã có request mới hơn - tránh ghi đè dữ liệu mới bằng dữ liệu cũ
+        if (mySeq !== _loadPosCashSeq) return;
+
         var prevBalance = results[0].val() || {};
         var transactions = results[1] || [];
         var allCostsCache = results[2] || {}; // Đã là object {id: item}
@@ -593,11 +732,17 @@ function loadPosCashData(targetDate) {
         });
 
         // expectedClosing = số tiền dự kiến phải có trong két SAU KHI trừ QL nhận
-        // Nếu đã lưu đối soát trước đó thì ưu tiên dùng expectedClosing đã lưu (tránh sai lệch khi F5)
         var expectedClosing;
-        if (savedBalance && savedBalance.expectedClosing !== undefined && savedBalance.expectedClosing !== null) {
+        if (savedBalance && savedBalance.isClosed === true &&
+            savedBalance.expectedClosing !== undefined && savedBalance.expectedClosing !== null) {
+            // Ngày ĐÃ CHỐT: dùng snapshot lúc chốt, đó là con số đã đối chiếu.
             expectedClosing = savedBalance.expectedClosing;
         } else {
+            // Ngày CHƯA CHỐT: phải tính lại từ dữ liệu sống.
+            // Trước đây ưu tiên savedBalance.expectedClosing cho mọi trường hợp ->
+            // sau khi lưu đối soát, mỗi lần QL nhận tiền về sau KHÔNG còn được trừ
+            // (vì nhánh else không chạy) trong khi managerPickupTotal vẫn tăng
+            // => difference, cashKept và số dư đầu kỳ ngày mai đều sai.
             expectedClosing = openingBalance + cashRevenue - posCashExpense - managerPickupTotal;
         }
 
@@ -650,12 +795,12 @@ function loadPosCashData(targetDate) {
             _updateDayClosedCache();
         }
 
-        renderCashCounter(isAdmin);
+        renderCashCounter();
     }).catch(function(err) {
-        renderCashCounter(isAdmin);
+        if (mySeq === _loadPosCashSeq) renderCashCounter();
     });
     } catch(e) {
-        renderCashCounter(isAdmin);
+        renderCashCounter();
     }
 }
 
@@ -663,7 +808,7 @@ function renderCashCounter(isAdmin) {
     var container = document.getElementById('quickCashContainer');
     if (!container) return;
     if (isAdmin === undefined) {
-        isAdmin = typeof DB !== 'undefined' && DB.isAdmin && DB.isAdmin();
+        isAdmin = _resolveIsAdmin();
     }
 
     // Tính tổng tiền đếm được
@@ -973,45 +1118,110 @@ html += '        <div class="pos-cash-row" style="cursor:pointer;" onclick="show
 
     html += '</div>';
 
-    // ===== PHẦN RIÊNG: TIỀN QUẢN LÝ NHẬN (input + lưu Firebase) =====
+    // ===== PHẦN RIÊNG: TIỀN QUẢN LÝ NHẬN =====
+    // Ô nhập + nút Lưu: CHỈ Admin.
+    // Lịch sử: ai cũng xem được (nhân viên read-only) để đối soát tiền két.
+    // Không đặt cả khối này sau `if (isAdmin)` vì nhân viên cần thấy
+    // các lần QL đã lấy tiền khỏi két trong ngày.
+    html += '<div class="cash-counter" style="margin-top:12px;">';
+    html += '  <div class="cash-counter-header">';
+    html += '    <span class="cash-counter-title">💰 Tiền QL nhận</span>';
+    if (data.managerPickupTotal > 0) {
+        html += '    <span class="cash-closed-badge" style="background:#fef3e7;color:#b45309;">' + formatMoney(data.managerPickupTotal) + '</span>';
+    }
+    html += '  </div>';
+    html += '  <div class="pos-cash-info">';
     if (isAdmin) {
-        html += '<div class="cash-counter" style="margin-top:12px;">';
-        html += '  <div class="cash-counter-header">';
-        html += '    <span class="cash-counter-title">💰 Tiền QL nhận</span>';
-        html += '  </div>';
-        html += '  <div class="pos-cash-info">';
-        html += '    <div class="pos-cash-row">';
-        html += '      <span>Tiền QL nhận:</span>';
-        html += '      <span class="pos-cash-mgr-pickup">';
-        html += '        <input type="number" class="mgr-pickup-input" id="mgrPickupInput" value="" min="0" placeholder="0">';
-        html += '        <button class="mgr-pickup-btn" onclick="saveManagerPickup()">💾 Lưu</button>';
-        html += '      </span>';
-        html += '    </div>';
-
-        // Lịch sử quản lý nhận tiền hôm nay
-        if (data.pickupHistory && data.pickupHistory.length > 0) {
-            for (var hi = 0; hi < data.pickupHistory.length; hi++) {
-                var ph = data.pickupHistory[hi];
-                var timeStr = '';
-                if (ph.createdAt) {
-                    var d = new Date(ph.createdAt);
-                    timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-                }
-                var pickupId = ph.id || '';
-                var remainingStr = ph.remainingPosCash !== undefined ? formatMoney(ph.remainingPosCash) : '...';
-                html += '    <div class="pos-cash-row pos-cash-pickup-log">';
-                html += '      <span>🕐 ' + timeStr + '</span>';
-                html += '      <span>-' + formatMoney(ph.amount) + '</span>';
-                html += '      <span style="font-size:11px;color:#64748b;margin-left:8px;">📦 Còn: ' + remainingStr + '</span>';
-                html += '      <button class="cash-action-btn" style="padding:2px 6px;font-size:10px;margin-left:auto;color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:4px;cursor:pointer;" onclick="deleteManagerPickup(\'' + pickupId + '\')" title="Xóa">🗑️</button>';
-                html += '    </div>';
-            }
+        // Ẩn ô nhập khi ngày đã chốt hoặc đang xem ngày khác (saveManagerPickup
+        // cũng chặn, nhưng ẩn hẳn giúp không bấm nhầm rồi mới thấy cảnh báo)
+        var pickupBlocked = data.isClosed || !!_selectedCloseDate;
+        if (pickupBlocked) {
+            html += '    <div class="pos-cash-row" style="color:#94a3b8;font-size:12px;">';
+            html += '      <span>' + (data.isClosed ? '🔒 Đã chốt ngày - không thể nhận tiền' : '📅 Đang xem ngày khác - chuyển về "Hôm nay" để nhận tiền') + '</span>';
+            html += '    </div>';
+        } else {
+            html += '    <div class="pos-cash-row">';
+            html += '      <span>Tiền QL nhận:</span>';
+            html += '      <span class="pos-cash-mgr-pickup">';
+            html += '        <input type="number" class="mgr-pickup-input" id="mgrPickupInput" value="" min="0" placeholder="0">';
+            html += '        <button class="mgr-pickup-btn" onclick="saveManagerPickup()">💾 Lưu</button>';
+            html += '      </span>';
+            html += '    </div>';
         }
-        html += '  </div>';
-        html += '</div>';
     }
 
+    // Lịch sử quản lý nhận tiền hôm nay
+    if (data.pickupHistory && data.pickupHistory.length > 0) {
+        for (var hi = 0; hi < data.pickupHistory.length; hi++) {
+            var ph = data.pickupHistory[hi];
+            var timeStr = '';
+            if (ph.createdAt) {
+                var d = new Date(ph.createdAt);
+                timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+            }
+            var pickupId = ph.id || '';
+            var remainingStr = ph.remainingPosCash !== undefined ? formatMoney(ph.remainingPosCash) : '...';
+            html += '  <div class="pos-cash-row pos-cash-pickup-log">';
+            html += '    <span>🕐 ' + timeStr + '</span>';
+            html += '    <span>-' + formatMoney(ph.amount) + '</span>';
+            html += '    <span style="font-size:11px;color:#64748b;margin-left:8px;">📦 Còn: ' + remainingStr + '</span>';
+            // Nút xoá chỉ dành cho Admin
+            if (isAdmin) {
+                html += '    <button class="cash-action-btn" style="padding:2px 6px;font-size:10px;margin-left:auto;color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:4px;cursor:pointer;" onclick="deleteManagerPickup(\'' + pickupId + '\')" title="Xóa">🗑️</button>';
+            }
+            html += '  </div>';
+        }
+    } else if (!isAdmin) {
+        html += '  <div class="pos-cash-row" style="color:#94a3b8;font-size:12px;padding-left:0;">Chưa có lần nhận tiền nào hôm nay</div>';
+    }
+    html += '  </div>';
+    html += '</div>';
+
+    // Giữ lại trạng thái các ô đang nhập trước khi re-render.
+    // Realtime (manager_cash_pickups / cost_transactions / daily_balances) gọi
+    // render lại rất thường xuyên; innerHTML = html sẽ xoá sạch mọi input, nút Lưu
+    // và số tiền người dùng đang gõ. Với 9 ô đếm tiền, mất focus còn làm bàn phím
+    // Android đóng giữa chừng và onchange không kịp bắn -> số vừa nhập biến mất.
+    var _focusedEl = document.activeElement;
+    var _keepState = [];
+    for (var ci = 0; ci < CASH_DENOMS.length; ci++) {
+        var _cid = 'cashInput_' + CASH_DENOMS[ci].value;
+        var _cel = document.getElementById(_cid);
+        if (_cel) {
+            _keepState.push({ id: _cid, value: _cel.value, focused: (_focusedEl === _cel) });
+        }
+    }
+    var _pickupInputEl = document.getElementById('mgrPickupInput');
+    var _keepPickupValue = _pickupInputEl ? _pickupInputEl.value : '';
+    var _pickupHadFocus = !!(_pickupInputEl && _focusedEl === _pickupInputEl);
+
     container.innerHTML = html;
+
+    for (var ci2 = 0; ci2 < _keepState.length; ci2++) {
+        var _st = _keepState[ci2];
+        var _el2 = document.getElementById(_st.id);
+        if (!_el2) continue;
+        if (_st.value !== '') _el2.value = _st.value;
+        if (_st.focused) {
+            try {
+                _el2.focus();
+                // setSelectionRange có thể ném lỗi với input type=number
+                _el2.setSelectionRange(_st.value.length, _st.value.length);
+            } catch (e) {}
+        }
+    }
+    if (_keepPickupValue) {
+        var _newPickupInput = document.getElementById('mgrPickupInput');
+        if (_newPickupInput) {
+            _newPickupInput.value = _keepPickupValue;
+            if (_pickupHadFocus) {
+                try {
+                    _newPickupInput.focus();
+                    _newPickupInput.setSelectionRange(_keepPickupValue.length, _keepPickupValue.length);
+                } catch (e) {}
+            }
+        }
+    }
 }
 
 function adjustCashCount(denomValue, delta) {
@@ -1049,45 +1259,36 @@ function updateCashGrandTotal() {
         total += denom.value * (cashCounts[denom.value] || 0);
     }
 
-    // Số tiền thực tế
-    // - Nếu đã chốt ngày: hiển thị cashKept đã lưu (không thay đổi theo số đếm)
-    //   Nếu cashKept null (dữ liệu cũ): fallback về expectedClosing
-    // - Nếu chưa chốt: hiển thị tổng đếm được (total)
-    var el = document.getElementById('cashGrandTotal');
-    if (el) {
-        var isClosed = _posCashData && _posCashData.isClosed;
-        var displayTotal;
-        if (isClosed) {
-            displayTotal = (_posCashData.cashKept !== null && _posCashData.cashKept !== undefined) ? _posCashData.cashKept : _posCashData.expectedClosing;
-        } else {
-            displayTotal = total;
-        }
-        el.textContent = formatMoney(displayTotal);
-    }
-
     // Cập nhật chênh lệch realtime (admin)
+    // LƯU Ý: renderCashCounter() render #posCashDiffValue kèm phần trăm, hậu tố
+    // "(đã chốt)" và class cảnh báo. Trước đây hàm này ghi đè bằng con số trần
+    // => mỗi lần bấm +/- là mất hẳn % và cảnh báo ⚠️/🔴.
     var expectedClosing = _posCashData ? _posCashData.expectedClosing : 0;
     var liveDiff = total - expectedClosing;
     var diffEl = document.getElementById('posCashDiffValue');
     if (diffEl) {
-        var diffClass = liveDiff >= 0 ? 'pos-cash-positive' : 'pos-cash-negative';
-        diffEl.textContent = (liveDiff >= 0 ? '+' : '') + formatMoney(liveDiff);
-        diffEl.className = diffClass;
+        var isClosedNow = _posCashData && _posCashData.isClosed;
+        var basePct = expectedClosing || (_posCashData && _posCashData.openingBalance) || 1;
+        var livePct = basePct > 0 ? Math.round(liveDiff / basePct * 10000) / 100 : 0;
+        var liveSuffix = isClosedNow ? ' (đã chốt)' : '';
+        diffEl.textContent = (liveDiff >= 0 ? '+' : '') + formatMoney(liveDiff) +
+            ' (' + (liveDiff >= 0 ? '+' : '') + livePct + '%)' + liveSuffix;
+        diffEl.className = liveDiff < 0 ? 'pos-cash-negative'
+            : (liveDiff > 0 ? 'pos-cash-warning' : 'pos-cash-positive');
     }
 
     // Cập nhật Tổng số tiền đếm được (staff) - realtime khi nhập mệnh giá
     var staffPosCashEl = document.getElementById('staffPosCashValue');
     if (staffPosCashEl) {
+        var staffRow = staffPosCashEl.closest('.pos-cash-row');
         if (total > 0) {
             staffPosCashEl.textContent = formatMoney(total);
             staffPosCashEl.className = 'pos-cash-positive';
             // Hiện dòng nếu đang bị ẩn (lần đầu nhập mệnh giá)
-            var parentRow = staffPosCashEl.closest('.pos-cash-row');
-            if (parentRow) parentRow.style.display = '';
+            if (staffRow) staffRow.style.display = '';
         } else {
             // Ẩn dòng số tiền khi chưa nhập mệnh giá
-            var parentRow = staffPosCashEl.closest('.pos-cash-row');
-            if (parentRow) parentRow.style.display = 'none';
+            if (staffRow) staffRow.style.display = 'none';
         }
     }
 
@@ -1167,62 +1368,203 @@ function fallbackCopy(text) {
     document.body.removeChild(textarea);
 }
 
+// ========== HÀM DÙNG CHUNG CHO PICKUP ==========
+// shopId phải lấy giống hệt listener _initGlobalRealtime() để không ghi/đọc lệch shop.
+// (Trước đây save dùng `getShopId() || 'shop_default'` còn listener dùng `getShopId()`
+//  + `if (!shopId) return` -> lệch shop khi CURRENT_SHOP_ID chưa init.)
+function _getPickupShopId() {
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : null;
+    return shopId || 'shop_default';
+}
+
+// ---------- Hàng đợi ghi lại khi mạng lỗi ----------
+// manager_cash_pickups KHÔNG được sync xuống IndexedDB ở máy khác, nên dbRef.set()
+// là kênh DUY NHẤT để máy nhân viên thấy realtime. Nếu lần ghi đó fail mà chỉ
+// hiện toast "Đã lưu" thì dữ liệu nằm mãi trong máy này -> các máy khác không
+// bao giờ biết. Vì vậy lần ghi lỗi được xếp vào localStorage và thử lại khi
+// có mạng trở lại (window 'online') hoặc khi app mở lại.
+// Key có shopId để đổi shop không đẩy nhầm pickup của shop cũ sang shop mới.
+var _PICKUP_PENDING_MAX = 50;
+
+function _pendingPickupKey() {
+    return 'pos_pending_manager_pickups_' + _getPickupShopId();
+}
+function _loadPendingPickups() {
+    try {
+        return JSON.parse(localStorage.getItem(_pendingPickupKey())) || {};
+    } catch (e) { return {}; }
+}
+function _savePendingPickups(obj) {
+    try {
+        localStorage.setItem(_pendingPickupKey(), JSON.stringify(obj));
+    } catch (e) {}
+}
+function _queuePendingPickup(id, data) {
+    var obj = _loadPendingPickups();
+    obj[id] = data;
+    var keys = [];
+    for (var k in obj) if (obj.hasOwnProperty(k)) keys.push(k);
+    if (keys.length > _PICKUP_PENDING_MAX) {
+        keys.sort(function(a, b) { return (obj[a].createdAt || 0) - (obj[b].createdAt || 0); });
+        while (keys.length > _PICKUP_PENDING_MAX) { delete obj[keys.shift()]; }
+    }
+    _savePendingPickups(obj);
+}
+function _removePendingPickup(id) {
+    var obj = _loadPendingPickups();
+    if (obj[id]) { delete obj[id]; _savePendingPickups(obj); }
+}
+function _flushPendingPickups() {
+    try {
+        if (typeof firebase === 'undefined' || !firebase.database) return;
+        var obj = _loadPendingPickups();
+        var keys = [];
+        for (var k in obj) if (obj.hasOwnProperty(k)) keys.push(k);
+        if (!keys.length) return;
+        var baseRef = firebase.database().ref(_getPickupShopId() + '/manager_cash_pickups');
+        for (var i = 0; i < keys.length; i++) {
+            (function (id) {
+                baseRef.child(id).set(obj[id]).then(function () {
+                    _removePendingPickup(id);
+                }).catch(function () {
+                    // vẫn lỗi (offline) -> giữ lại để thử lần sau
+                });
+            })(keys[i]);
+        }
+    } catch (e) {}
+}
+window.addEventListener('online', _flushPendingPickups);
+
 // ========== QUẢN LÝ: NHẬP TIỀN QUẢN LÝ NHẬN ==========
+// Đây là bản DUY NHẤT của saveManagerPickup (fund-reconciliation.js đã bỏ
+// bản trùng và gọi hàm này).
+var _savingManagerPickup = false;
+
 function saveManagerPickup() {
+    // ---- Kiểm tra dữ liệu TRƯỚC, không đụng cờ chống ghi trùng ----
+    // (nếu khoá cờ ở đây thì một lần bấm sai sẽ khoá nút Lưu, phải chờ tick
+    //  sau mới bấm lại được -> dễ bị hiểu là nút chết)
     var input = document.getElementById('mgrPickupInput');
-    if (!input) return;
-    var amount = parseFloat(input.value) || 0;
+    var amountEl = input || document.getElementById('managerPickupAmount');
+    // Trước đây `if (!input) return;` -> im lặng hoàn toàn, người dùng bấm
+    // nút Lưu mà không thấy gì cả. Giờ báo rõ nguyên nhân.
+    if (!amountEl) {
+        showToast('⚠️ Không tìm thấy ô nhập tiền QL nhận', 'warning');
+        return;
+    }
+    var amount = parseFloat(amountEl.value) || 0;
     if (amount <= 0) {
         showToast('⚠️ Nhập số tiền hợp lệ', 'warning');
         return;
     }
 
-    var today = getTodayDateKey();
-    var now = Date.now();
-    var pickupId = 'pickup_' + now.toString(36) + '_' + Math.random().toString(36).substr(2, 4);
+    // ---- Chặn khi đang xem ngày KHÁC hôm nay ----
+    // Ô nhập hiện cho mọi ngày đang chọn, nhưng record chỉ nên ghi cho hôm nay.
+    // Trước đây luôn ghi getTodayDateKey() trong khi panel đang hiển thị ngày khác
+    // => lần nhận không xuất hiện trong panel đang xem, expectedClosing của ngày
+    // đó không bị trừ, và phiếu in cho ngày đó thiếu khoản nhận.
+    if (_selectedCloseDate) {
+        showToast('⚠️ Không thể nhận tiền khi đang xem ngày khác. Hãy bấm "Hôm nay" trước.', 'warning');
+        return;
+    }
 
-    // Tính số tiền POS còn lại sau khi QL nhận
-    var currentPosCash = _posCashData ? _posCashData.expectedClosing : 0;
-    var remainingPosCash = currentPosCash - amount;
-    if (remainingPosCash < 0) remainingPosCash = 0;
+    // ---- Chặn khi ngày đã chốt ----
+    // Nếu ghi sau khi chốt thì managerPickupTotal tăng nhưng daily_balances đã
+    // khoá cashKept/difference/expectedClosing => phiếu in ra 3 số không cộng được.
+    if (_posCashData && _posCashData.isClosed) {
+        showToast('⚠️ Ngày này đã chốt. Hãy hủy chốt trước khi nhận tiền QL.', 'warning');
+        return;
+    }
 
-    var pickupData = {
-        id: pickupId,
-        amount: amount,
-        dateKey: today,
-        createdAt: now,
-        createdBy: (DB.getCurrentUser && DB.getCurrentUser() && DB.getCurrentUser().id) || window.currentDeviceId || 'admin',
-        note: 'Quản lý nhận tiền mặt',
-        remainingPosCash: remainingPosCash
-    };
+    // ---- Chặn khi dữ liệu két chưa tải xong ----
+    // Nếu không, currentPosCash = 0 và remainingPosCash ghi vĩnh viễn = 0 vào
+    // bản ghi, sau đó 3 hàm in đều ưu tiên field này => phiếu in ra "Còn: 0đ".
+    if (!_posCashData) {
+        showToast('⚠️ Chưa tải được dữ liệu két. Vui lòng thử lại sau.', 'warning');
+        return;
+    }
 
-    // Cập nhật cache ngay lập tức để loadPosCashData() thấy dữ liệu mới
-    // (vì child_added từ Firebase có thể chưa kịp gửi về)
-    if (!_pickupsCache) _pickupsCache = {};
-    _pickupsCache[pickupId] = pickupData;
-    _pickupsCacheLoaded = true;
+    // ---- Chống bấm nhiều lần khi đang ghi ----
+    if (_savingManagerPickup) return;
+    _savingManagerPickup = true;
 
-    // Bước 1: Lưu vào IndexedDB qua DB.create trước -> memoryCache được cập nhật ngay
-    // -> realtime subscription nhận notify -> UI cập nhật
-    if (typeof DB !== 'undefined' && typeof DB.create === 'function') {
-        DB.create('manager_cash_pickups', pickupData).then(function() {
-            // Bước 2: Sau khi DB.create thành công, ghi lên Firebase để đồng bộ các máy khác
-            var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
-            var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
-            dbRef.set(pickupData).catch(function(err) {});
+    try {
+        var today = getTodayDateKey();
+        var now = Date.now();
+        var pickupId = 'pickup_' + now.toString(36) + '_' + Math.random().toString(36).substr(2, 4);
 
-            showToast('✅ Đã lưu: ' + formatMoney(amount), 'success');
-            loadPosCashData();
-        }).catch(function(err) {
-            showToast('❌ Lỗi khi lưu!', 'error');
-        });
-    } else {
-        // Fallback: ghi thẳng lên Firebase nếu DB.create không có sẵn
-        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+        // Tính số tiền POS còn lại sau khi QL nhận
+        var currentPosCash = _posCashData.expectedClosing || 0;
+        var remainingPosCash = currentPosCash - amount;
+        if (remainingPosCash < 0) remainingPosCash = 0;
+
+        var noteEl = document.getElementById('managerPickupNote');
+        var pickupData = {
+            id: pickupId,
+            amount: amount,
+            dateKey: today,
+            date: new Date(now).toISOString(),
+            createdAt: now,
+            createdBy: (typeof DB !== 'undefined' && DB.getCurrentUser && DB.getCurrentUser() && DB.getCurrentUser().id) || window.currentDeviceId || 'admin',
+            note: (noteEl && noteEl.value) ? noteEl.value.trim() : 'Quản lý nhận tiền mặt',
+            remainingPosCash: remainingPosCash
+        };
+
+        // Payload riêng cho toast - KHÔNG thêm field này vào pickupData vì đó là
+        // schema ghi xuống Firebase/IndexedDB, không cần đổi.
+        var _pickupActor = (typeof DB !== 'undefined' && DB.getCurrentUser) ? DB.getCurrentUser() : null;
+        var pickupToastData = {
+            amount: amount,
+            type: 'manager_pickup',
+            paymentMethod: 'cash',
+            note: pickupData.note,
+            items: [],
+            createdByName: _pickupActor ? (_pickupActor.displayName || '') : '',
+            createdByRole: _pickupActor ? (_pickupActor.role || '') : 'admin'
+        };
+
+        var shopId = _getPickupShopId();
         var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
-        dbRef.set(pickupData).catch(function(err) {});
-        showToast('✅ Đã lưu: ' + formatMoney(amount) + ' (chưa đồng bộ)', 'success');
-        loadPosCashData();
+
+        // Cập nhật cache + xoá ô nhập NGAY (optimistic) để phản hồi tức thì,
+        // không phụ thuộc mạng.
+        if (!_pickupsCache) _pickupsCache = {};
+        _pickupsCache[pickupId] = pickupData;
+        // KHÔNG set _pickupsCacheLoaded = true ở đây: nếu cache chưa từng được nạp
+        // đầy đủ, đánh dấu "đã tải" lúc này khiến loadPosCashData() dùng cache
+        // chỉ có 1 pickup vừa tạo -> các lần nhận trước trong ngày biến mất khỏi
+        // panel. Cờ này chỉ được set trong nhánh once('value') của loadPosCashData.
+        amountEl.value = '';
+
+        // Ghi local trước để không mất dữ liệu khi mạng lỗi
+        var localWrite = (typeof DB !== 'undefined' && typeof DB.create === 'function')
+            ? DB.create('manager_cash_pickups', pickupData)
+            : Promise.resolve();
+
+        localWrite.then(function () {
+            // Bắt buộc CHỜ ghi Firebase xong mới báo thành công.
+            return dbRef.set(pickupData);
+        }).then(function () {
+            _savingManagerPickup = false;
+            _removePendingPickup(pickupId);
+            // Toast 1 dòng thống nhất: "QL rút tiền 200.000đ Tiền mặt - Admin · Bình"
+            showActivityToast('🏧', pickupToastData, 'success', 4000);
+            loadPosCashData();
+        }).catch(function (err) {
+            _savingManagerPickup = false;
+            console.error('saveManagerPickup error:', err);
+            // Đã lưu local nhưng chưa đồng bộ được sang máy khác.
+            // Phải báo rõ, không được báo "Đã lưu" như cũ.
+            _queuePendingPickup(pickupId, pickupData);
+            showToast('⚠️ Đã lưu trên máy này nhưng CHƯA đồng bộ sang máy khác. Sẽ thử lại khi có mạng.', 'error');
+            loadPosCashData();
+        });
+    } catch (e) {
+        // Lỗi đồng bộ trong lúc chuẩn bị dữ liệu -> nhả cờ ngay để nút Lưu
+        // không bao giờ bị kẹt.
+        _savingManagerPickup = false;
+        console.error('saveManagerPickup error:', e);
+        showToast('❌ Lỗi khi lưu: ' + (e && e.message ? e.message : 'không xác định'), 'error');
     }
 }
 
@@ -1236,44 +1578,103 @@ function deleteManagerPickup(pickupId) {
         return;
     }
 
-    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
+    // Chặn khi ngày đã chốt: xoá pickup làm managerPickupTotal giảm trong khi
+    // daily_balances đã khoá cashKept/difference/expectedClosing -> phiếu in ra
+    // 3 số không cộng được. Phải hủy chốt trước.
+    if (_posCashData && _posCashData.isClosed) {
+        showToast('⚠️ Ngày này đã chốt. Hãy hủy chốt trước khi xoá khoản nhận.', 'warning');
+        return;
+    }
+
+    var shopId = _getPickupShopId();
 
     // Cập nhật cache ngay lập tức (xóa khỏi _pickupsCache)
     // để loadPosCashData() không còn thấy item đã xóa
-    if (_pickupsCache && _pickupsCache[pickupId]) {
+    var removedItem = (_pickupsCache && _pickupsCache[pickupId]) ? _pickupsCache[pickupId] : null;
+    if (removedItem) {
         delete _pickupsCache[pickupId];
     }
+    // Xoá khỏi hàng đợi ghi lại, nếu không sẽ ghi lại bản đã xoá lên Firebase
+    _removePendingPickup(pickupId);
 
-    // Bước 1: Xóa trên Firebase
+    // Bước 1: Xóa trên Firebase (chờ kết quả để báo đúng)
     var dbRef = firebase.database().ref(shopId + '/manager_cash_pickups/' + pickupId);
-    dbRef.remove().catch(function(err) {
-    });
+    var remoteWrite = dbRef.remove();
 
     // Bước 2: Xóa trong IndexedDB qua DB.remove (nếu có)
-    if (typeof DB !== 'undefined' && typeof DB.remove === 'function') {
-        DB.remove('manager_cash_pickups', pickupId).then(function() {
-            showToast('✅ Đã xóa pickup', 'success');
-            loadPosCashData();
-        }).catch(function(err) {
-            showToast('✅ Đã xóa trên Firebase', 'success');
-            loadPosCashData();
-        });
-    } else {
-        showToast('✅ Đã xóa pickup', 'success');
+    var localWrite = (typeof DB !== 'undefined' && typeof DB.remove === 'function')
+        ? DB.remove('manager_cash_pickups', pickupId)
+        : Promise.resolve();
+
+    Promise.all([localWrite, remoteWrite]).then(function () {
+        // Toast 1 dòng: "xoá QL rút tiền 200.000đ Tiền mặt - Admin · Bình"
+        var _delActor = (typeof DB !== 'undefined' && DB.getCurrentUser) ? DB.getCurrentUser() : null;
+        showActivityToast('↩️', {
+            amount: removedItem ? (removedItem.amount || 0) : 0,
+            type: 'manager_pickup_undo',
+            paymentMethod: 'cash',
+            note: (removedItem && removedItem.note) || '',
+            items: [],
+            createdByName: _delActor ? (_delActor.displayName || '') : '',
+            createdByRole: _delActor ? (_delActor.role || '') : 'admin'
+        }, 'success', 4000);
+    }).catch(function (err) {
+        console.error('deleteManagerPickup error:', err);
+        // Trả lại vào cache nếu xóa trên Firebase thất bại, nếu không máy này sẽ
+        // mất vĩnh viễn pickup khỏi managerPickupTotal trong khi máy khác vẫn thấy
+        // -> expectedClosing lệch giữa các máy và số khi chốt ngày sẽ sai.
+        if (removedItem) {
+            if (!_pickupsCache) _pickupsCache = {};
+            _pickupsCache[pickupId] = removedItem;
+        }
+        showToast('⚠️ Đã xoá trên máy này nhưng chưa xoá được trên máy khác. Sẽ đồng bộ lại sau.', 'error');
+    }).then(function () {
         loadPosCashData();
-    }
+        // Bảng đối soát cuối ngày + danh sách lịch sử cũng hiển thị tiền QL nhận
+        try {
+            if (typeof renderReconciliation === 'function') {
+                renderReconciliation(getTodayDateKey());
+            }
+        } catch (e) {}
+        try {
+            if (typeof renderManagerPickupHistory === 'function') {
+                renderManagerPickupHistory();
+            }
+        } catch (e) {}
+    });
 }
 
 
 // ========== HÀM CHỌN NGÀY TRƯỚC ĐÓ ĐỂ CHỐT ==========
 function selectCloseDate(dateStr) {
     if (!dateStr) return;
-    _selectedCloseDate = dateStr;
-    // Reset bộ đếm tiền khi chuyển ngày
-    for (var i = 0; i < CASH_DENOMS.length; i++) {
-        cashCounts[CASH_DENOMS[i].value] = 0;
+    // Chọn ngày hôm nay => coi như KHÔNG chọn ngày khác (_selectedCloseDate = null).
+    // Lý do: mọi listener realtime đều gate bằng `if (!_selectedCloseDate)`.
+    // Trước đây hàm này luôn gán _selectedCloseDate = dateStr, nên chỉ cần bấm
+    // nút "📅 Hôm nay" hoặc mũi tên "▶" là realtime của manager_cash_pickups /
+    // cost_transactions / daily_balances bị TẮT vĩnh viễn trong phiên đó ->
+    // máy nhân viên không bao giờ thấy quản lý nhận tiền.
+    var wasToday = (_selectedCloseDate === null);
+    var isToday = (dateStr === getTodayDateKey());
+    _selectedCloseDate = isToday ? null : dateStr;
+
+    // Số đếm chỉ lưu theo NGÀY HÔM NAY trong localStorage (xem _getCashCountStorageKey).
+    // => chỉ lưu khi đang RỜI khỏi hôm nay. Nếu lưu vô điều kiện ở mọi lần gọi thì
+    // lúc quay lại hôm nay, cashCounts đang bị zero sẽ ghi đè lên chính số đã lưu
+    // rồi _loadCashCountsFromLocal() đọc ra 0 => mất số đếm.
+    if (wasToday && !isToday) {
+        _saveCashCountsToLocal();
     }
-    loadPosCashData(dateStr);
+
+    // Reset bộ đếm tiền khi chuyển ngày
+    _resetCashCountsInMemory();
+    if (isToday) {
+        // Quay lại hôm nay -> nạp lại số đếm đã lưu.
+        // Trước đây zero cashCounts rồi không nạp lại => panel hiện 0 trong khi
+        // localStorage vẫn còn; bấm +/- một lần là ghi đè vĩnh viễn số đã đếm.
+        _loadCashCountsFromLocal();
+    }
+    loadPosCashData(_selectedCloseDate);
 }
 
 // Lùi/Tiến ngày (delta = -1: lùi, delta = 1: tiến)
@@ -1296,16 +1697,35 @@ function jumpToDate(dateStr) {
 }
 
 // ========== NHÂN VIÊN: CHỐT NGÀY ==========
+// Khoá chống double-tap khi đang ghi chốt ngày
+var _closingDay = false;
 function staffCloseDay() {
+    // Chống double-tap trên Android: thiếu khoá này sẽ ghi 2 lần + gửi 2 tin
+    // nhắn Telegram cảnh báo chốt ca cho quản lý.
+    if (_closingDay) return;
+    _closingDay = true;
+
+    try {
+    // Chặn khi dữ liệu chưa nạp xong. Trước đây dùng object mặc định toàn 0 nên
+    // khi mất mạng/lỗi Firebase sẽ ghi cashKept: 0, difference: số đếm, isClosed: true
+    // -> số dư đầu kỳ của ngày mai thành 0.
+    if (!_posCashData) {
+        showToast('⚠️ Chưa tải được dữ liệu két. Vui lòng thử lại sau.', 'warning');
+        _closingDay = false;
+        return;
+    }
+    if (_posCashData.isClosed) {
+        showToast('ℹ️ Ngày này đã chốt rồi', 'warning');
+        _closingDay = false;
+        return;
+    }
+
     var countedTotal = 0;
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
     }
 
-    var data = _posCashData || {
-        openingBalance: 0, cashRevenue: 0, posCashExpense: 0,
-        managerPickupTotal: 0, expectedClosing: 0
-    };
+    var data = _posCashData;
     var managerPickupTotal = data.managerPickupTotal || 0;
     var expectedClosing = data.expectedClosing || 0;
 
@@ -1321,6 +1741,12 @@ function staffCloseDay() {
 
     // Dùng ngày đã chọn (nếu có), nếu không thì dùng hôm nay
     var closeDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var confirmMsg = '🔒 Xác nhận CHỐT ngày ' + formatDateDisplay(closeDate) + '?\n\n' +
+        '💵 Đếm được: ' + formatMoney(countedTotal) + '\n' +
+        '📐 Dự kiến còn: ' + formatMoney(expectedAfterPickup) + '\n' +
+        '📋 Chênh lệch: ' + (difference >= 0 ? '+' : '') + formatMoney(difference) + '\n\n' +
+        'Sau khi chốt sẽ không thể xóa món / hoàn tác / ghi nợ nếu không hủy chốt.';
+    if (!confirm(confirmMsg)) { _closingDay = false; return; }
 
     // Tạo thời gian chốt ca theo UTC+7
     var now = new Date();
@@ -1338,6 +1764,10 @@ function staffCloseDay() {
         cashKept: countedTotal,
         difference: difference,
         differenceType: differenceType,
+        // Lưu kèm expectedClosing lúc chốt. Nếu không, mọi lần tính lại "Dự kiến còn"
+        // sau này sẽ lệch với con số đã đối chiếu, và fixMissingCashKept() không có
+        // giá trị này để dựng lại cashKept cho ngày cũ.
+        expectedClosing: expectedAfterPickup,
         isClosed: true,
         closedAt: Date.now(),
         closedAtTime: closedAtTime,
@@ -1411,38 +1841,113 @@ function staffCloseDay() {
         }
         
         // Đọc transactions từ IndexedDB (bất đồng bộ)
+        // Cờ chống gửi trùng: .then và .catch của cùng một promise KHÔNG loại trừ
+        // nhau — nếu _processTransactionsAndSend() ném lỗi (kể cả lỗi bên trong
+        // _sendShiftCloseTelegram), .catch sẽ bắt và gửi thêm 1 tin với toàn bộ
+        // thống kê = 0. Nay chỉ gửi đúng 1 lần.
+        var _tgSent = false;
+        var _sendOnce = function (txList) {
+            if (_tgSent) return;
+            _tgSent = true;
+            try {
+                _processTransactionsAndSend(txList || []);
+            } catch (e3) {
+                console.error('Gửi Telegram chốt ca lỗi:', e3);
+            }
+        };
         try {
             if (typeof DB !== 'undefined' && typeof DB.getTransactionsByDate === 'function') {
                 var txPromise = DB.getTransactionsByDate(closeDate);
                 if (txPromise && typeof txPromise.then === 'function') {
-                    txPromise.then(function(txList) {
-                        _processTransactionsAndSend(txList || []);
-                    }).catch(function() {
-                        _processTransactionsAndSend([]);
-                    });
+                    txPromise.then(_sendOnce).catch(function () { _sendOnce([]); });
                 } else if (Array.isArray(txPromise)) {
-                    _processTransactionsAndSend(txPromise);
+                    _sendOnce(txPromise);
                 } else {
-                    _processTransactionsAndSend([]);
+                    _sendOnce([]);
                 }
             } else {
-                _processTransactionsAndSend([]);
+                _sendOnce([]);
             }
         } catch (e) {
-            _processTransactionsAndSend([]);
+            _sendOnce([]);
         }
 
         // Sau khi chốt, quay về ngày hôm nay
         _selectedCloseDate = null;
+        _closingDay = false;
         loadPosCashData();
     }).catch(function(err) {
-        // Vẫn thử gửi Telegram ngay cả khi Firebase lỗi
-        try {
-            _sendShiftCloseTelegram(closeDate, data || {}, countedTotal || 0, managerPickupTotal || 0, expectedAfterPickup || 0, difference || 0, isNegative, isSurplus, closedAtTime || '', 0, 0, 0, 0, 0, 0, 0);
-        } catch(e3) {
-        }
-        showToast('❌ Lỗi khi chốt ngày!', 'error');
+        _closingDay = false;
+        console.error('Chốt ngày lỗi:', err);
+        // KHÔNG gửi Telegram ở nhánh này.
+        // Ngày thực tế chưa được khoá (chỉ showToast cho nhân viên), nên gửi cảnh
+        // báo "🔴 THIẾU ... CẦN KIỂM TRA" cho quản lý sẽ khiến quản lý điều tra
+        // nhầm một ngày vẫn đang mở.
+        showToast('❌ Lỗi khi chốt ngày! Ngày CHƯA được chốt, hãy thử lại.', 'error');
     });
+    } catch (e) {
+        _closingDay = false;
+        console.error('staffCloseDay error:', e);
+        showToast('❌ Lỗi khi chốt ngày: ' + (e && e.message ? e.message : 'không xác định'), 'error');
+    }
+}
+
+// ========== GỬI TELEGRAM (DÙNG CHUNG) ==========
+// Gửi 1 tin nhắn, KHÔNG chặn UI, có báo kết quả cho người dùng.
+// Trả về Promise<boolean>: true = chắc chắn gửi thành công.
+//
+// 3 lỗi trong code cũ đã sửa ở đây:
+//  1. onerror/ontimeout/non-2xx đều gọi lại _sendShiftCloseViaImage GỌI LẦN NỮA
+//     cùng nội dung. Nếu Telegram đã nhận & xử lý xong nhưng response bị rớt
+//     (mạng yếu, WebView bị suspend) thì quản lý nhận 2 tin giống hệt.
+//  2. Telegram trả HTTP 200 kèm {"ok":false} khi bot bị chặn / chat sai, mà
+//     nhánh thành công là if rỗng và catch rỗng => hỏng hoàn toàn mà im lặng.
+//  3. open(..., true) là XHR ĐỒNG BỘ => đóng băng main thread tới 10 giây,
+//     gọi bên trong .then() của Firebase nên UI đứng hình mỗi lần chốt ca.
+function _tgPost(url, params, onDone) {
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);   // tham số thứ 3 = true => BẤT ĐỒNG BỘ
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.timeout = 10000;
+
+        // Chống bắn callback 2 lần (ví dụ ontimeout rồi onerror)
+        var settled = false;
+        function finish(ok, errMsg) {
+            if (settled) return;
+            settled = true;
+            if (onDone) onDone(ok, errMsg);
+        }
+
+        xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                var body = null;
+                try { body = JSON.parse(xhr.responseText); } catch (e) {}
+                if (body && body.ok === false) {
+                    console.error('[Telegram] API trả ok=false:', body.description);
+                    finish(false, body.description || 'Telegram từ chối');
+                } else {
+                    finish(true, null);
+                }
+            } else {
+                var m = 'HTTP ' + xhr.status;
+                try {
+                    var b2 = JSON.parse(xhr.responseText);
+                    if (b2 && b2.description) m = b2.description;
+                } catch (e) {}
+                console.error('[Telegram] HTTP lỗi:', m);
+                finish(false, m);
+            }
+        };
+        // Chỉ báo lỗi, KHÔNG gửi lại bằng Image() -> tránh tin trùng
+        xhr.onerror = function() { finish(false, 'không kết nối được'); };
+        xhr.ontimeout = function() { finish(false, 'hết thời gian chờ'); };
+        xhr.onabort = function() { finish(false, 'đã hủy'); };
+
+        xhr.send(params);
+    } catch (e) {
+        if (onDone) onDone(false, e && e.message ? e.message : 'Lỗi không xác định');
+    }
 }
 
 // ========== GỬI TELEGRAM CHỐT CA (LUỒNG RIÊNG - KO QUA telegram.js) ==========
@@ -1464,8 +1969,16 @@ function _sendShiftCloseTelegram(closeDate, data, countedTotal, managerPickupTot
     }
 
     // Nếu ko có token shift -> bỏ qua (ko fallback về token chính)
-    // Chỉ gửi qua token chốt ca riêng
-    if (!botToken || !chatId) {
+    // BÁO CHO NGƯỜI DÙNG: trước đây return im lặng, nên khi nhân viên thiếu tiền
+    // mà quản lý không hề được báo, và cả nhân viên cũng không biết.
+    if (!botToken) {
+        console.warn('[ShiftClose] Chưa cấu hình token chốt ca - bỏ qua gửi Telegram');
+        showToast('⚠️ Đã chốt nhưng CHƯA gửi được Telegram (chưa cấu hình token chốt ca)', 'warning');
+        return;
+    }
+    if (!chatId) {
+        console.warn('[ShiftClose] Chưa cấu hình Chat ID - bỏ qua gửi Telegram');
+        showToast('⚠️ Đã chốt nhưng CHƯA gửi được Telegram (thiếu Chat ID)', 'warning');
         return;
     }
 
@@ -1511,32 +2024,21 @@ function _sendShiftCloseTelegram(closeDate, data, countedTotal, managerPickupTot
         disable_web_page_preview: true
     });
 
-    // Cách 1: XMLHttpRequest (ưu tiên)
-    try {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', url, true);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.timeout = 10000;
-        xhr.onload = function() {
-            if (xhr.status >= 200 && xhr.status < 300) {
-            } else {
-                // Fallback: thử gửi bằng Image() nếu XHR lỗi
-                _sendShiftCloseViaImage(url, chatId, message);
-            }
-        };
-        xhr.onerror = function() {
-            _sendShiftCloseViaImage(url, chatId, message);
-        };
-        xhr.ontimeout = function() {
-            _sendShiftCloseViaImage(url, chatId, message);
-        };
-        xhr.send(params);
-    } catch (e) {
-        _sendShiftCloseViaImage(url, chatId, message);
-    }
+    // Gửi bằng XHR bất đồng bộ, chỉ thử MỘT lần.
+    // Xem _tgPost() để biết vì sao không fallback trùng nội dung nữa.
+    _tgPost(url, params, function(ok, errMsg) {
+        if (!ok) {
+            console.error('[ShiftClose] Gửi Telegram thất bại:', errMsg);
+            showToast('⚠️ Đã chốt ngày nhưng gửi Telegram thất bại: ' + (errMsg || 'lỗi mạng'), 'warning');
+        }
+    });
 }
 
-// Fallback: gửi Telegram bằng Image() (ko bị CORS, tương thích mọi trình duyệt)
+// Fallback: gửi Telegram bằng Image() (không bị CORS)
+// CẢNH BÁO: chỉ dùng khi XHR thất bại CHẮC CHẮN (nối không tới server) và
+// chỉ 1 lần, vì Image() không phân biệt được HTTP 200 {"ok":false} — nếu gọi
+// ở onload/onerror/ontimeout thì rất dễ gửi trùng 2-3 tin cho quản lý.
+// Cũng không gửi lại khi response đã tới (tránh tin trùng khi mạng rớt).
 function _sendShiftCloseViaImage(url, chatId, message) {
     try {
         // Telegram API hỗ trợ GET method
@@ -1582,28 +2084,12 @@ function _sendShiftCloseUnlock(closeDate) {
         disable_web_page_preview: true
     });
 
-    // Cách 1: XMLHttpRequest (ưu tiên)
-    try {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', url, true);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.timeout = 10000;
-        xhr.onload = function() {
-            if (xhr.status >= 200 && xhr.status < 300) {
-            } else {
-                _sendShiftCloseViaImage(url, chatId, message);
-            }
-        };
-        xhr.onerror = function() {
-            _sendShiftCloseViaImage(url, chatId, message);
-        };
-        xhr.ontimeout = function() {
-            _sendShiftCloseViaImage(url, chatId, message);
-        };
-        xhr.send(params);
-    } catch (e) {
-        _sendShiftCloseViaImage(url, chatId, message);
-    }
+    // Gửi bằng XHR bất đồng bộ, chỉ 1 lần, có báo lỗi (xem _tgPost)
+    _tgPost(url, params, function(ok, errMsg) {
+        if (!ok) {
+            console.error('[ShiftClose] Gửi thông báo hủy chốt thất bại:', errMsg);
+        }
+    });
 }
 
 // ========== ADMIN: HỦY CHỐT NGÀY ==========
@@ -1617,10 +2103,24 @@ function unlockDayClose() {
     var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? DB.getShopId() : 'shop_default';
 
     var dbRef = firebase.database().ref(shopId + '/daily_balances/' + closeDate);
+    // PHẢI xoá luôn các giá trị đã chốt, không chỉ flip isClosed.
+    // Nếu giữ lại cashKept/difference/actualClosing/diffPercent/expectedClosing thì:
+    //  - UI vẫn hiện chênh lệch của lần chốt cũ dù đã hủy chốt
+    //  - cashKept cũ vẫn được dùng làm openingBalance của ngày kế tiếp
+    //    (xem loadPosCashData) cho một ngày đã hủy chốt => số dư đầu kỳ sai
+    //  - expectedClosing cũ làm mọi tính toán "Dự kiến còn" của phiên sau bị đóng băng
     dbRef.update({
         isClosed: false,
         closedAt: null,
+        closedAtTime: null,
         closedBy: null,
+        cashKept: null,
+        actualClosing: null,
+        difference: null,
+        diffPercent: null,
+        differenceType: null,
+        expectedClosing: null,
+        status: null,
         updatedAt: Date.now()
     }).then(function() {
         showToast('🔓 Đã hủy chốt ngày ' + dateLabel, 'success');
@@ -1637,44 +2137,94 @@ function unlockDayClose() {
 }
 
 // ========== TOAST CÓ NÚT TẮT ==========
+// Trước đây tạo element riêng + tự xoá sau 15s, khiến toast này hiện CÙNG LÚC
+// với toast của showToast (2 cái cùng lúc, trái nguyên tắc chỉ 1 toast).
+// Nay chuyển về showToast + chỉ giữ phần "nhiều dòng" khác biệt.
 function showCloseableToast(message, type) {
-    var toast = document.createElement('div');
-    toast.className = 'toast ' + (type || 'success') + ' toast-closeable';
-    toast.style.cursor = 'default';
-
-    var msgSpan = document.createElement('span');
-    msgSpan.style.whiteSpace = 'pre-line';
-    msgSpan.style.flex = '1';
-    msgSpan.style.fontSize = '13px';
-    msgSpan.style.lineHeight = '1.6';
-    msgSpan.textContent = message;
-
-    var closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:18px;cursor:pointer;padding:0 0 0 12px;opacity:0.8;flex-shrink:0;';
-    closeBtn.onclick = function() {
-        if (toast.parentNode) toast.remove();
-    };
-
-    toast.appendChild(msgSpan);
-    toast.appendChild(closeBtn);
-    document.getElementById('toastContainer').appendChild(toast);
-
-    // Auto-dismiss sau 15 giây nếu không tắt
-    setTimeout(function() {
-        if (toast.parentNode) {
-            toast.style.opacity = '0';
-            toast.style.transition = 'opacity 0.5s';
-            setTimeout(function() {
-                if (toast.parentNode) toast.remove();
-            }, 500);
+    var id = showToast(message, type || 'success');
+    if (id && _toastMap[id]) {
+        var toast = _toastMap[id].element;
+        if (toast) {
+            toast.classList.add('toast-closeable');
+            var msgSpan = toast.querySelector('.toast-text');
+            if (msgSpan) {
+                msgSpan.style.whiteSpace = 'pre-line';
+                msgSpan.style.textAlign = 'left';
+                msgSpan.style.fontSize = '13px';
+                msgSpan.style.lineHeight = '1.6';
+                msgSpan.style.flex = '1';
+            }
+            toast.style.cursor = 'default';
+            // Không cho bấm thân toast tắt ở loại này (nhiều dòng, dễ bấm nhầm)
+            toast.onclick = null;
         }
-    }, 15000);
+    }
+    return id;
 }
 
 // ============================================================
 // 2. CÀI ĐẶT ỨNG DỤNG (Settings)
 // ============================================================
+
+/**
+ * Nạp cấu hình quán từ IndexedDB rồi điền vào form Cài đặt.
+ *
+ * Nguồn: DB.getShopConfig() đọc IndexedDB (nhanh, không mạng). Dùng nguồn này
+ * thay vì window.shopConfig vì global có thể chưa sẵn sàng lúc mở tab.
+ * Chỉ điền vào ô đang TRỐNG nên không đè lên thứ admin đang gõ dở.
+ */
+function _loadSettingsConfigFromDB() {
+    if (typeof DB === 'undefined' || typeof DB.getShopConfig !== 'function') return;
+
+    function fill(el, val) {
+        if (!el) return;
+        if (el.value && el.value.length > 0) return;
+        el.value = val == null ? '' : val;
+    }
+
+    DB.getShopConfig().then(function (cfg) {
+        if (!cfg) return;
+
+        // Cờ "cấu hình đã sẵn sàng" - saveLockConfig() dùng để chặn lệnh xoá
+        // khi form còn trống vì chưa tải xong.
+        var hasAny = false;
+        for (var k in cfg) {
+            if (cfg.hasOwnProperty(k) && cfg[k] !== '' && cfg[k] !== null && cfg[k] !== undefined) {
+                hasAny = true; break;
+            }
+        }
+        if (hasAny) window._shopConfigReady = true;
+
+        // Gom vào window.shopConfig để các hàm khác đọc được ngay
+        if (!window.shopConfig) window.shopConfig = {};
+        for (var k2 in cfg) {
+            if (cfg.hasOwnProperty(k2) && window.shopConfig[k2] === undefined) {
+                window.shopConfig[k2] = cfg[k2];
+            }
+        }
+
+        // Telegram
+        fill(document.getElementById('telegramBotToken'), cfg.telegramBotToken);
+        fill(document.getElementById('telegramChatId'), cfg.telegramChatId);
+        fill(document.getElementById('telegramShiftCloseToken'), cfg.telegramShiftCloseToken);
+        fill(document.getElementById('telegramWarningToken'), cfg.telegramWarningToken);
+        fill(document.getElementById('telegramExpenseToken'), cfg.telegramExpenseToken);
+
+        // Khóa bàn & thời gian
+        fill(document.getElementById('settingsLockStartHour'), cfg.lockStartHour);
+        fill(document.getElementById('settingsLockEndHour'), cfg.lockEndHour);
+        fill(document.getElementById('settingsLockEndMinute'), cfg.lockEndMinute);
+        fill(document.getElementById('settingsTableLockHours'), cfg.tableLockHours);
+        fill(document.getElementById('settingsLockPassword'), cfg.lockPassword);
+
+        // Thông tin quán
+        fill(document.getElementById('shopInfoName'), cfg.name);
+        if (cfg.address) fill(document.getElementById('shopInfoAddress'), cfg.address);
+        if (cfg.phone) fill(document.getElementById('shopInfoPhone'), cfg.phone);
+    }).catch(function () {
+        // Không đọc được thì để nguyên form, không đụng gì
+    });
+}
 
 function initSettingsTab() {
     try {
@@ -1725,57 +2275,62 @@ function initSettingsTab() {
         if (staffNoteSection) staffNoteSection.style.display = '';
     }
 
-    // Mặc định thu gọn tất cả collapsible section
+    // Thu gọn các collapsible section CHƯA từng được mở.
+    // Trước đây mỗi lần vào tab đều thu gọn TẤT CẢ, nên người dùng mở "Cấu hình
+    // Telegram" rồi sang tab khác và quay lại thì mọi section đóng lại, mất trạng
+    // thái. Giờ chỉ thu gọn section mà người dùng chưa từng mở trong phiên này.
     var allCollapsible = document.querySelectorAll('.collapsible-section');
     for (var ci = 0; ci < allCollapsible.length; ci++) {
-        allCollapsible[ci].classList.remove('expanded');
-        var body = allCollapsible[ci].querySelector('.settings-section-body');
+        var sec = allCollapsible[ci];
+        if (sec.dataset && sec.dataset.userToggled === '1') continue;
+        sec.classList.remove('expanded');
+        var body = sec.querySelector('.settings-section-body');
         if (body) body.style.display = 'none';
-        var icon = allCollapsible[ci].querySelector('.settings-toggle-icon');
+        var icon = sec.querySelector('.settings-toggle-icon');
         if (icon) {
             icon.textContent = '▶';
         }
     }
 
-    // Load Telegram config từ localStorage
-    var savedToken = localStorage.getItem('telegram_bot_token');
-    var savedChatId = localStorage.getItem('telegram_chat_id');
-    var savedBotName = localStorage.getItem('telegram_bot_name');
-    var savedShiftCloseToken = localStorage.getItem('telegram_shift_close_token');
-    var savedWarningToken = localStorage.getItem('telegram_warning_token');
-    var savedExpenseToken = localStorage.getItem('telegram_expense_token');
-
-    // Khởi tạo window.shopConfig để các hàm gửi Telegram (cả chung và chốt ca) đọc được
-    // Ưu tiên giữ giá trị từ Firebase realtime nếu đã có (tránh ghi đè bằng localStorage rỗng)
-    if (!window.shopConfig) {
-        window.shopConfig = {};
+    // Load Telegram config vào UI
+    //
+    // NGUỒN ĐÚNG là cấu hình quán (window.shopConfig, đã đồng bộ từ Firebase),
+    // KHÔNG phải localStorage.
+    //
+    // LỖI ĐÃ SỬA (bản này mới là bản chạy thật - settings-init.js không được
+    // load trong index.html nên bản ở đó không bao giờ chạy): trước đây đọc
+    // localStorage rồi ghi thẳng xuống ô. Trên máy mới localStorage chưa có gì
+    // nên MỖI LẦN bấm vào tab Cài đặt là 5 ô bị xoá trắng, dù Firebase vẫn còn
+    // token hợp lệ. Hậu quả nặng: admin không thấy token để sửa, buộc phải gõ
+    // lại từ đầu, mà 3 ô token phụ vẫn trống -> lúc bấm Lưu sẽ ghi rỗng lên
+    // Firebase và xoá mất bot chốt ca / cảnh báo / chi phí đang chạy.
+    function _lsOr(key) {
+        try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
     }
-    // Chỉ ghi đè nếu localStorage có giá trị, nếu không giữ nguyên từ Firebase realtime
+    var savedToken = window.shopConfig.telegramBotToken || _lsOr('telegram_bot_token');
+    var savedChatId = window.shopConfig.telegramChatId || _lsOr('telegram_chat_id');
+    var savedShiftCloseToken = window.shopConfig.telegramShiftCloseToken || _lsOr('telegram_shift_close_token');
+    var savedWarningToken = window.shopConfig.telegramWarningToken || _lsOr('telegram_warning_token');
+    var savedExpenseToken = window.shopConfig.telegramExpenseToken || _lsOr('telegram_expense_token');
+
+    // Đồng bộ ngược vào shopConfig để các hàm gửi Telegram đọc được
     if (savedToken) window.shopConfig.telegramBotToken = savedToken;
     if (savedChatId) window.shopConfig.telegramChatId = savedChatId;
     if (savedShiftCloseToken) window.shopConfig.telegramShiftCloseToken = savedShiftCloseToken;
     if (savedWarningToken) window.shopConfig.telegramWarningToken = savedWarningToken;
     if (savedExpenseToken) window.shopConfig.telegramExpenseToken = savedExpenseToken;
 
-    // Load Telegram config vào UI
-    var tokenInput = document.getElementById('telegramBotToken');
-    if (tokenInput) tokenInput.value = savedToken || '';
-    var chatIdInput = document.getElementById('telegramChatId');
-    if (chatIdInput) chatIdInput.value = savedChatId || '';
-    var botNameInput = document.getElementById('telegramBotName');
-    if (botNameInput) botNameInput.value = savedBotName || '';
-
-    // Load shift-close Telegram config vào UI
-    var shiftCloseTokenInput = document.getElementById('telegramShiftCloseToken');
-    if (shiftCloseTokenInput) shiftCloseTokenInput.value = savedShiftCloseToken || '';
-
-    // Load warning Telegram config vào UI
-    var warningTokenInput = document.getElementById('telegramWarningToken');
-    if (warningTokenInput) warningTokenInput.value = savedWarningToken || '';
-
-    // Load expense Telegram config vào UI
-    var expenseTokenInput = document.getElementById('telegramExpenseToken');
-    if (expenseTokenInput) expenseTokenInput.value = savedExpenseToken || '';
+    // Chỉ điền vào ô đang TRỐNG. Admin đang sửa dở thì không được xoá nội dung.
+    function _fillIfEmpty2(el, val) {
+        if (!el) return;
+        if (el.value && el.value.length > 0) return;
+        el.value = val == null ? '' : val;
+    }
+    _fillIfEmpty2(document.getElementById('telegramBotToken'), savedToken);
+    _fillIfEmpty2(document.getElementById('telegramChatId'), savedChatId);
+    _fillIfEmpty2(document.getElementById('telegramShiftCloseToken'), savedShiftCloseToken);
+    _fillIfEmpty2(document.getElementById('telegramWarningToken'), savedWarningToken);
+    _fillIfEmpty2(document.getElementById('telegramExpenseToken'), savedExpenseToken);
 
     // Load staff permission list (đã chuyển sang modal employees.js)
     // Giữ lại để tương thích nếu có gọi từ nơi khác
@@ -1790,13 +2345,25 @@ function initSettingsTab() {
         loadShopInfo();
     }
 
-    // Load ESP32 config
-    if (typeof loadEsp32Config === 'function') {
-        loadEsp32Config();
+    // Load ESP32 config - CHỈ admin.
+    // Nhân viên không được thấy section này (index.html đặt display:none), gọi
+    // loadEsp32Config() cho họ sẽ bắn toast "Đã tải cấu hình ESP32" mỗi lần vào
+    // tab + 1 request Firebase đọc cả mật khẩu WiFi.
+    if (isAdmin && typeof loadEsp32Config === 'function') {
+        loadEsp32Config(true);
     }
 
     // Load lock config
     loadLockConfig();
+
+    // Nạp lại cấu hình từ IndexedDB (đọc local, không chờ mạng).
+    //
+    // initSettingsTab() chạy ngay khi bấm tab. Nếu bấm sớm lúc app còn đang
+    // đồng bộ thì window.shopConfig / window.shopInfo chưa có dữ liệu và form
+    // hiện trống hết. Rồi admin bấm "Lưu cấu hình" là saveLockConfig() ghi null
+    // lên Firebase và XOÁ mật khẩu khóa bàn của cả shop.
+    // Đọc thẳng IndexedDB thì không phụ thuộc thứ tự sự kiện.
+    _loadSettingsConfigFromDB();
 
     // Đồng bộ trạng thái toggle khóa chat
     // Sử dụng isChatLocked() từ messages.js (đã đồng bộ qua Firebase realtime)
@@ -1824,7 +2391,7 @@ function initSettingsTab() {
     var staffNoteInput = document.getElementById('staffNoteInput');
     if (staffNoteInput) {
         try {
-            var savedNote = localStorage.getItem('staff_note');
+            var savedNote = localStorage.getItem(_getStaffNoteKey());
             if (savedNote !== null) {
                 staffNoteInput.value = savedNote;
             }
@@ -1835,10 +2402,24 @@ function initSettingsTab() {
     }
 }
 
+// Key ghi chú nhân viên: gắn theo user + shop.
+// Trước đây dùng 'staff_note' chung cho tất cả => mọi nhân viên dùng chung máy
+// hoặc trình duyệt ghi đè lên nhau, dù UI ghi "Ghi chú của bạn".
+function _getStaffNoteKey() {
+    var userId = 'guest';
+    try {
+        if (typeof DB !== 'undefined' && DB.getCurrentUser && DB.getCurrentUser()) {
+            userId = DB.getCurrentUser().id || DB.getCurrentUser().username || 'guest';
+        }
+    } catch (e) {}
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? (DB.getShopId() || 'shop_default') : 'shop_default';
+    return 'staff_note_' + shopId + '_' + userId;
+}
+
 // Lưu ghi chú nhân viên vào localStorage (gọi từ oninput)
 function saveStaffNote(value) {
     try {
-        localStorage.setItem('staff_note', value || '');
+        localStorage.setItem(_getStaffNoteKey(), value || '');
     } catch(e) {}
 }
 
@@ -1873,12 +2454,32 @@ function handleLoadAllData() {
     }
     
     // Gọi forceSyncFromFirebase - admin sẽ tải 31 ngày, employee tải ngày hiện tại
+    //
+    // Thêm timeout: forceSyncFromFirebase() await Promise.all của nhiều fullSync
+    // (mỗi cái gọi once('value')). Nếu mất mạng giữa chừng thì promise treo
+    // vô hạn => nút kẹt vĩnh viễn ở "⏳ Đang tải..." không có đường thoát.
+    var _syncFinished = false;
+    var _syncTimeout = setTimeout(function () {
+        if (_syncFinished) return;
+        _syncFinished = true;
+        statusEl.textContent = '❌ Tải quá 60s không xong. Kiểm tra mạng rồi thử lại.';
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = '📥 Tải toàn bộ dữ liệu';
+    }, 60000);
+
     DB.forceSyncFromFirebase().then(function() {
+        if (_syncFinished) return;
+        _syncFinished = true;
+        clearTimeout(_syncTimeout);
         statusEl.textContent = '✅ Hoàn tất! Đã tải lại toàn bộ dữ liệu từ Firebase.';
         statusEl.style.color = '#22c55e';
         btn.disabled = false;
         btn.textContent = '📥 Tải toàn bộ dữ liệu';
     }).catch(function(err) {
+        if (_syncFinished) return;
+        _syncFinished = true;
+        clearTimeout(_syncTimeout);
         if (err && err.message === 'Offline') {
             statusEl.textContent = '❌ Không có kết nối mạng';
         } else {
@@ -1890,29 +2491,45 @@ function handleLoadAllData() {
     });
 }
 
-function savePrinterIp() {
-    var input = document.getElementById('settingsPrinterIp');
-    if (!input) return;
-    var ip = input.value.trim();
-    if (!ip) {
-        showToast('⚠️ Vui lòng nhập địa chỉ IP', 'warning');
-        return;
-    }
-    localStorage.setItem('printer_ip', ip);
-    showToast('✅ Đã lưu địa chỉ máy in', 'success');
-}
-
+// ========== MÁY IN ==========
+// GHI CHÚ QUAN TRỌNG VỀ `printer_ip`
+// ----------------------------------
+// `printer_ip` là cấu hình SỐT / KHÔNG DÙNG trong app hiện tại:
+//  - KHÔNG có ô nhập `settingsPrinterIp` trong bất kỳ file .html nào (đã kiểm
+//    tra index.html, takeaway.html, pos.html) → savePrinterIp() luôn return sớm,
+//    nên localStorage['printer_ip'] KHÔNG BAO GIỜ được ghi.
+//  - Không mã nào đọc giá trị này khi in.
+//  - Luồng in thật (print.js) gọi `Android.printSunmi(base64)`. Máy in Sunmi
+//    VFD tích hợp tự in qua cổng nội bộ, KHÔNG cần IP.
+//
+// Vì vậy testPrint() cũ hiện toast "📡 Đã gửi lệnh in thử đến <ip>" dù không
+// hề gửi lệnh nào (nó gọi window.AppBridge.printTest — cầu nối AppBridge
+// không tồn tại trong app, app dùng Android.*). Người dùng tin là máy in đã
+// nhận lệnh trong khi thực tế không in gì. Thông báo sai tệ hơn im lặng.
+//
+// Sửa: bỏ hẳn cặp hàm chết, dùng lại testSunmiService() sẵn có trong print.js
+// (kiểm tra đúng cầu nối Android.checkSunmiPrinter và báo cáo thật).
+// Nếu sau này app thật sự cần in qua IP mạng thì phải sửa cả phía Android:
+// thêm method nhận IP và truyền IP vào Android.printSunmi(base64, ip).
+// TUYỆT ĐỐI KHÔNG tự thêm tham số vào Android.printSunmi() — cầu nối
+// JavascriptInterface của Android khớp method theo cả tên lẫn số tham số,
+// thêm tham số sẽ khiến method không tìm thấy và MẤT KHÔNG in được.
 function testPrint() {
-    var ip = localStorage.getItem('printer_ip');
-    if (!ip) {
-        showToast('⚠️ Chưa có địa chỉ máy in', 'warning');
+    if (typeof testSunmiService === 'function') {
+        testSunmiService();
         return;
     }
-    // Gửi lệnh in thử qua Android bridge
-    if (window.AppBridge && typeof window.AppBridge.printTest === 'function') {
-        window.AppBridge.printTest(ip);
+    // Chỉ xảy ra nếu print.js chưa load — báo đúng tình trạng, không báo thành công
+    if (typeof Android !== 'undefined' && typeof Android.checkSunmiPrinter === 'function') {
+        try {
+            var parsed = JSON.parse(Android.checkSunmiPrinter());
+            showToast(parsed.status === 'ok' ? '✅ Máy in sẵn sàng' : '⚠️ Máy in chưa kết nối',
+                      parsed.status === 'ok' ? 'success' : 'warning');
+        } catch (e) {
+            showToast('❌ Lỗi kiểm tra máy in', 'error');
+        }
     } else {
-        showToast('📡 Đã gửi lệnh in thử đến ' + ip, 'info');
+        showToast('❌ Không có cầu nối máy in (Android bridge). Chỉ in được trên app Android đã cài bridge.', 'error');
     }
 }
 
@@ -1944,45 +2561,64 @@ function loadShopInfo() {
         addressEl.value = window.shopInfo.address || '';
         phoneEl.value = window.shopInfo.phone || '';
     } else {
-        nameEl.value = '';
-        addressEl.value = '';
-        phoneEl.value = '';
+        // CHƯA có dữ liệu -> KHÔNG xoá ô nhập.
+        // Trước đây set về '' ở đây, nên nếu người dùng mở tab sớm (shop_info
+        // chưa tải xong) rồi gõ thì thông tin vừa nhập bị xoá mất.
+        // Để nguyên giá trị đang có trên ô.
     }
 }
 
 function saveShopInfo() {
-    var name = document.getElementById('shopInfoName').value.trim();
-    var address = document.getElementById('shopInfoAddress').value.trim();
-    var phone = document.getElementById('shopInfoPhone').value.trim();
+    var name = _settingsInputValue('shopInfoName');
+    var address = _settingsInputValue('shopInfoAddress');
+    var phone = _settingsInputValue('shopInfoPhone');
 
     if (!name) {
         showToast('⚠️ Vui lòng nhập tên quán', 'warning');
         return;
     }
 
-    var data = {
-        id: 'shop_info',
+    // Ghi thẳng lên node info/{shopId} (cùng cấp với name/code) - giống saveLockConfig.
+    //
+    // Trước đây dùng DB.create('info', data, 'shop_info') -> tạo MỘT RECORD THỨ HAI
+    // trong objectStore 'info' (vì id lấy từ tham số 3). Trong khi pos-app.js:329
+    // đọc shopInfo = DB.getAll('info')[0] -> lấy record shop_config chứ không phải
+    // record vừa ghi. Hậu quả: địa chỉ/SĐT không bao giờ đọc lại được, tên quán
+    // không lên header, và record này dễ bị mất khi có ai đó thay cả node info.
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? (DB.getShopId() || 'shop_default') : (localStorage.getItem('current_shop_id') || 'shop_default');
+    var fbRef = firebase.database().ref(shopId + '/info');
+
+    fbRef.update({
         name: name,
         address: address,
         phone: phone,
-        updatedAt: new Date().toISOString()
-    };
-
-    DB.create('info', data, 'shop_info').then(function() {
-        window.shopInfo = data;
+        updatedAt: Date.now()
+    }).then(function() {
+        // Cập nhật biến trong RAM để UI giữ nguyên, không cần F5
+        if (!window.shopInfo) window.shopInfo = { id: 'shop_info' };
+        window.shopInfo.name = name;
+        window.shopInfo.address = address;
+        window.shopInfo.phone = phone;
         showToast('✅ Đã lưu thông tin quán', 'success');
     }).catch(function(err) {
+        console.error('saveShopInfo error:', err);
         showToast('❌ Lỗi lưu thông tin quán', 'error');
     });
 }
 
 function clearShopInfo() {
     if (!confirm('Xóa thông tin quán?')) return;
-    DB.remove('info', 'shop_info').then(function() {
-        window.shopInfo = null;
+    var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? (DB.getShopId() || 'shop_default') : (localStorage.getItem('current_shop_id') || 'shop_default');
+    var fbRef = firebase.database().ref(shopId + '/info');
+    fbRef.update({ address: '', phone: '' }).then(function() {
+        if (window.shopInfo) {
+            window.shopInfo.address = '';
+            window.shopInfo.phone = '';
+        }
         loadShopInfo();
         showToast('🗑️ Đã xóa thông tin quán', 'info');
     }).catch(function(err) {
+        console.error('clearShopInfo error:', err);
         showToast('❌ Lỗi xóa thông tin quán', 'error');
     });
 }
@@ -2044,12 +2680,15 @@ function toggleExpenseTokenVisibility() {
 }
 
 function testShiftCloseTelegram() {
-    var token = localStorage.getItem('telegram_shift_close_token');
-    var chatId = localStorage.getItem('telegram_chat_id');
+    // Đọc theo _tgConfig() (Firebase trước, localStorage sau) - xem giải thích ở
+    // hàm đó. Trước đây chỉ đọc localStorage nên trên máy mới nút này luôn báo
+    // "Chưa có cấu hình Telegram" dù token chốt ca có trên Firebase.
+    var token = _tgConfig('telegramShiftCloseToken');
+    var chatId = _tgConfig('telegramChatId');
     if (!token) {
         showToast('⚠️ Chưa có token chốt ca, dùng token chính để thử', 'warning');
-        token = localStorage.getItem('telegram_bot_token');
-        chatId = localStorage.getItem('telegram_chat_id');
+        token = _tgConfig('telegramBotToken');
+        chatId = _tgConfig('telegramChatId');
         if (!token || !chatId) {
             showToast('⚠️ Chưa có cấu hình Telegram nào', 'warning');
             return;
@@ -2089,19 +2728,41 @@ function testShiftCloseTelegram() {
     xhr.send();
 }
 
+// Đọc giá trị input, trả về '' nếu element không tồn tại.
+// Bắt buộc: #telegramBotName KHÔNG có trong bất kỳ HTML nào, đọc thẳng
+// .value sẽ ném TypeError và làm nút "💾 Lưu cấu hình" chết hoàn toàn
+// (không ghi gì, không có toast, chỉ có lỗi trong console).
+function _settingsInputValue(id) {
+    var el = document.getElementById(id);
+    return el ? (el.value || '').trim() : '';
+}
+
 function saveTelegramConfig() {
-    var token = document.getElementById('telegramBotToken').value.trim();
-    var chatId = document.getElementById('telegramChatId').value.trim();
-    var botName = document.getElementById('telegramBotName').value.trim();
+    var token = _settingsInputValue('telegramBotToken');
+    var chatId = _settingsInputValue('telegramChatId');
+    // #telegramBotName không tồn tại trong index.html -> _settingsInputValue trả ''
+    var botName = _settingsInputValue('telegramBotName');
+
+    // 3 token phụ: ô trống thì LẤY LẠI giá trị đang có, không phải để trống.
+    //
+    // Trước đây để trống rồi ghi '' lên Firebase, xoá mất bot chốt ca / cảnh
+    // báo / chi phí đang chạy. Giờ ô trống = "không đổi", giữ nguyên giá trị
+    // cũ. Muốn xoá thì bấm nút 🗑️ Xóa.
+    function _valOrKeep(inputId, configKey) {
+        var v = _settingsInputValue(inputId);
+        if (v) return v;
+        var cfg = window.shopConfig || {};
+        return cfg[configKey] || '';
+    }
 
     // Shift-close token (không bắt buộc)
-    var shiftCloseToken = document.getElementById('telegramShiftCloseToken').value.trim();
+    var shiftCloseToken = _valOrKeep('telegramShiftCloseToken', 'telegramShiftCloseToken');
 
     // Warning token (không bắt buộc) - dùng chung Chat ID
-    var warningToken = document.getElementById('telegramWarningToken').value.trim();
+    var warningToken = _valOrKeep('telegramWarningToken', 'telegramWarningToken');
 
     // Expense token (không bắt buộc) - dùng chung Chat ID
-    var expenseToken = document.getElementById('telegramExpenseToken').value.trim();
+    var expenseToken = _valOrKeep('telegramExpenseToken', 'telegramExpenseToken');
 
     if (!token || !chatId) {
         showToast('⚠️ Vui lòng nhập Bot Token và Chat ID cho thông báo chung', 'warning');
@@ -2114,26 +2775,15 @@ function saveTelegramConfig() {
         localStorage.setItem('telegram_bot_name', botName);
     }
 
-    // Lưu shift-close token
-    if (shiftCloseToken) {
-        localStorage.setItem('telegram_shift_close_token', shiftCloseToken);
-    } else {
-        localStorage.removeItem('telegram_shift_close_token');
-    }
-
-    // Lưu warning token (dùng chung Chat ID)
-    if (warningToken) {
-        localStorage.setItem('telegram_warning_token', warningToken);
-    } else {
-        localStorage.removeItem('telegram_warning_token');
-    }
-
-    // Lưu expense token (dùng chung Chat ID)
-    if (expenseToken) {
-        localStorage.setItem('telegram_expense_token', expenseToken);
-    } else {
-        localStorage.removeItem('telegram_expense_token');
-    }
+    // Lưu 3 token phụ.
+    //
+    // Ô trống KHÔNG đồng nghĩa "xoá". Trước đây ô trống thì removeItem,
+    // cộng với việc các ô này không được nạp lại từ Firebase, nên chỉ cần
+    // lỡ tay bấm Lưu là mất luôn bot chốt ca / cảnh báo / chi phí trên máy
+    // này. Muốn xoá thì dùng nút 🗑️ Xóa.
+    if (shiftCloseToken) localStorage.setItem('telegram_shift_close_token', shiftCloseToken);
+    if (warningToken) localStorage.setItem('telegram_warning_token', warningToken);
+    if (expenseToken) localStorage.setItem('telegram_expense_token', expenseToken);
 
     // Cập nhật biến global trong telegram.js nếu có
     if (typeof window.TELEGRAM_BOT_TOKEN !== 'undefined') {
@@ -2156,23 +2806,54 @@ function saveTelegramConfig() {
     // Ghi lên Firebase để đồng bộ
     var shopId = localStorage.getItem('current_shop_id') || 'shop_default';
     var fbRef = firebase.database().ref(shopId + '/info');
-    fbRef.update({
-        telegramBotToken: token,
-        telegramChatId: chatId,
-        telegramShiftCloseToken: shiftCloseToken || '',
-        telegramWarningToken: warningToken || '',
-        telegramExpenseToken: expenseToken || ''
-    }).catch(function(err) {
-    });
 
+    // PHẢI chờ Firebase trả lời rồi mới báo thành công.
+    // Trước đây showToast('✅ Đã lưu') chạy đồng bộ, còn .catch rỗng nuốt lỗi
+    // => mất mạng / bị từ chối quyền thì vẫn báo đã lưu, localStorage đã có token
+    // nên máy này "chạy được" còn máy khác thì không đồng bộ => phân kỳ dữ liệu
+    // mà không có cách phát hiện.
     var statusEl = document.getElementById('telegramConfigStatus');
-    if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình Telegram';
-    showToast('✅ Đã lưu cấu hình Telegram', 'success');
+    if (statusEl) statusEl.textContent = '⏳ Đang lưu...';
+
+    // FIX: trước đây luôn ghi cả 3 token phụ, kể cả khi ô đang trống ->
+    // ghi chuỗi rỗng lên Firebase và XOÁ MẤT bot chốt ca / cảnh báo / chi phí
+    // đang chạy tốt. Tệ hơn: ô phụ không được nạp lại nên admin không thấy
+    // giá trị cũ, không lấy lại được sau khi đã ghi đè.
+    // Nay chỉ ghi trường nào thực sự có nội dung.
+    var payload = {
+        telegramBotToken: token,
+        telegramChatId: chatId
+    };
+    if (shiftCloseToken) payload.telegramShiftCloseToken = shiftCloseToken;
+    if (warningToken) payload.telegramWarningToken = warningToken;
+    if (expenseToken) payload.telegramExpenseToken = expenseToken;
+
+    fbRef.update(payload).then(function() {
+        if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình Telegram';
+        showToast('✅ Đã lưu cấu hình Telegram', 'success');
+    }).catch(function(err) {
+        console.error('saveTelegramConfig error:', err);
+        if (statusEl) statusEl.textContent = '❌ Lỗi khi lưu lên máy chủ';
+        showToast('❌ Lỗi khi lưu cấu hình Telegram! Chỉ lưu tạm trên máy này.', 'error');
+    });
+}
+
+// Lấy cấu hình Telegram theo đúng thứ tự ưu tiên:
+//   1. window.shopConfig - nguồn từ Firebase, đúng và có trên mọi máy
+//   2. localStorage       - cache cũ, chỉ có trên máy đã từng bấm Lưu
+//
+// Trước đây chỉ đọc localStorage. Trên máy mới localStorage rỗng nên nút
+// "Gửi thử" luôn báo "Chưa có cấu hình Telegram" dù Firebase có token hợp lệ,
+// khiến admin tưởng cấu hình hỏng.
+function _tgConfig(key) {
+    var cfg = window.shopConfig || {};
+    if (cfg[key]) return cfg[key];
+    try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
 }
 
 function testTelegramConfig() {
-    var token = localStorage.getItem('telegram_bot_token');
-    var chatId = localStorage.getItem('telegram_chat_id');
+    var token = _tgConfig('telegramBotToken');
+    var chatId = _tgConfig('telegramChatId');
     if (!token || !chatId) {
         showToast('⚠️ Chưa có cấu hình Telegram', 'warning');
         return;
@@ -2220,12 +2901,39 @@ function clearTelegramConfig() {
     localStorage.removeItem('telegram_warning_token');
     localStorage.removeItem('telegram_expense_token');
 
-    document.getElementById('telegramBotToken').value = '';
-    document.getElementById('telegramChatId').value = '';
-    document.getElementById('telegramBotName').value = '';
-    document.getElementById('telegramShiftCloseToken').value = '';
-    document.getElementById('telegramWarningToken').value = '';
-    document.getElementById('telegramExpenseToken').value = '';
+    // Xoá ô nhập. Dùng helper vì #telegramBotName không tồn tại trong HTML
+    // -> đọc .value trực tiếp sẽ ném TypeError, làm dừng giữa chừng nên
+    // warningToken/expenseToken còn nguyên giá trị trên UI.
+    var _ids = ['telegramBotToken', 'telegramChatId', 'telegramBotName',
+                'telegramShiftCloseToken', 'telegramWarningToken', 'telegramExpenseToken'];
+    for (var _i = 0; _i < _ids.length; _i++) {
+        var _el = document.getElementById(_ids[_i]);
+        if (_el) _el.value = '';
+    }
+
+    // Xoá luôn biến đang dùng. Nếu chỉ xoá localStorage + UI thì telegram.js
+    // vẫn đọc window.shopConfig và tiếp tục gửi tin bằng token cũ tới khi F5.
+    if (window.shopConfig) {
+        window.shopConfig.telegramBotToken = '';
+        window.shopConfig.telegramChatId = '';
+        window.shopConfig.telegramShiftCloseToken = '';
+        window.shopConfig.telegramWarningToken = '';
+        window.shopConfig.telegramExpenseToken = '';
+    }
+
+    // Xoá trên Firebase để các máy khác cũng ngừng gửi
+    try {
+        var shopId = (typeof DB !== 'undefined' && DB.getShopId) ? (DB.getShopId() || 'shop_default') : (localStorage.getItem('current_shop_id') || 'shop_default');
+        firebase.database().ref(shopId + '/info').update({
+            telegramBotToken: '',
+            telegramChatId: '',
+            telegramShiftCloseToken: '',
+            telegramWarningToken: '',
+            telegramExpenseToken: ''
+        }).catch(function(err) {
+            console.error('clearTelegramConfig error:', err);
+        });
+    } catch (e) {}
 
     var statusEl = document.getElementById('telegramConfigStatus');
     if (statusEl) statusEl.textContent = '🗑️ Đã xóa cấu hình Telegram';
@@ -2238,7 +2946,11 @@ function clearTelegramConfig() {
 
 function loadLockConfig() {
     try {
-        var info = window.shopInfo || {};
+        // Cấu hình khóa nằm trong window.shopConfig, KHÔNG phải window.shopInfo.
+        // saveLockConfig() ghi các field này lên node info/{shopId} và chính
+        // _updateShopInfoUI() cũng feed từ shop_config. Đọc window.shopInfo sẽ ra
+        // rỗng nếu record info đầu tiên không phải shop_config.
+        var info = window.shopConfig || window.shopInfo || {};
         var startHourInput = document.getElementById('settingsLockStartHour');
         if (startHourInput) startHourInput.value = info.lockStartHour !== undefined ? info.lockStartHour : '';
 
@@ -2298,12 +3010,42 @@ function saveLockConfig() {
     // Ghi trực tiếp lên Firebase để đảm bảo đúng path
     var shopId = localStorage.getItem('current_shop_id') || 'shop_default';
     var fbRef = firebase.database().ref(shopId + '/info');
+
+    // Ô rỗng => ghi null để XOÁ giá trị đã lưu.
+    // Trước đây `if (startHour) updates.x = ...` nên xoá ô không ghi gì cả,
+    // không có cách gỡ mật khẩu / reset về mặc định.
+    //
+    // NHƯNG phải chặn trường hợp nguy hiểm: form chưa kịp nạp xong mà admin
+    // bấm Lưu, lúc đó MỌI ô đều trống và lệnh này sẽ xoá sạch cấu hình trên
+    // Firebase (kể cả mật khẩu mở khoá bàn) chỉ với một cú bấm.
+    var _allEmpty = !startHour && !endHour && !endMinute && !tableLockHours && !lockPassword;
+    if (_allEmpty && !window._shopConfigReady) {
+        // Form mở ra lúc app còn đang đồng bộ nên mọi ô đều trống. Bấm Lưu lúc
+        // này sẽ ghi null lên Firebase và xoá sạch cấu hình khóa bàn của shop.
+        showToast('⚠️ Cấu hình chưa tải xong. Vui lòng đợi rồi thử lại, hoặc tải lại trang.', 'warning');
+        return;
+    }
+
     var updates = {};
-    if (startHour) updates.lockStartHour = parseInt(startHour, 10);
-    if (endHour) updates.lockEndHour = parseInt(endHour, 10);
-    if (endMinute) updates.lockEndMinute = parseInt(endMinute, 10);
-    if (tableLockHours) updates.tableLockHours = parseInt(tableLockHours, 10);
-    if (lockPassword) updates.lockPassword = lockPassword;
+    updates.lockStartHour = startHour ? parseInt(startHour, 10) : null;
+    updates.lockEndHour = endHour ? parseInt(endHour, 10) : null;
+    updates.lockEndMinute = endMinute ? parseInt(endMinute, 10) : null;
+    updates.tableLockHours = tableLockHours ? parseInt(tableLockHours, 10) : null;
+    updates.lockPassword = lockPassword ? lockPassword : null;
+
+    // Có giá trị nào bị xoá thì hỏi lại trước, không xoá âm thầm.
+    var _willClear = [];
+    if (!startHour) _willClear.push('giờ mở');
+    if (!endHour) _willClear.push('giờ đóng');
+    if (!endMinute) _willClear.push('phút');
+    if (!tableLockHours) _willClear.push('giờ ngồi');
+    if (!lockPassword) _willClear.push('mật khẩu');
+    if (_willClear.length > 0) {
+        if (!confirm('Bạn sẽ XOÁ các mục sau khỏi cấu hình:\n• ' + _willClear.join('\n• ') +
+                     '\n\nBàn đã khóa sẽ không mở được nữa. Xác nhận xoá?')) {
+            return;
+        }
+    }
 
     fbRef.update(updates).then(function() {
         // Cập nhật shopInfo và shopConfig ngay lập tức
@@ -2313,9 +3055,18 @@ function saveLockConfig() {
         if (window.shopConfig) {
             for (var k in updates) window.shopConfig[k] = updates[k];
         }
+        var cleared = [];
+        if (!startHour) cleared.push('giờ mở');
+        if (!endHour) cleared.push('giờ đóng');
+        if (!endMinute) cleared.push('phút');
+        if (!tableLockHours) cleared.push('giờ ngồi');
+        if (!lockPassword) cleared.push('mật khẩu');
         var statusEl = document.getElementById('lockConfigStatus');
-        if (statusEl) statusEl.textContent = '✅ Đã lưu cấu hình khóa bàn & thời gian';
-        showToast('✅ Đã lưu cấu hình khóa bàn & thời gian', 'success');
+        var msg = cleared.length
+            ? '✅ Đã lưu (xoá: ' + cleared.join(', ') + ')'
+            : '✅ Đã lưu cấu hình khóa bàn & thời gian';
+        if (statusEl) statusEl.textContent = msg;
+        showToast(msg, 'success');
     }).catch(function(err) {
         showToast('❌ Lỗi lưu cấu hình', 'error');
     });
@@ -2359,32 +3110,31 @@ function deleteStaff(staffId, staffName) {
 // ============================================================
 // 7. ESCAPE HELPER
 // ============================================================
-
-function escapeJsString(str) {
-    if (!str) return '';
-    return str.replace(/\\/g, '\\\\')
-              .replace(/'/g, "\\'")
-              .replace(/"/g, '\\"')
-              .replace(/\n/g, '\\n')
-              .replace(/\r/g, '\\r');
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&')
-              .replace(/</g, '<')
-              .replace(/>/g, '>')
-              .replace(/"/g, '"')
-              .replace(/'/g, '&#039;');
-}
+// escapeHtml và escapeJsString: KHÔNG khai báo lại ở đây.
+// Nguồn duy nhất là pos-app.js (load thứ 3, sớm hơn settings.js).
+// Lý do phải gỡ: settings.js load SAU nên bản ở đây ghi đè bản ở pos-app.js.
+// Bản escapeHtml ở đây còn NGHIÊM TRỌNG HƠN: replace(/&/g,'&') là identity cho
+// & < > " -> không escape gì cả, chỉ dấu nháy đơn là đúng. Nghĩa là mọi lời gọi
+// escapeHtml() trong settings.js (2856, 3472, 3492, 3625...) và trong toàn app
+// đều KHÔNG escape. Tên bàn / tên khách / tên món chứa ký tự HTML sẽ phá vỡ UI.
 
 // ============================================================
 // 4. SO SÁNH PHIÊN BẢN (Version Compare)
 // ============================================================
 
 function compareVersions(v1, v2) {
-    var parts1 = v1.split('.').map(Number);
-    var parts2 = v2.split('.').map(Number);
+    function toParts(v) {
+        var s = String(v === undefined || v === null ? '' : v).trim();
+        // Bỏ tiền tố 'v' và hậu tố pre-release (vd '1.2.0-beta.2')
+        if (s.charAt(0) === 'v' || s.charAt(0) === 'V') s = s.substring(1);
+        var main = s.split('-')[0].split('+')[0];
+        return main.split('.').map(function (n) {
+            var x = parseInt(n, 10);
+            return isNaN(x) ? 0 : x;
+        });
+    }
+    var parts1 = toParts(v1);
+    var parts2 = toParts(v2);
     for (var i = 0; i < Math.max(parts1.length, parts2.length); i++) {
         var n1 = parts1[i] || 0;
         var n2 = parts2[i] || 0;
@@ -2392,6 +3142,75 @@ function compareVersions(v1, v2) {
         if (n1 < n2) return -1;
     }
     return 0;
+}
+
+// ========== CẬP NHẬT ỨNG DỤNG TỪ GITHUB ==========
+// Các hàm này được gọi bằng onclick từ pos.html / mangdi.html (section
+// "Cài đặt ứng dụng"). Trước đây pos.html/mangdi.html có nút gọi tới
+// checkUpdateNow / saveGitHubToken / clearSkipVersion nhưng KHÔNG hàm nào tồn tại
+// => bấm là ReferenceError, im lặng không hiện gì.
+var _githubTokenKey = 'pos_github_token';
+var _skipVersionKey = 'pos_skip_version';
+
+function saveGitHubToken() {
+    var input = document.getElementById('settingsGithubToken');
+    if (!input) {
+        showToast('⚠️ Không tìm thấy ô nhập GitHub Token', 'warning');
+        return;
+    }
+    var token = (input.value || '').trim();
+    try {
+        if (token) {
+            localStorage.setItem(_githubTokenKey, token);
+            showToast('✅ Đã lưu GitHub Token', 'success');
+        } else {
+            localStorage.removeItem(_githubTokenKey);
+            showToast('🗑️ Đã xoá GitHub Token', 'info');
+        }
+    } catch (e) {
+        showToast('❌ Lỗi lưu GitHub Token', 'error');
+    }
+}
+
+function clearSkipVersion() {
+    try {
+        localStorage.removeItem(_skipVersionKey);
+        showToast('🗑️ Đã bỏ bỏ qua phiên bản', 'info');
+    } catch (e) {
+        showToast('❌ Lỗi xoá', 'error');
+    }
+}
+
+function checkUpdateNow() {
+    var token = '';
+    try { token = localStorage.getItem(_githubTokenKey) || ''; } catch (e) {}
+
+    if (typeof fetch !== 'function') {
+        showToast('❌ Trình duyệt không hỗ trợ', 'error');
+        return;
+    }
+
+    showToast('⏳ Đang kiểm tra cập nhật...', 'info');
+    fetch('https://api.github.com/repos/Datkep92/pos2018/releases/latest', {
+        headers: token ? { Authorization: 'token ' + token } : {}
+    }).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+    }).then(function (rel) {
+        var remoteVer = (rel && (rel.tag_name || rel.name)) || '';
+        if (!remoteVer) throw new Error('Không đọc được phiên bản');
+        remoteVer = String(remoteVer).replace(/^v/i, '');
+
+        var currentVer = (typeof CURRENT_APP_VERSION !== 'undefined') ? CURRENT_APP_VERSION : '0';
+        if (compareVersions(remoteVer, currentVer) > 0) {
+            showToast('🆕 Có phiên bản mới: ' + remoteVer, 'info');
+        } else {
+            showToast('✅ Bạn đang dùng bản mới nhất', 'success');
+        }
+    }).catch(function (err) {
+        console.error('checkUpdateNow error:', err);
+        showToast('❌ Lỗi kiểm tra cập nhật: ' + (err && err.message ? err.message : 'không xác định'), 'error');
+    });
 }
 
 // ============================================================
@@ -2548,8 +3367,10 @@ function saveEsp32Config() {
 
 /**
  * Tải cấu hình ESP32 từ Firebase và điền vào form
+ * @param {boolean} silent - true thì không hiện toast thành công (dùng khi
+ *   tự động nạp lúc mở tab, tránh bắn toast mỗi lần vào tab Settings)
  */
-function loadEsp32Config() {
+function loadEsp32Config(silent) {
     var statusEl = document.getElementById('esp32ConfigStatus');
     if (statusEl) statusEl.textContent = '⏳ Đang tải...';
 
@@ -2588,7 +3409,7 @@ function loadEsp32Config() {
             var updated = config.updatedAt ? ' (cập nhật: ' + new Date(config.updatedAt).toLocaleString('vi-VN') + ')' : '';
             statusEl.textContent = '✅ Đã tải cấu hình' + updated;
         }
-        showToast('✅ Đã tải cấu hình ESP32', 'success');
+        if (!silent) showToast('✅ Đã tải cấu hình ESP32', 'success');
     }).catch(function(err) {
         if (statusEl) statusEl.textContent = '❌ Lỗi: ' + err.message;
         showToast('❌ Lỗi tải cấu hình ESP32', 'error');
@@ -2634,39 +3455,63 @@ function clearIndexedDB() {
                  '• Trang sẽ tự động tải lại để đồng bộ từ Firebase\n\n' +
                  'Tiếp tục?')) return;
 
+    // Khoá chống bấm 2 lần: hàm này xoá dữ liệu rồi reload, bấm lại giữa chừng
+    // sẽ chạy lại từ đầu.
+    if (clearIndexedDB._busy) return;
+    clearIndexedDB._busy = true;
+
     showToast('⏳ Đang xóa cache...', 'info', 0);
 
-    // Xóa IndexedDB
+    // Đóng connection IndexedDB trước. Nếu không, chính app đang giữ connection
+    // sẽ chặn deleteDatabase -> request bị block và KHÔNG BAO GIỜ hoàn tất,
+    // trong khi trang reload sau 500ms giết luôn request đó => cache không bị xoá
+    // dù confirm và toast đều nói đã xoá.
+    try {
+        if (typeof DB !== 'undefined' && typeof DB.closeLocalDB === 'function') {
+            DB.closeLocalDB();
+        }
+    } catch (e) {}
+
+    // Tên database thật (xem db.js: STORE_NAME = 'pos_data')
+    var KNOWN_DBS = ['pos_data', 'posDB', 'PosDB', 'pos_db', 'firebase', 'firebase-db'];
+
+    function _deleteAll(names, done) {
+        var pending = names.length;
+        if (pending === 0) { done(); return; }
+        var finished = false;
+        names.forEach(function(n) {
+            if (!n) { if (--pending === 0 && !finished) { finished = true; done(); } return; }
+            var req;
+            try { req = indexedDB.deleteDatabase(n); } catch (e) {
+                if (--pending === 0 && !finished) { finished = true; done(); }
+                return;
+            }
+            // Phải chờ onsuccess/onerror. onblocked = có tab khác đang mở DB này.
+            req.onsuccess = req.onerror = req.onblocked = function() {
+                if (--pending === 0 && !finished) { finished = true; done(); }
+            };
+        });
+        // Chốt treo nếu trình duyệt không bắn callback nào
+        setTimeout(function() { if (!finished) { finished = true; done(); } }, 3000);
+    }
+
+    function _reload() {
+        // location.reload(true) đã lỗi thời, mọi trình duyệt hiện đại bỏ qua tham số
+        location.reload();
+    }
+
     if (window.indexedDB && indexedDB.databases) {
         indexedDB.databases().then(function(list) {
-            list.forEach(function(db) {
-                if (db.name) {
-                    indexedDB.deleteDatabase(db.name);
-                }
-            });
-            // Force reload sau khi xóa
-            setTimeout(function() {
-                location.reload(true);
-            }, 500);
+            var names = list.map(function(db) { return db && db.name; }).filter(Boolean);
+            // Luôn gộp tên DB thật vào, phòng khi indexedDB.databases() không liệt kê đủ
+            KNOWN_DBS.forEach(function(n) { if (names.indexOf(n) === -1) names.push(n); });
+            _deleteAll(names, _reload);
         }).catch(function() {
-            // Fallback: xóa các database phổ biến của POS
-            var names = ['posDB', 'PosDB', 'pos_db', 'firebase', 'firebase-db'];
-            names.forEach(function(n) {
-                indexedDB.deleteDatabase(n);
-            });
-            setTimeout(function() {
-                location.reload(true);
-            }, 500);
+            _deleteAll(KNOWN_DBS, _reload);
         });
     } else {
-        // Fallback cho trình duyệt cũ không hỗ trợ indexedDB.databases()
-        var names = ['posDB', 'PosDB', 'pos_db', 'firebase', 'firebase-db'];
-        names.forEach(function(n) {
-            indexedDB.deleteDatabase(n);
-        });
-        setTimeout(function() {
-            location.reload(true);
-        }, 500);
+        // Trình duyệt cũ không hỗ trợ indexedDB.databases() (Firefox, Safari, iOS 12)
+        _deleteAll(KNOWN_DBS, _reload);
     }
 }
 
@@ -2767,6 +3612,53 @@ function showActiveTablesModal() {
     });
 }
 
+// Gắn thông tin quán vào dữ liệu phiếu đối soát (cho header máy in)
+function _addShopHeaderToReport(reportData) {
+    var shop = null;
+    if (typeof window.shopInfo !== 'undefined' && window.shopInfo) shop = window.shopInfo;
+    else if (typeof shopInfo !== 'undefined' && shopInfo) shop = shopInfo;
+    if (shop) {
+        reportData.storeName = shop.name || null;
+        reportData.storeAddress = shop.address || null;
+        reportData.storePhone = shop.phone || null;
+    }
+    return reportData;
+}
+
+// ========== PHIẾU QL NHẬN TIỀN ==========
+// Dựng dữ liệu phiếu 1 lần, dùng chung cho xem trước / in / sao chép.
+function _buildManagerPickupReport(data, targetDate, dateLabel, currentPosCash) {
+    var rows = [];
+    rows.push(['Số dư đầu kỳ', formatMoney(data.openingBalance || 0)]);
+    rows.push(['Doanh thu tiền mặt', formatMoney(data.cashRevenue || 0)]);
+    rows.push(['Chi phí Két POS', '-' + formatMoney(data.posCashExpense || 0)]);
+    if (data.pickupHistory && data.pickupHistory.length > 0) {
+        for (var i = 0; i < data.pickupHistory.length; i++) {
+            var ph = data.pickupHistory[i];
+            var timeStr = '';
+            if (ph.createdAt) {
+                var d = new Date(ph.createdAt);
+                timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+            }
+            rows.push(['Lần ' + (i + 1) + ' (' + timeStr + ')', '-' + formatMoney(ph.amount || 0)]);
+        }
+    }
+    var footer = [];
+    footer.push(['Tổng QL nhận', formatMoney(data.managerPickupTotal || 0)]);
+    footer.push(['Số tiền còn tại POS', formatMoney(currentPosCash || 0)]);
+
+    return {
+        title: 'PHIẾU QUẢN LÝ NHẬN TIỀN',
+        dateLabel: dateLabel,
+        rows: rows,
+        footer: footer,
+        // In lại phiếu của ngày cũ không được mang dấu thời gian của hôm nay
+        printedAtLabel: (targetDate === getTodayDateKey())
+            ? ('In lúc ' + new Date().toLocaleString('vi-VN'))
+            : ('In lúc ' + new Date().toLocaleString('vi-VN') + ' (phiếu ngày ' + dateLabel + ')')
+    };
+}
+
 // ========== IN PHIẾU QUẢN LÝ NHẬN TIỀN ==========
 function printManagerPickup() {
     var data = _posCashData;
@@ -2779,41 +3671,17 @@ function printManagerPickup() {
     var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(targetDate);
 
-    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
+    // Dựng dữ liệu phiếu MỘT LẦN rồi dùng lại cho cả modal xem trước, in,
+    // và sao chép. Trước đây mỗi hàm tự tính lại từ _posCashData, nên nếu
+    // realtime bắn giữa lúc mở modal và lúc bấm "In" thì giấy in KHÁC modal
+    // đã duyệt (kể cả khác ngày).
     var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
-    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
+    // remainingPosCash là số dư NGAY SAU lần nhận đó, không phải số dư hiện tại.
+    // Dùng expectedClosing (đã trừ QL nhận) làm số dư hiện tại cho đúng.
+    var currentPosCash = data.expectedClosing || 0;
 
-    // Tạo nội dung in
-    var lines = [];
-    lines.push('================================');
-    lines.push('   QUẢN LÝ NHẬN TIỀN');
-    lines.push('   Ngày: ' + dateLabel);
-    lines.push('================================');
-    lines.push('');
-    lines.push('  Số dư đầu kỳ: ' + formatMoney(data.openingBalance || 0));
-    lines.push('');
-
-    for (var i = 0; i < data.pickupHistory.length; i++) {
-        var ph = data.pickupHistory[i];
-        var timeStr = '';
-        if (ph.createdAt) {
-            var d = new Date(ph.createdAt);
-            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-        }
-        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr);
-        lines.push('  QL nhận: ' + formatMoney(ph.amount));
-        lines.push('  ------------------------------');
-    }
-
-    lines.push('');
-    lines.push('  Số tiền QL nhận: ' + formatMoney(data.managerPickupTotal));
-    lines.push('  Số tiền tại POS: ' + formatMoney(currentPosCash));
-    lines.push('');
-    lines.push('================================');
-    lines.push('  ' + new Date().toLocaleString('vi-VN'));
-    lines.push('================================');
-
-    var text = lines.join('\n');
+    var reportData = _buildManagerPickupReport(data, targetDate, dateLabel, currentPosCash);
+    var text = _reportRowsToText(reportData);
 
     // Hiển thị popup modal để in / xem
     var modalId = 'printPickupModal';
@@ -2844,39 +3712,20 @@ function printManagerPickup() {
 }
 
 // Sao chép nội dung phiếu QL nhận tiền
+// Dùng lại đúng hàm dựng dữ liệu với modal xem trước + in, để nội dung
+// sao chép khớp với phiếu đã duyệt.
 function copyPickupContent() {
     var data = _posCashData;
-    if (!data || !data.pickupHistory) return;
-
-    var today = data.dateKey || getTodayDateKey();
-    var dateLabel = formatDateDisplay(today);
-
-    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
-    var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
-    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
-
-    var lines = [];
-    lines.push('QUẢN LÝ NHẬN TIỀN');
-    lines.push('Ngày: ' + dateLabel);
-    lines.push('');
-    lines.push('Số dư đầu kỳ: ' + formatMoney(data.openingBalance || 0));
-    lines.push('');
-
-    for (var i = 0; i < data.pickupHistory.length; i++) {
-        var ph = data.pickupHistory[i];
-        var timeStr = '';
-        if (ph.createdAt) {
-            var d = new Date(ph.createdAt);
-            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-        }
-        lines.push('  Lần ' + (i + 1) + ' - ' + timeStr + ': ' + formatMoney(ph.amount));
+    if (!data || !data.pickupHistory || data.pickupHistory.length === 0) {
+        showToast('⚠️ Không có dữ liệu QL nhận tiền', 'warning');
+        return;
     }
 
-    lines.push('');
-    lines.push('Số tiền QL nhận: ' + formatMoney(data.managerPickupTotal));
-    lines.push('Số tiền tại POS: ' + formatMoney(currentPosCash));
-
-    var text = lines.join('\n');
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+    var currentPosCash = data.expectedClosing || 0;
+    var reportData = _buildManagerPickupReport(data, targetDate, dateLabel, currentPosCash);
+    var text = _reportRowsToText(reportData);
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function() {
@@ -2892,72 +3741,64 @@ function copyPickupContent() {
 // In nội dung phiếu QL nhận tiền qua máy in nhiệt (dùng print.js)
 function printPickupContent(modalId) {
     var data = _posCashData;
-    if (!data || !data.pickupHistory) return;
-
-    var today = data.dateKey || getTodayDateKey();
-    var dateLabel = formatDateDisplay(today);
-
-    // Lấy số tiền POS còn lại sau lần nhận cuối cùng (từ Firebase)
-    var lastPickup = data.pickupHistory[data.pickupHistory.length - 1];
-    var currentPosCash = (lastPickup && lastPickup.remainingPosCash !== undefined) ? lastPickup.remainingPosCash : data.expectedClosing;
-
-    var textLines = [];
-    textLines.push('================================');
-    textLines.push('   QUAN LY NHAN TIEN');
-    textLines.push('   Ngay: ' + dateLabel);
-    textLines.push('================================');
-    textLines.push('');
-    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance || 0));
-    textLines.push('');
-
-    for (var i = 0; i < data.pickupHistory.length; i++) {
-        var ph = data.pickupHistory[i];
-        var timeStr = '';
-        if (ph.createdAt) {
-            var d = new Date(ph.createdAt);
-            timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-        }
-        textLines.push('  Lan ' + (i + 1) + ' - ' + timeStr);
-        textLines.push('  QL nhan: ' + formatMoney(ph.amount));
-        textLines.push('  ------------------------------');
+    if (!data || !data.pickupHistory || data.pickupHistory.length === 0) {
+        showToast('⚠️ Không có dữ liệu QL nhận tiền', 'warning');
+        return;
     }
 
-    textLines.push('');
-    textLines.push('  So tien QL nhan: ' + formatMoney(data.managerPickupTotal));
-    textLines.push('  So tien tai POS: ' + formatMoney(currentPosCash));
-    textLines.push('');
-    textLines.push('================================');
-    textLines.push('  ' + new Date().toLocaleString('vi-VN'));
-    textLines.push('================================');
-
-    var text = textLines.join('\n');
+    var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
+    var dateLabel = formatDateDisplay(targetDate);
+    var currentPosCash = data.expectedClosing || 0;
+    var reportData = _buildManagerPickupReport(data, targetDate, dateLabel, currentPosCash);
 
     // Đóng modal
     closeModal(modalId);
 
-    // Dùng printViaSunmi từ print.js với data.text
-    if (typeof printViaSunmi === 'function') {
-        printViaSunmi({ text: text }).then(function() {
-            showToast('✅ Da in phieu QL nhan tien', 'success');
-        }).catch(function(err) {
-            console.warn('Print pickup failed:', err);
-            showToast('⚠️ In that bai: ' + (err ? err.message : 'Loi'), 'error');
-        });
-    } else {
-        // Fallback: mở cửa sổ in mới
-        var printWindow = window.open('', '_blank', 'width=300,height=600');
-        if (printWindow) {
-            printWindow.document.write('<html><head><title>In phieu QL nhan tien</title>');
-            printWindow.document.write('<style>body{font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;}@media print{@page{margin:0;}}</style>');
-            printWindow.document.write('</head><body>');
-            printWindow.document.write('<pre>' + text + '</pre>');
-            printWindow.document.write('<script>window.onload=function(){window.print();window.close();}<\/script>');
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-        } else {
-            showToast('⚠️ Khong the mo cua so in. Hay sao chep noi dung.', 'warning');
-        }
+    // Dùng builder riêng cho phiếu đối soát, KHÔNG dùng buildReceiptESC
+    // (hàm đó dựng hoá đơn bán hàng: in thêm "Tài cho", bảng món, "Cảm ơn quý khách!")
+    _addShopHeaderToReport(reportData);
+    printReportOrWindow(reportData, 'In phieu QL nhan tien').then(function(ok) {
+        if (ok) showToast('✅ Đã in phiếu QL nhận tiền', 'success');
+    });
+}
+
+// ========== PHIẾU CHỐT CA ==========
+// Dựng dữ liệu 1 lần, dùng chung cho xem trước / in / sao chép.
+function _buildShiftCloseReport(data, targetDate, dateLabel, actualCash, expectedClosing, diff) {
+    var rows = [];
+    if (data.closedAtTime) {
+        rows.push(['Thời gian chốt', data.closedAtTime]);
     }
+    rows.push(['--- DOANH THU ---']);
+    rows.push(['Tổng doanh thu', formatMoney(data.totalRevenue || 0)]);
+    rows.push(['Tiền mặt', formatMoney(data.cashRevenue || 0)]);
+    rows.push(['Chuyển khoản', formatMoney(data.transferAmount || 0)]);
+    rows.push(['Grab', formatMoney(data.grabAmount || 0)]);
+    if (data.debtAmount > 0) {
+        rows.push(['Nợ trong ngày', formatMoney(data.debtAmount)]);
+    }
+    rows.push(['--- THÔNG TIN ---']);
+    rows.push(['Số dư đầu kỳ', formatMoney(data.openingBalance || 0)]);
+    rows.push(['Chi phí Két POS', formatMoney(data.posCashExpense || 0)]);
+    rows.push(['QL nhận', formatMoney(data.managerPickupTotal || 0)]);
+
+    var footer = [];
+    footer.push(['Số tiền đếm được', formatMoney(actualCash || 0)]);
+    footer.push(['Số tiền dự kiến còn', formatMoney(expectedClosing || 0)]);
+    footer.push(['Chênh lệch', (diff >= 0 ? '+' : '') + formatMoney(diff)]);
+
+    // In lại phiếu ngày cũ không được mang dấu thời gian của hôm nay
+    var printTime = targetDate === getTodayDateKey()
+        ? ('In lúc ' + new Date().toLocaleString('vi-VN'))
+        : ('Ngày ' + dateLabel + ' - in lúc ' + new Date().toLocaleString('vi-VN'));
+
+    return {
+        title: 'PHIẾU CHỐT CA',
+        dateLabel: dateLabel,
+        rows: rows,
+        footer: footer,
+        printedAtLabel: printTime
+    };
 }
 
 // ========== IN PHIẾU CHỐT CA CHO NHÂN VIÊN ==========
@@ -2972,7 +3813,14 @@ function printStaffCloseReceipt() {
     var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(targetDate);
 
-    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    // Dùng expectedClosing ĐÃ LƯU lúc chốt (data.expectedClosing), KHÔNG tính
+    // lại từ dữ liệu sống. Nếu tính lại thì 3 số trên phiếu sẽ không cộng được:
+    // actualCash/difference là snapshot lúc chốt, còn expectedClosing tính lại
+    // sẽ khác nếu sau đó có thêm đơn tiền mặt hoặc pickup (nay đã chặn nhưng
+    // dữ liệu cũ vẫn còn).
+    var expectedClosing = (data.expectedClosing !== null && data.expectedClosing !== undefined)
+        ? data.expectedClosing
+        : ((data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0));
     var countedTotal = 0;
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
@@ -2981,49 +3829,8 @@ function printStaffCloseReceipt() {
     var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
     var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
 
-    var textLines = [];
-    textLines.push('================================');
-    textLines.push('   PHIEU CHOT CA');
-    textLines.push('   Ngay: ' + dateLabel);
-    textLines.push('================================');
-    textLines.push('');
-
-    // Thời gian chốt
-    if (data.closedAtTime) {
-        textLines.push('  Thoi gian chot: ' + data.closedAtTime);
-        textLines.push('');
-    }
-
-    textLines.push('  --- DOANH THU ---');
-    textLines.push('  Tong doanh thu: ' + formatMoney(data.totalRevenue));
-    textLines.push('  Tien mat: ' + formatMoney(data.cashRevenue));
-    textLines.push('  Chuyen khoan: ' + formatMoney(data.transferAmount));
-    textLines.push('  Grab: ' + formatMoney(data.grabAmount));
-    if (data.debtAmount > 0) {
-        textLines.push('  No trong ngay: ' + formatMoney(data.debtAmount));
-    }
-    textLines.push('');
-
-    textLines.push('  --- THONG TIN ---');
-    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance));
-    textLines.push('  Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
-    textLines.push('  QL nhan: ' + formatMoney(data.managerPickupTotal));
-    textLines.push('');
-
-    textLines.push('  --- KET QUA CHOT ---');
-    textLines.push('  So tien dem duoc tai POS: ' + formatMoney(actualCash));
-    textLines.push('  So tien du kien con lai: ' + formatMoney(expectedClosing));
-    var diffSign = diff >= 0 ? '+' : '';
-    textLines.push('  Chenh lech: ' + diffSign + formatMoney(diff));
-    textLines.push('');
-
-    textLines.push('================================');
-    // Dùng targetDate để hiển thị ngày in đúng với ngày đã chọn
-    var printTime = targetDate === getTodayDateKey() ? new Date().toLocaleString('vi-VN') : formatDateDisplay(targetDate) + ' 23:59';
-    textLines.push('  ' + printTime);
-    textLines.push('================================');
-
-    var text = textLines.join('\n');
+    var reportData = _buildShiftCloseReport(data, targetDate, dateLabel, actualCash, expectedClosing, diff);
+    var text = _reportRowsToText(reportData);
 
     // Hiển thị popup modal để in / xem trước
     var modalId = 'printStaffCloseModal';
@@ -3056,12 +3863,18 @@ function printStaffCloseReceipt() {
 // In nội dung phiếu chốt ca qua máy in nhiệt
 function printStaffCloseContent(modalId) {
     var data = _posCashData;
-    if (!data || !data.isClosed) return;
+    if (!data || !data.isClosed) {
+        showToast('⚠️ Chưa chốt ngày, không thể in', 'warning');
+        return;
+    }
 
     var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(targetDate);
 
-    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    // Dùng expectedClosing ĐÃ LƯU lúc chốt (xem giải thích ở printStaffCloseReceipt)
+    var expectedClosing = (data.expectedClosing !== null && data.expectedClosing !== undefined)
+        ? data.expectedClosing
+        : ((data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0));
     var countedTotal = 0;
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
@@ -3069,85 +3882,33 @@ function printStaffCloseContent(modalId) {
     var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
     var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
 
-    var textLines = [];
-    textLines.push('================================');
-    textLines.push('   PHIEU CHOT CA');
-    textLines.push('   Ngay: ' + dateLabel);
-    textLines.push('================================');
-    textLines.push('');
-
-    if (data.closedAtTime) {
-        textLines.push('  Thoi gian chot: ' + data.closedAtTime);
-        textLines.push('');
-    }
-
-    textLines.push('  --- DOANH THU ---');
-    textLines.push('  Tong doanh thu: ' + formatMoney(data.totalRevenue));
-    textLines.push('  Tien mat: ' + formatMoney(data.cashRevenue));
-    textLines.push('  Chuyen khoan: ' + formatMoney(data.transferAmount));
-    textLines.push('  Grab: ' + formatMoney(data.grabAmount));
-    if (data.debtAmount > 0) {
-        textLines.push('  No trong ngay: ' + formatMoney(data.debtAmount));
-    }
-    textLines.push('');
-
-    textLines.push('  --- THONG TIN ---');
-    textLines.push('  So du dau ky: ' + formatMoney(data.openingBalance));
-    textLines.push('  Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
-    textLines.push('  QL nhan: ' + formatMoney(data.managerPickupTotal));
-    textLines.push('');
-
-    textLines.push('  --- KET QUA CHOT ---');
-    textLines.push('  So tien dem duoc tai POS: ' + formatMoney(actualCash));
-    textLines.push('  So tien du kien con lai: ' + formatMoney(expectedClosing));
-    var diffSign = diff >= 0 ? '+' : '';
-    textLines.push('  Chenh lech: ' + diffSign + formatMoney(diff));
-    textLines.push('');
-
-    textLines.push('================================');
-    var printTime = targetDate === getTodayDateKey() ? new Date().toLocaleString('vi-VN') : formatDateDisplay(targetDate) + ' 23:59';
-    textLines.push('  ' + printTime);
-    textLines.push('================================');
-
-    var text = textLines.join('\n');
+    var reportData = _buildShiftCloseReport(data, targetDate, dateLabel, actualCash, expectedClosing, diff);
 
     // Đóng modal
     closeModal(modalId);
 
-    // In qua printViaSunmi
-    if (typeof printViaSunmi === 'function') {
-        printViaSunmi({ text: text }).then(function() {
-            showToast('✅ Da in phieu chot ca', 'success');
-        }).catch(function(err) {
-            console.warn('Print staff close failed:', err);
-            showToast('⚠️ In that bai: ' + (err ? err.message : 'Loi'), 'error');
-        });
-    } else {
-        // Fallback: mo cua so in moi
-        var printWindow = window.open('', '_blank', 'width=300,height=600');
-        if (printWindow) {
-            printWindow.document.write('<html><head><title>In phieu chot ca</title>');
-            printWindow.document.write('<style>body{font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;}@media print{@page{margin:0;}}</style>');
-            printWindow.document.write('</head><body>');
-            printWindow.document.write('<pre>' + text + '</pre>');
-            printWindow.document.write('<script>window.onload=function(){window.print();window.close();}<\/script>');
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-        } else {
-            showToast('⚠️ Khong the mo cua so in. Hay sao chep noi dung.', 'warning');
-        }
-    }
+    // Builder riêng cho phiếu đối soát (không bọc trong template hoá đơn bán hàng)
+    _addShopHeaderToReport(reportData);
+    printReportOrWindow(reportData, 'In phieu chot ca').then(function(ok) {
+        if (ok) showToast('✅ Đã in phiếu chốt ca', 'success');
+    });
 }
 
 // Sao chép nội dung phiếu chốt ca
 function copyStaffCloseContent() {
     var data = _posCashData;
-    if (!data || !data.isClosed) return;
+    if (!data || !data.isClosed) {
+        showToast('⚠️ Chưa chốt ngày, không thể sao chép', 'warning');
+        return;
+    }
 
     var targetDate = _selectedCloseDate || data.dateKey || getTodayDateKey();
     var dateLabel = formatDateDisplay(targetDate);
 
-    var expectedClosing = (data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0);
+    // Dùng expectedClosing ĐÃ LƯU lúc chốt (xem giải thích ở printStaffCloseReceipt)
+    var expectedClosing = (data.expectedClosing !== null && data.expectedClosing !== undefined)
+        ? data.expectedClosing
+        : ((data.openingBalance || 0) + (data.cashRevenue || 0) - (data.posCashExpense || 0) - (data.managerPickupTotal || 0));
     var countedTotal = 0;
     for (var i = 0; i < CASH_DENOMS.length; i++) {
         countedTotal += CASH_DENOMS[i].value * (cashCounts[CASH_DENOMS[i].value] || 0);
@@ -3155,35 +3916,9 @@ function copyStaffCloseContent() {
     var actualCash = (data.cashKept !== null && data.cashKept !== undefined) ? data.cashKept : (countedTotal > 0 ? countedTotal : expectedClosing);
     var diff = data.difference !== null && data.difference !== undefined ? data.difference : (actualCash - expectedClosing);
 
-    var lines = [];
-    lines.push('PHIEU CHOT CA');
-    lines.push('Ngay: ' + dateLabel);
-    lines.push('');
-    if (data.closedAtTime) {
-        lines.push('Thoi gian chot: ' + data.closedAtTime);
-        lines.push('');
-    }
-    lines.push('--- DOANH THU ---');
-    lines.push('Tong doanh thu: ' + formatMoney(data.totalRevenue));
-    lines.push('Tien mat: ' + formatMoney(data.cashRevenue));
-    lines.push('Chuyen khoan: ' + formatMoney(data.transferAmount));
-    lines.push('Grab: ' + formatMoney(data.grabAmount));
-    if (data.debtAmount > 0) {
-        lines.push('No trong ngay: ' + formatMoney(data.debtAmount));
-    }
-    lines.push('');
-    lines.push('--- THONG TIN ---');
-    lines.push('So du dau ky: ' + formatMoney(data.openingBalance));
-    lines.push('Chi phi Ket POS: ' + formatMoney(data.posCashExpense));
-    lines.push('QL nhan: ' + formatMoney(data.managerPickupTotal));
-    lines.push('');
-    lines.push('--- KET QUA CHOT ---');
-    lines.push('So tien dem duoc tai POS: ' + formatMoney(actualCash));
-    lines.push('So tien du kien con lai: ' + formatMoney(expectedClosing));
-    var diffSign = diff >= 0 ? '+' : '';
-    lines.push('Chenh lech: ' + diffSign + formatMoney(diff));
-
-    var text = lines.join('\n');
+    // Dùng lại đúng hàm dựng dữ liệu với modal xem trước + in
+    var reportData = _buildShiftCloseReport(data, targetDate, dateLabel, actualCash, expectedClosing, diff);
+    var text = _reportRowsToText(reportData);
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function() {
@@ -3206,6 +3941,9 @@ function toggleSettingsSection(titleEl) {
     var body = section.querySelector('.settings-section-body');
     var icon = titleEl.querySelector('.settings-toggle-icon');
     var isExpanded = section.classList.contains('expanded');
+    // Đánh dấu người dùng đã tự mở/đóng section này, để initSettingsTab
+    // không tự thu gọn lại vào lần vào tab kế tiếp.
+    if (section.dataset) section.dataset.userToggled = '1';
     if (isExpanded) {
         // Thu gọn
         section.classList.remove('expanded');

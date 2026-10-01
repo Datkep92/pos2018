@@ -349,7 +349,12 @@ function reloadAppData() {
             if (typeof renderTables === 'function') renderTables();
             if (typeof renderCustomerList === 'function') renderCustomerList();
             if (typeof renderHistoryByDate === 'function') renderHistoryByDate(currentHistoryDate);
-            if (typeof renderReport === 'function') renderReport(currentReportDate);
+            // Dùng helper chung: currentReportDate chưa được định nghĩa ở đâu cả
+            // (chỉ có trong report.js — file KHÔNG load). Dòng cũ
+            // "if (typeof renderReport === 'function') renderReport(currentReportDate)"
+            // chỉ an toàn nhờ guard typeof; nếu sau này bật tab Báo cáo thì nổ.
+            // Guard thêm vì auth.js load TRƯỚC pos-app.js (nơi định nghĩa helper).
+            if (typeof refreshReportIfAvailable === 'function') refreshReportIfAvailable();
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
             // Load staff list nếu là admin
             if (DB.isAdmin && DB.isAdmin() && typeof DB.getStaffs === 'function') {
@@ -374,26 +379,14 @@ function reloadAppData() {
 }
 
 // ========== QUẢN LÝ NHÂN VIÊN (ADMIN) ==========
-// Đã chuyển hoàn toàn sang employees.js
-// Các hàm dưới đây là fallback tối thiểu, employees.js sẽ ghi đè khi load
-
-function openStaffManager() {
-    // employees.js sẽ ghi đè hàm này khi load
-    // Fallback: mở modal từ employees.js nếu có
-    if (typeof window.openStaffManager === 'function') {
-        window.openStaffManager();
-    } else {
-        showToast('⚠️ Chưa sẵn sàng (employees.js chưa load)', 'warning');
-    }
-}
-
-function renderStaffList(staffs) {
-    // employees.js sẽ ghi đè
-}
-
-function showAddStaffForm() {}
-function hideAddStaffForm() {}
-function handleAddStaff() {}
+// Đã chuyển hoàn toàn sang employees.js.
+//
+// KHÔNG khai báo các hàm ở đây nữa. Bản cũ là fallback rỗng, và employees.js
+// load SAU nên ghi đè toàn bộ -> 4 hàm trong auth.js + openStaffManager đều là
+// code chết. Tệ hơn: openStaffManager() bản cũ tự gọi lại chính nó qua
+// window.openStaffManager -> vô hạn đệ quy nếu employees.js chưa load.
+// Việc quản lý nhân viên giờ chỉ nằm ở employees.js (openStaffManager,
+// empRenderStaffList, empHandleAddStaff...).
 
 // Export global - employees.js sẽ ghi đè các hàm này khi load
 window.initAuth = initAuth;
@@ -403,9 +396,9 @@ window.handleLogout = handleLogout;
 window.showRegisterForm = showRegisterForm;
 window.showLoginForm = showLoginForm;
 window.isAdminUser = isAdminUser;
-window.openStaffManager = openStaffManager;
-window.showAddStaffForm = showAddStaffForm;
-window.hideAddStaffForm = hideAddStaffForm;
-window.handleAddStaff = handleAddStaff;
+// openStaffManager / showAddStaffForm / hideAddStaffForm / handleAddStaff:
+// KHÔNG export ở đây. auth.js load trước employees.js nên window.xxx = hàm rỗng
+// sẽ bị employees.js ghi đè ngay sau đó -> vô nghĩa. Chúng được export từ
+// employees.js (openStaffManager, empHandleAddStaff).
 window.startLockMonitor = startLockMonitor;
 window.stopLockMonitor = stopLockMonitor;

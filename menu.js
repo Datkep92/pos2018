@@ -32,8 +32,8 @@ function openManageCategoryModal() {
             <div class="manage-category-item">
                 <span>${c.icon || '📌'} ${escapeHtml(c.name)}</span>
                 <div class="manage-category-actions">
-                    <button class="btn-small" onclick="editCategory('${c.id}'); closeModal('manageCategoryModal')">✏️</button>
-                    <button class="btn-small" style="background:#dc2626;" onclick="deleteCategory('${c.id}'); closeModal('manageCategoryModal')">🗑️</button>
+                    <button class="btn-small" onclick="menuEditCategory('${c.id}'); closeModal('manageCategoryModal')">✏️</button>
+                    <button class="btn-small" style="background:#dc2626;" onclick="menuDeleteCategory('${c.id}'); closeModal('manageCategoryModal')">🗑️</button>
                 </div>
             </div>
         `).join('');
@@ -181,7 +181,10 @@ async function openCategoryModal() {
     modalEl.style.display = 'flex';
 }
 
-async function editCategory(id) {
+// NOTE: đổi tên từ editCategory -> menuEditCategory để không trùng với
+// editCategory trong inventory-manager.js (file này dùng cho UI quản lý menu riêng,
+// còn inventory-manager.js dùng cho tab "Menu - Tồn kho").
+async function menuEditCategory(id) {
     const cat = menuCategories.find(c => c.id == id);
     if (!cat) return;
     const titleEl = document.getElementById('categoryModalTitle');
@@ -222,7 +225,8 @@ async function saveCategory() {
     }
 }
 
-async function deleteCategory(id) {
+// NOTE: đổi tên từ deleteCategory -> menuDeleteCategory (xem note ở menuEditCategory)
+async function menuDeleteCategory(id) {
     if (menuItems.some(i => i.categoryId == id)) {
         showToast('Danh mục có món, không thể xóa!', 'error');
         return;
@@ -232,7 +236,7 @@ async function deleteCategory(id) {
         await DB.remove('menu_categories', id);
         showToast('Đã xóa danh mục', 'success');
     } catch (err) {
-        console.error("❌ deleteCategory lỗi:", err);
+        console.error("❌ menuDeleteCategory lỗi:", err);
         showToast('Lỗi xóa danh mục!', 'error');
     }
 }
@@ -600,9 +604,9 @@ function openOrderModalWithMenu() {
 window.initMenu = initMenu;
 window.renderMenuManager = renderMenuManager;
 window.openCategoryModal = openCategoryModal;
-window.editCategory = editCategory;
+window.menuEditCategory = menuEditCategory;
 window.saveCategory = saveCategory;
-window.deleteCategory = deleteCategory;
+window.menuDeleteCategory = menuDeleteCategory;
 window.openItemModal = openItemModal;
 window.editItem = editItem;
 window.saveItem = saveItem;
