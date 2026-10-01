@@ -116,10 +116,32 @@ Write-Output "  JDK          : $JavaHome"
 # ---------------------------------------------------------------------
 # Doc / ghi phien ban
 # ---------------------------------------------------------------------
-if ($VersionCode -gt 0) { $Cfg.versionCode = $VersionCode }
-if ($VersionName)       { $Cfg.versionName = $VersionName }
-$VerCode = [int]$Cfg.versionCode
+if ($VersionName) { $Cfg.versionName = $VersionName }
 $VerName = [string]$Cfg.versionName
+
+# So phien ban (versionCode) TINH TU TEN, khong dat tay.
+#
+# Cong thuc PHAI KHOP VOI UpdateChecker.parseVersion trong Java:
+#     major * 10000 + minor * 100 + patch
+#     1.0.0 -> 10000      1.0.1 -> 10001      1.1.0 -> 10100
+#
+# Neu de so phien ban nhieu hon versionCode thi may POS so sanh sai va khong
+# bao gio nhan ban cap nhat. Tinh tu ten loai bo hoan toan nguoi nhap sai.
+function VersionCodeTuTen([string]$name) {
+    $t = $name.Trim()
+    if ($t.StartsWith("v") -or $t.StartsWith("V")) { $t = $t.Substring(1) }
+    $p = $t -split '[.\-]'
+    function N($s) { $v = 0; if ([int]::TryParse($s.Trim(), [ref]$v)) { return $v } else { return 0 } }
+    $major = [Math]::Max(0, (N $p[0]))
+    $minor = 0; if ($p.Count -gt 1) { $minor = [Math]::Min(99, [Math]::Max(0, (N $p[1]))) }
+    $patch = 0; if ($p.Count -gt 2) { $patch = [Math]::Min(99, [Math]::Max(0, (N $p[2]))) }
+    return ($major * 10000) + ($minor * 100) + $patch
+}
+$VerCode = VersionCodeTuTen $VerName
+if ($VersionCode -gt 0 -and $VersionCode -ne $VerCode) {
+    Write-Output "  !! -VersionCode $VersionCode khong khop voi ten '$VerName' (tinh ra $VerCode). Dung $VerCode."
+}
+$Cfg.versionCode = $VerCode
 
 # Ghi lai build-config.json de lan sau nho dung version
 $Cfg | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $AndroidDir "build-config.json") -Encoding UTF8

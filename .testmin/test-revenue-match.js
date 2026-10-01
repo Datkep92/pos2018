@@ -1,5 +1,5 @@
 // =====================================================================
-// SO DOANH THU: employees.js (thuong NV) vs manager.js (bao cao)
+// QUY TAC DOANH THU TINH LUONG (employees.js)
 // Nap code THAT tu pos2018/
 // Chay: node test-revenue-match.js
 // =====================================================================
@@ -8,7 +8,6 @@ var path = require('path');
 var vm = require('vm');
 
 var empSrc = fs.readFileSync(path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'employees.min.js'), 'utf8');
-var mgSrc = fs.readFileSync(path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'manager.js'), 'utf8');
 
 function ex(src, n) {
     var m = new RegExp('function\\s+' + n + '\\s*\\(').exec(src);
@@ -90,27 +89,18 @@ var NEED_E = ['empGetShopId', 'empGetDaysInMonth', '_debounceFirebaseWrite',
 vm.runInContext(NEED_E.map(function (f) { return ex(empSrc, f); }).join('\n\n'), ctxE);
 NEED_E.forEach(function (f) { sbE[f] = vm.runInContext(f, ctxE); });
 
-// Nap manager.js
-var sbM = makeSandbox();
-sbM.managerData = { transactions: [], customers: [], staffs: [] };
-var ctxM = vm.createContext(sbM);
-vm.runInContext('var DRINK_STATS_INITIAL=20; var _drinkStatsAll=[]; var _drinkStatsExpanded=false;' +
-    'var MANAGER_DEBT_LIMIT=30; var _debtListExpanded=false; var _lastDebtBalances=[]; var lowStockDirty=true;', ctxM);
-vm.runInContext(ex(mgSrc, '_toLocalDateStr') + '\n' + ex(mgSrc, '_getRangeMs') + '\n' +
-    ex(mgSrc, '_itemTimeMs') + '\n' + ex(mgSrc, '_buildDayIndex') + '\n' +
-    ex(mgSrc, '_countDaysInMonth') + '\n' + ex(mgSrc, '_getSalaryPeriodOfRange') + '\n' +
-    ex(mgSrc, '_dateStrToMs') + '\n' + ex(mgSrc, 'managerComputeSalaryForRange') + '\n' +
-    ex(mgSrc, 'managerComputeStats'), ctxM);
-sbM.managerComputeStats = vm.runInContext('managerComputeStats', ctxM);
+// ---- GHI CHU ----
+// Ban dau test nay doi chieu employees.js voi manager.js de chung minh mot giao
+// dich chi duoc tinh mot lan (khong khoip tien). manager.js la FILE CHET, khong
+// bao gio duoc nap trong index.html, nen nua "doi chieu" do khong con y nghia.
+// Cac ham _toLocalDateStr / _getRangeMs / managerComputeStats... khong ton tai
+// trong file dang chay (manager-detail.js).
+// Giu lai phan employees.js: day moi la noi tinh tien thuong that su.
 
-console.log('SO DOANH THU: THUONG NHAN VIEN vs BAO CAO QUAN LY');
+console.log('QUY TAC DOANH THU TINH LUONG (employees.js)');
 
 function reset() { TX = []; WRITES = {}; EXISTING = {}; _dbRangeCalls = []; vm.runInContext('_empDailyRevenueCache = {};', ctxE); }
 
-// Doanh thu theo cach manager.js
-function revManager() {
-    return sbM.managerComputeStats(TX, [], [], [], [], new Date(2026, 7, 1), new Date(2026, 7, 31, 23, 59, 59)).revenue;
-}
 // Doanh thu theo cach employees.js (empUpdateDailyRevenue -> daily_revenue)
 function revEmployee(dateKey) {
     vm.runInContext('_empDailyRevenueCache = {};', ctxE);
@@ -141,16 +131,9 @@ var tests = [
             group('KHOI DONG: ' + t.ten);
             reset();
             TX = t.tx;
-            var mRev = revManager();
-            eq('manager.js bao cao', mRev, t.expect);
-            return revEmployee(D).then(function (eRev) {
-                eq('employees.js tinh thuong', eRev, t.expect);
-                if (eRev !== mRev) {
-                    ok('HAI BEN KHONG KHOIP', false,
-                        'chenh lech ' + Math.abs(eRev - mRev) + 'd -> thuong NV sai so voi bao cao');
-                } else {
-                    ok('HAI BEN KHOIP', true);
-                }
+            var eRev = revEmployee(D).then(function (v) { return v; });
+            return eRev.then(function (v) {
+                eq('employees.js tinh thuong', v, t.expect);
             });
         });
     });

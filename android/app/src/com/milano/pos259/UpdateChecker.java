@@ -163,14 +163,38 @@ public class UpdateChecker {
         }
     }
 
-    /** "v1.2.3" -> 3, "v1.10.0" -> 10, ... */
+    /**
+     * "v1.2.3" -> 10203, "v1.10.0" -> 11000
+     *
+     * CONG THUC PHAI KHOP VOI build-apk.ps1 (ham VersionCodeTuTen).
+     * major * 10000 + minor * 100 + patch
+     *
+     * VY SAO KHONG LAY CHI PHAN MAJOR:
+     * Ban dau chi doc parts[0], nghĩa la v1.0.1 va v1.0.0 cung ra 1. May POS
+     * da cai v1.0.0 se SO SANH 1 > 1 = sai va KHONG BAO GIO nhan ban moi -
+     * sua loi xong phai cho may tat het moi ra ban moi.
+     */
     static int parseVersion(String tag) {
         try {
             String t = tag.trim();
             if (t.startsWith("v") || t.startsWith("V")) t = t.substring(1);
             String[] parts = t.split("[.\\-]");
-            // chi lay phan so dau tien: v1.2.3 -> 1
-            return Integer.parseInt(parts[0].trim());
+            int major = Integer.parseInt(parts[0].trim());
+            int minor = parts.length > 1 ? num(parts[1]) : 0;
+            int patch = parts.length > 2 ? num(parts[2]) : 0;
+            // gioi han de tranh tran so khi phan nho >= 100
+            if (major < 0) major = 0;
+            if (minor < 0 || minor > 99) minor = 99;
+            if (patch < 0 || patch > 99) patch = 99;
+            return major * 10000 + minor * 100 + patch;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static int num(String s) {
+        try {
+            return Integer.parseInt(s.trim());
         } catch (Exception e) {
             return 0;
         }

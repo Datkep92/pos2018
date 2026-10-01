@@ -1,7 +1,7 @@
 ﻿{
     "packageName":  "com.milano.pos259",
-    "versionName":  "1.0.0",
-    "versionCode":  1,
+    "versionName":  "1.0.1",
+    "versionCode":  10001,
     "minSdk":  21,
     "targetSdk":  34,
     "compileSdk":  34,
