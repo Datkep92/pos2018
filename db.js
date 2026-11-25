@@ -137,6 +137,10 @@
     firebase.database.ServerValue = _origServerValue;
     
     // Khởi tạo với Firebase config riêng cho POS
+    // Khai báo ở đây (trước initWithCustomConfig) để lời gọi restore cấu hình
+    // ở dưới không bị một lệnh `var _databaseURL = ...` đặt sau đó ghi đè.
+    var _databaseURL = firebaseConfig.databaseURL;
+
     function initWithCustomConfig(customConfig) {
         // Dọn dẹp secondary app cũ nếu có
         if (_secondaryApp) {
@@ -233,21 +237,55 @@
     var _processedKeys = {}; // { collection: { itemId: timestamp } }
     var _PROCESSED_KEYS_TTL = 10000; // 10 giây - đủ để chờ deltaSync hoàn tất
     
-    function _isRecentlyProcessed(collection, key) {
-        if (_processedKeys[collection] && _processedKeys[collection][key]) {
-            var age = Date.now() - _processedKeys[collection][key];
-            if (age < _PROCESSED_KEYS_TTL) {
+    // stamp = mốc thời gian của bản ghi trên server (_syncedAt/updatedAt).
+    // Dedup chỉ được nuột bản CÙNG MỐC. Bản có mốc mới hơn là thay đổi thật
+    // (kể cả khi cùng key vừa được xử lý cách đây vài giây) -> phải đi qua.
+    function _isRecentlyProcessed(collection, key, stamp) {
+        var rec = _processedKeys[collection] ? _processedKeys[collection][key] : null;
+        if (rec) {
+            var when = (typeof rec === 'object' && rec.t) ? rec.t : rec;
+            var recStamp = (typeof rec === 'object' && rec.stamp) ? rec.stamp : 0;
+            if (stamp && (!recStamp || stamp > recStamp)) {
+                // Mốc MỚI HƠN là thay đổi thật từ máy khác, dù cùng key vừa được
+                // xử lý cách đây vài giây -> phải đi qua (cập nhật mốc đã thấy).
+                if (typeof rec === 'object') { rec.stamp = stamp; rec.t = Date.now(); }
+                return false;
+            }
+            if (stamp && recStamp === stamp) return true; // echo cùng bản
+            if (Date.now() - when < _PROCESSED_KEYS_TTL) {
+                if (stamp && typeof rec === 'object') rec.stamp = stamp;
                 return true;
             }
-            // Hết hạn, xóa để tránh memory leak
             delete _processedKeys[collection][key];
         }
         return false;
     }
     
-    function _markProcessed(collection, key) {
+    function _markProcessed(collection, key, stamp) {
         if (!_processedKeys[collection]) _processedKeys[collection] = {};
-        _processedKeys[collection][key] = Date.now();
+        _processedKeys[collection][key] = { t: Date.now(), stamp: stamp || 0 };
+    }
+
+    function _remoteStamp(item) { return (item && (item._syncedAt || item.updatedAt)) || 0; }
+
+    // Quyết định có áp bản ghi từ Firebase vào local hay không.
+    // So mốc thời gian server (_syncedAt), KHÔNG so _version (bộ đếm riêng
+    // từng máy). Bản cũ hơn hoặc cùng mốc thì bỏ qua; bản mới hơn phải qua
+    // dù key vừa được mark trong vòng 10 giây.
+    function _shouldApplyRemote(collection, key, item) {
+        var remoteStamp = _remoteStamp(item);
+        var local = memoryCache[collection] ? memoryCache[collection][key] : null;
+        if (local) {
+            var localStamp = _remoteStamp(local);
+            if (remoteStamp && localStamp && remoteStamp === localStamp) return false;
+            if (remoteStamp && localStamp && remoteStamp < localStamp) return false;
+            // Echo từ chính máy này: local đã có bản tương đương hoặc đang chờ gửi.
+            if (item._syncedBy && item._syncedBy === CURRENT_DEVICE_ID &&
+                remoteStamp <= localStamp) return false;
+            if (item._syncedBy === CURRENT_DEVICE_ID && !localStamp) return false;
+        }
+        if (_isRecentlyProcessed(collection, key, remoteStamp)) return false;
+        return true;
     }
     
     // Cleanup _processedKeys định kỳ - tránh memory leak
@@ -257,7 +295,9 @@
             if (_processedKeys.hasOwnProperty(col)) {
                 for (var key in _processedKeys[col]) {
                     if (_processedKeys[col].hasOwnProperty(key)) {
-                        if (now - _processedKeys[col][key] > _PROCESSED_KEYS_TTL) {
+                        var rec = _processedKeys[col][key];
+                        var recTime = (typeof rec === 'object' && rec.t) ? rec.t : rec;
+                        if (now - recTime > _PROCESSED_KEYS_TTL) {
                             delete _processedKeys[col][key];
                         }
                     }
@@ -313,14 +353,21 @@
             if (!res.committed) {
                 return { ok: false, table: null, reason: 'Ban khong con ton tai tren may chu' };
             }
-            var table = seen || null;
+            // Dùng kết quả THẬT do Firebase trả về sau transaction, không dùng
+            // `seen` (bản đọc trước khi commit). Dùng `seen` khi transaction chạy
+            // lại làm bản local thiếu các thay đổi của lần chạy trước -> mất món.
+            var hasSnapshot = !!(res && res.snapshot && typeof res.snapshot.val === 'function');
+            var committed = hasSnapshot ? res.snapshot.val() : null;
+            var table = hasSnapshot ? (committed ? committed : null) : (seen || null);
             // Đồng bộ máy này với kết quả vừa commit để UI hiển thị đúng
             if (table) {
                 var copy = {};
                 for (var c in table) if (table.hasOwnProperty(c)) copy[c] = table[c];
                 copy.id = String(copy.id !== undefined ? copy.id : tableId);
-                copy.updatedAt = Date.now();
-                copy.updatedBy = CURRENT_DEVICE_ID;
+                if (!hasSnapshot) {
+                    copy.updatedAt = Date.now();
+                    copy.updatedBy = CURRENT_DEVICE_ID;
+                }
                 saveToLocal('tables', copy).then(function () {
                     _notifyLocal('tables', { type: 'changed', item: copy, collection: 'tables' });
                 }).catch(function () { /* IndexedDB lỗi thì realtime vẫn đồng bộ */ });
@@ -552,8 +599,9 @@
     // Dùng REST API shallow=true để tối ưu băng thông
     // Fallback về SDK once('value') nếu REST API lỗi
     
-    // Lưu databaseURL để dùng cho REST API (Firebase Database Reference.toString() không hoạt động)
-    var _databaseURL = firebaseConfig.databaseURL;
+    // _databaseURL đã khai báo ở đầu file. KHÔNG gán lại ở đây: gán lại
+    // sẽ xoá URL của cấu hình custom vừa restore, khiến REST đọc nhầm database
+    // mặc định -> reconcile có thể xoá nhầm dữ liệu của POS đang dùng.
     
     function _getFirebaseKeys(collection) {
         // Xây dựng URL cho REST API shallow=true
@@ -1029,7 +1077,8 @@
         staffs: true,
         cost_categories: true,
         info: true,
-        bonus_fund: true
+        bonus_fund: true,
+        messages: true
     };
     
     var _syncTimer = null;
@@ -2571,12 +2620,27 @@
     // Active listener cho 1 collection (chỉ khi có component cần)
     function _ensureListener(collection, callback, options) {
         if (_activeListeners[collection]) {
-            _activeListeners[collection].refCount++;
-            if (callback) {
+            var existing = _activeListeners[collection];
+            existing.refCount++;
+            var cbExisting = callback;
+            if (cbExisting) {
                 if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-                _localCallbacks[collection].push(callback);
+                _localCallbacks[collection].push(cbExisting);
             }
-            return _activeListeners[collection].unsubFn;
+            var releasedExisting = false;
+            return function() {
+                if (releasedExisting) return;
+                releasedExisting = true;
+                if (cbExisting) {
+                    var cbsExisting = _localCallbacks[collection];
+                    if (cbsExisting) {
+                        var idxExisting = cbsExisting.indexOf(cbExisting);
+                        if (idxExisting >= 0) cbsExisting.splice(idxExisting, 1);
+                    }
+                    cbExisting = null;
+                }
+                _releaseListener(collection);
+            };
         }
         
         // Thêm callback trước
@@ -2673,18 +2737,9 @@
                 updateScheduled = true;
                 setTimeout(_flushUpdate, EMIT_DEBOUNCE_MS);
             };
-            // FIX ĐỒNG BỘ BÀN: bàn là collection DUY NHẤT cố tình bỏ qua so sánh
-            // _version, vì _version là bộ đếm độc lập theo từng thiết bị nên không
-            // so sánh được giữa 2 máy (máy A đang _version=5, máy B mới ghi _version=3
-            // -> dữ liệu hợp lệ của B sẽ bị loài). Nhưng bỏ hẳn kiểm tra thì dữ liệu
-            // CŨ từ máy khác có thể ghi đè bản local MỚI HƠN (mạng lag, IndexedDB
-            // đọc thiếu) -> mất món vừa thêm. So sánh updatedAt giải quyết cả hai.
-            var _acceptRemote = function(key, item) {
-                if (collection !== 'tables') return true;
-                var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-                if (!localItem) return true;
-                return (item.updatedAt || 0) >= (localItem.updatedAt || 0);
-            };
+            // Bàn (tables) cũng đi qua _shouldApplyRemote: so _syncedAt/updatedAt
+            // chứ không so _version (bộ đếm riêng từng máy), nên bản cũ không
+            // ghi đè bản mới dù Firebase bắn lại child_added khi gắn listener.
             handlers.onAdded = function(snapshot) {
                 if (!snapshot.exists()) return;
                 var key = snapshot.key;
@@ -2697,66 +2752,35 @@
                 // toàn bộ collection về chỉ để so sánh key.
                 _markRemoteKeySeen(collection, key);
                 
-                // PHASE 5: Dedup check - tránh xử lý items đã được xử lý gần đây
-                if (_isRecentlyProcessed(collection, key)) return;
-                
                 var src = snapshot.val() || {};
                 var item = { id: key };
                 for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
                 
-                // Xem giải thích ở handlers.onChanged: _version là bộ đếm riêng theo từng
-                // máy, so sánh nó giữa 2 thiết bị sẽ loại vĩnh viễn thay đổi hợp
-                // lệ của máy khác. Chỉ so _syncedAt (mốc thời gian server) và bỏ
-                // qua bản do chính máy này gửi.
-                var localItemAdd = memoryCache[collection] ? memoryCache[collection][key] : null;
-                if (localItemAdd) {
-                    if (item._syncedBy && item._syncedBy === CURRENT_DEVICE_ID) return;
-                    if (localItemAdd._syncedAt && item._syncedAt &&
-                        localItemAdd._syncedAt === item._syncedAt) return;
-                }
+                // Lọc theo mốc server: bỏ echo/cùng mốc/bản cũ, nhưng KHÔNG
+                // nuột bản mới hơn dù key vừa được mark trong vòng 10 giây.
+                if (!_shouldApplyRemote(collection, key, item)) return;
                 
                 if (collection === 'transactions' && memoryCache.transactions && memoryCache.transactions[key]) {
                     var localTx = memoryCache.transactions[key];
                     if (localTx._version >= 1 && !localTx._syncedAt) return;
                 }
                 
-                _markProcessed(collection, key);
+                _markProcessed(collection, key, _remoteStamp(item));
                 saveToLocal(collection, item).then(emitUpdate);
             };
             handlers.onChanged = function(snapshot) {
                 if (!snapshot.exists()) return;
                 var key = snapshot.key;
                 
-                // PHASE 5: Dedup check
-                if (_isRecentlyProcessed(collection, key)) return;
-                
                 var src = snapshot.val() || {};
                 var item = { id: key };
                 for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
                 
-                // _version KHÔNG dùng để so sánh giữa 2 máy.
-                //
-                // _version là bộ đếm riêng theo từng bản ghi và tăng trên máy
-                // đang sửa (update() ghi (old._version||0)+1). Hai máy sửa
-                // cùng một khách: máy A lên _version=5, máy B mới ghi
-                // _version=3. So sánh _version sẽ loại vĩnh viễn mọi thay đổi
-                // hợp lệ của máy B trên máy A, và ngược lại - dữ liệu biến mất
-                // khỏi một máy cho tới lần fullSync/đổi shop sau này.
-                //
-                // Cách đúng với kiến trúc last-write-wins: so sánh MỐC THỜI GIAN
-                // ghi trên server (_syncedAt là ServerValue.TIMESTAMP của
-                // Firebase, nên giống nhau trên mọi máy), chỉ bỏ qua khi bản
-                // đến từ chính máy này (nó đã được ghi vào local rồi).
-                var localItem2 = memoryCache[collection] ? memoryCache[collection][key] : null;
-                if (localItem2) {
-                    // Bản do chính máy này gửi lên -> không cần áp lại.
-                    if (item._syncedBy && item._syncedBy === CURRENT_DEVICE_ID) return;
-                    // Cùng nội dung -> bỏ qua cho khỏi vẽ lại.
-                    if (localItem2._syncedAt && item._syncedAt &&
-                        localItem2._syncedAt === item._syncedAt) return;
-                }
+                // So _syncedAt (mốc server), KHÔNG so _version (bộ đếm riêng
+                // từng máy). Bản mới hơn từ tab khác trên cùng thiết bị vẫn qua.
+                if (!_shouldApplyRemote(collection, key, item)) return;
                 
-                _markProcessed(collection, key);
+                _markProcessed(collection, key, _remoteStamp(item));
                 saveToLocal(collection, item).then(emitUpdate);
             };
             handlers.onRemoved = function(snapshot) {
@@ -2787,7 +2811,24 @@
         _unsubscribeFns[collection].push(unsubFn);
         
         console.log('[Listener] ✅ Active listener cho ' + collection);
-        return unsubFn;
+        // Trả về hàm unsubscribe RIÊNG cho subscriber này: gỡ đúng callback
+        // của nó rồi mới giảm refCount. Trả thẳng unsubFn dùng chung khiến
+        // một bên hủy là gỡ listener trong khi bên kia vẫn đang nghe.
+        var cbNew = callback;
+        var releasedNew = false;
+        return function() {
+            if (releasedNew) return;
+            releasedNew = true;
+            if (cbNew) {
+                var cbsNew = _localCallbacks[collection];
+                if (cbsNew) {
+                    var idxNew = cbsNew.indexOf(cbNew);
+                    if (idxNew >= 0) cbsNew.splice(idxNew, 1);
+                }
+                cbNew = null;
+            }
+            _releaseListener(collection);
+        };
     }
     
     // Giảm refCount, tự động unsubscribe khi không còn ai dùng
@@ -2808,110 +2849,83 @@
 
     var _pollingTimers = {};
     function subscribeWithPolling(collection, callback, intervalSeconds) {
-        intervalSeconds = intervalSeconds || 60; // Mặc định 60 giây
-        if (callback) {
+        intervalSeconds = intervalSeconds || 60;
+        var cbRef = callback;
+        var stopped = false;
+
+        function _registerCallback() {
+            if (!cbRef) return;
             if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-            _localCallbacks[collection].push(callback);
+            if (_localCallbacks[collection].indexOf(cbRef) < 0) _localCallbacks[collection].push(cbRef);
         }
-        
+        function _unregisterCallback() {
+            if (!cbRef) return;
+            var cbs = _localCallbacks[collection];
+            if (cbs) {
+                var idx = cbs.indexOf(cbRef);
+                if (idx >= 0) cbs.splice(idx, 1);
+            }
+            cbRef = null;
+        }
+        function _stopPolling() {
+            if (stopped) return;
+            stopped = true;
+            clearInterval(_pollingTimers[collection]);
+            delete _pollingTimers[collection];
+            _unregisterCallback();
+        }
+        _registerCallback();
+
+        // Đã có timer cho collection này: chỉ gọi ngay nếu có cache,
+        // KHÔNG đăng ký callback lần 2 (trước đây gây render đúp).
         if (_pollingTimers[collection]) {
-            if (callback) {
-                if (memoryCache[collection]) {
-                    var data = [];
-                    for (var key in memoryCache[collection]) {
-                        if (memoryCache[collection].hasOwnProperty(key)) {
-                            data.push(memoryCache[collection][key]);
-                        }
-                    }
-                    if (data.length > 0) {
-                        try { callback(data); } catch(e) { console.error('Polling callback error:', e); }
-                    } else {
-                        console.log('⏳ Polling ' + collection + ': memoryCache empty, registering callback for later');
-                        if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-                        _localCallbacks[collection].push(callback);
-                    }
-                } else {
-                    console.log('⏳ Polling ' + collection + ': memoryCache not ready, registering callback for later');
-                    if (!_localCallbacks[collection]) _localCallbacks[collection] = [];
-                    _localCallbacks[collection].push(callback);
+            if (cbRef && memoryCache[collection]) {
+                var cached = [];
+                for (var key in memoryCache[collection]) {
+                    if (memoryCache[collection].hasOwnProperty(key)) cached.push(memoryCache[collection][key]);
+                }
+                if (cached.length > 0) {
+                    try { cbRef(cached); } catch (e) { console.error('Polling callback error:', e); }
+                    _unregisterCallback();
                 }
             }
-            return function() {
-                clearInterval(_pollingTimers[collection]);
-                delete _pollingTimers[collection];
-            };
+            return _stopPolling;
         }
         
-        var ref = _getDb().ref(CURRENT_SHOP_ID + '/' + collection);
-        
         getSyncMeta(collection).then(function(meta) {
+            if (stopped) return;
             if (meta && meta.maxVersion > 0) {
-                deltaSync(collection);
-            } else {
-                ref.once('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var remote = snapshot.val() || {};
-                    var count = 0;
-                    var maxVersion = 0;
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            var src = remote[key];
-                            var item = { id: key };
-                            for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                            if (item._version === undefined) item._version = 1;
-                            if (item._version > maxVersion) maxVersion = item._version;
-                            saveToLocal(collection, item, 'added');
-                            count++;
-                        }
-                    }
-                    saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: [] });
-                    console.log('📥 Polling loaded ' + collection + ': ' + count + ' items');
-                });
+                deltaSyncByTime(collection);
+                return;
             }
+            var ref = _getDb().ref(CURRENT_SHOP_ID + '/' + collection);
+            ref.once('value', function(snapshot) {
+                if (!snapshot.exists()) return;
+                var remote = snapshot.val() || {};
+                var count = 0;
+                var maxVersion = 0;
+                for (var key in remote) {
+                    if (remote.hasOwnProperty(key)) {
+                        var src = remote[key];
+                        var item = { id: key };
+                        for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
+                        if (item._version === undefined) item._version = 1;
+                        if (item._version > maxVersion) maxVersion = item._version;
+                        saveToLocal(collection, item, 'added');
+                        count++;
+                    }
+                }
+                saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: [] });
+                console.log('📥 Polling loaded ' + collection + ': ' + count + ' items');
+            });
         });
         
         _pollingTimers[collection] = setInterval(function() {
-            if (!isOnline) return;
-            
-            getSyncMeta(collection).then(function(meta) {
-                var localMaxVersion = (meta && meta.maxVersion) || 0;
-                var queryRef = ref.orderByChild('_version').startAt(localMaxVersion + 1);
-                
-                queryRef.once('value', function(snapshot) {
-                    if (!snapshot.exists()) return;
-                    var remote = snapshot.val() || {};
-                    var count = 0;
-                    var newMaxVersion = localMaxVersion;
-                    
-                    for (var key in remote) {
-                        if (remote.hasOwnProperty(key)) {
-                            var src = remote[key];
-                            var item = { id: key };
-                            for (var p in src) if (src.hasOwnProperty(p)) item[p] = src[p];
-                            if (item._version === undefined) item._version = 1;
-                            if (item._version > newMaxVersion) newMaxVersion = item._version;
-                            
-                            var localItem = memoryCache[collection] ? memoryCache[collection][key] : null;
-                            saveToLocal(collection, item, localItem ? 'changed' : 'added');
-                            count++;
-                        }
-                    }
-                    
-                    if (count > 0) {
-                        saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: newMaxVersion, dateKeys: (meta && meta.dateKeys) || [] });
-                        console.log('📥 Polling delta ' + collection + ': ' + count + ' new items');
-                    }
-                });
-            });
-            
-            // P5: _cleanupDeletedIds đã được xóa - child_removed listener xử lý việc xóa realtime
-            // vì nó đã được gọi trong fullSync/deltaSync và có cache riêng
+            if (!isOnline || stopped) return;
+            deltaSyncByTime(collection);
         }, intervalSeconds * 1000);
         
-        return function() {
-            clearInterval(_pollingTimers[collection]);
-            delete _pollingTimers[collection];
-        };
+        return _stopPolling;
     }
     
     function _cleanupOldData() {
@@ -3432,7 +3446,10 @@
             
             ref.once('value', function(snapshot) {
                 if (!snapshot.exists()) {
+                    // TUYỆT ĐỐI không clear local ở đây. Rules từ chối đọc / mạng
+                    // trả rỗng tạm thời từng làm xoá sạch menu, khách, bàn.
                     saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: 0, dateKeys: [] });
+                    _emit(collection + ':synced', { collection: collection, count: 0, timestamp: Date.now() });
                     resolve();
                     return;
                 }
@@ -3456,12 +3473,28 @@
                 
                 var preClear = Promise.resolve();
                 if (isMaster) {
-                    preClear = new Promise(function(clearResolve) {
-                        var tx = localDB.transaction([collection], 'readwrite');
-                        var store = tx.objectStore(collection);
-                        var req = store.clear();
-                        req.onsuccess = function() { clearResolve(); };
-                        req.onerror = function() { clearResolve(); };
+                    // Lưu lại các bản CHƯA lên server (pending/failed) trước khi
+                    // clear store. fullSync từng xoá chúng -> mất đơn/món vừa tạo.
+                    preClear = loadFromLocal(collection).catch(function() { return []; }).then(function(localItems) {
+                        var keep = {};
+                        for (var qi = 0; qi < syncQueue.length; qi++) {
+                            var q = syncQueue[qi];
+                            if (!q || q.collection !== collection || !_queueBelongsToCurrentShop(q)) continue;
+                            if (q.status !== 'pending' && q.status !== 'failed') continue;
+                            var qid = q.targetId !== undefined ? q.targetId : (q.data && q.data.id);
+                            if (qid !== undefined && qid !== null) keep[String(qid)] = true;
+                        }
+                        var protectedItems = [];
+                        for (var li = 0; li < localItems.length; li++) {
+                            if (keep[String(localItems[li].id)]) protectedItems.push(localItems[li]);
+                        }
+                        return new Promise(function(clearResolve) {
+                            var tx = localDB.transaction([collection], 'readwrite');
+                            var store = tx.objectStore(collection);
+                            var req = store.clear();
+                            req.onsuccess = function() { clearResolve(protectedItems); };
+                            req.onerror = function() { clearResolve(protectedItems); };
+                        });
                     });
                 }
                 
@@ -3524,7 +3557,18 @@
                     }
                 }
                 
-                return saveChain.then(function() {
+                return saveChain.then(function(protectedItems) {
+                    // Ghi lại các bản chưa đồng bộ sau khi đã ghi bản server.
+                    var restore = Promise.resolve();
+                    if (protectedItems && protectedItems.length) {
+                        for (var ri = 0; ri < protectedItems.length; ri++) {
+                            (function(protectedItem) {
+                                restore = restore.then(function() { return saveToLocal(collection, protectedItem); });
+                            })(protectedItems[ri]);
+                        }
+                    }
+                    return restore;
+                }).then(function() {
                     // Ghi sync_meta
                     saveSyncMeta(collection, { lastSyncAt: Date.now(), maxVersion: maxVersion, dateKeys: dateKeys });
                     updateMetaOnFirebase(collection, maxVersion);
@@ -4251,6 +4295,12 @@
         }
         _unsubscribeFns = {};
         listeners = {};
+        // Các raw unsubscribe ở trên đã gọi xong; refCount cũ không còn giá trị.
+        // Nếu không xoá, _ensureListener sẽ tưởng listener còn active và không
+        // gắn listener mới cho shop/Firebase config vừa đổi.
+        for (var activeCol in _activeListeners) {
+            if (_activeListeners.hasOwnProperty(activeCol)) delete _activeListeners[activeCol];
+        }
         
         // Hủy tất cả polling timers cũ
         for (var timerCol in _pollingTimers) {
@@ -4324,7 +4374,7 @@ function syncDateBasedOnly() {
                     for (var k = 0; k < requiredKeys.length; k++) {
                         if (!set[requiredKeys[k]]) missing.push(requiredKeys[k]);
                     }
-                    if (missing.length === 0) return deltaSync(collection);
+                    if (missing.length === 0) return deltaSyncByTime(collection);
                     var c2 = Promise.resolve();
                     for (var m = 0; m < missing.length; m++) {
                         (function(dk) {
@@ -4549,6 +4599,9 @@ function initDatabase() {
                             
                             // Xóa dữ liệu local trước khi chuyển sang POS khác
                             return clearLocalData().then(function() {
+                                // Gán shop MỚI trước khi init config/gắn listener,
+                                // nếu không listener sẽ vẫn trỏ vào shop cũ.
+                                setShopId(shopId);
                                 // Khởi tạo custom Firebase config nếu có
                                 if (result.firebaseConfig) {
                                     localStorage.setItem('pos_firebase_config', JSON.stringify(result.firebaseConfig));
@@ -4613,6 +4666,8 @@ function initDatabase() {
                     // QUAN TRỌNG: Xóa dữ liệu local TRƯỚC khi chuyển sang custom Firebase config
                     // để tránh dữ liệu cũ từ default Firebase bị mix với dữ liệu mới
                     return clearLocalData().then(function() {
+                        // Gán shop mới TRƯỚC _reinitializeSubscriptions().
+                        setShopId(shopId);
                         // Khởi tạo custom Firebase config nếu có
                         if (result.firebaseConfig) {
                             localStorage.setItem('pos_firebase_config', JSON.stringify(result.firebaseConfig));
@@ -4692,6 +4747,7 @@ function initDatabase() {
                     localStorage.setItem('pos_session', JSON.stringify(currentUser));
                     localStorage.removeItem('pos_firebase_config');
                     setShopId(shopId);
+                    _reinitializeSubscriptions();
                     
                     return currentUser;
                 });

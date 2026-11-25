@@ -244,7 +244,13 @@ for (var i = 0; i < FILES.length; i++) {
     fs.writeFileSync(tmp, out, 'utf8');
     var okSyntax = true;
     try {
-        child.execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' });
+        // Trên iPhone, `node` là script wrapper thêm --jitless --no-expose-wasm.
+        // process.execPath trỏ thẳng node.real, nên nếu không truyền lại cờ từ
+        // process.execArgv thì `--check` bị lỗi và build bỏ qua TẤT CẢ file JS.
+        var nodeFlags = process.execArgv.filter(function(a) {
+            return a.indexOf('--') === 0;
+        });
+        child.execFileSync(process.execPath, nodeFlags.concat(['--check', tmp]), { stdio: 'pipe' });
         checked++;
     } catch (e) {
         okSyntax = false;

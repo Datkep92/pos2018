@@ -4,67 +4,175 @@
     ".write": true,
     "$shopId": {
       "info": {
-        ".indexOn": ["_version", "updatedAt"]
-      },
-      "transactions": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "daily_balances": {
-        ".indexOn": ["_version", "updatedAt"]
-      },
-      "cost_transactions": {
-        ".indexOn": ["_version", "updatedAt"]
-      },
-      "inventory_transactions": {
-        ".indexOn": ["_version", "updatedAt"]
-      },
-      "ingredient_transactions": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "manager_cash_pickups": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "employee_attendance": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "employee_salaries": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "delete_logs": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "drawer_sessions": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
-      },
-      "notifications": {
-        ".indexOn": ["_version", "createdAt", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "tables": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "customers": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "menu": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "menu_categories": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "ingredients": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "staffs": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "cost_categories": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "bonus_fund": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "messages": {
-        ".indexOn": ["_version", "updatedAt"]
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "refund_failures": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "drawer_telegram_queue": {
-        ".indexOn": ["timestamp"]
+        ".indexOn": [
+          "timestamp"
+        ]
+      },
+      "transactions": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey",
+          "dateTypeKey"
+        ]
+      },
+      "daily_balances": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "cost_transactions": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "inventory_transactions": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "ingredient_transactions": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "manager_cash_pickups": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "employee_attendance": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "employee_salaries": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "delete_logs": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "drawer_sessions": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
+      },
+      "notifications": {
+        ".indexOn": [
+          "_version",
+          "createdAt",
+          "updatedAt",
+          "dateKey"
+        ]
       }
     }
   }

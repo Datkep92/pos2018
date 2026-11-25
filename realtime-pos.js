@@ -516,6 +516,14 @@ function updateTableCard(card, table) {
 // nên bàn có id number tạo ra 2 entry riêng cho cùng 1 bàn -> cache phình và
 // card không được update đúng lúc.
 var _tableVersionCache = {};
+// FIX ĐỒNG BỘ: _version là bộ đếm RIÊNG từng máy, không so sánh được giữa 2
+// thiết bị. Một bản ghi sửa ở máy khác có thể có _version nhỏ hơn mà vẫn MỚI
+// hơn. Revision phải gồm cả mốc thời gian server; nếu không thẻ bàn đứng yên
+// dù dữ liệu đã đổi (mất món trên màn hình).
+function _tableRevision(t) {
+    if (!t) return '0|0|0';
+    return String(t._version || 0) + '|' + String(t.updatedAt || 0) + '|' + String(t._syncedAt || 0);
+}
 // FIX ĐỒNG BỘ: lưu id các bàn đã bị XÓA THẬT SỰ (sự kiện 'removed' từ Firebase),
 // kể cả khi lúc đó không đứng ở tab Bàn -> mở tab là thẻ bàn được gỡ ngay.
 var _tablesRemovedIds = {};
@@ -685,7 +693,7 @@ function updateTablesDiff(newTables) {
         if (existingCard) {
             // P2: Chỉ update nếu _version thay đổi (tránh update không cần thiết)
             var oldVersion = _tableVersionCache[tid];
-            var newVersion = table._version || table.updatedAt || 0;
+            var newVersion = _tableRevision(table);
             if (oldVersion !== newVersion) {
                 updateTableCard(existingCard, table);
                 _tableVersionCache[tid] = newVersion;
@@ -697,7 +705,7 @@ function updateTablesDiff(newTables) {
             // P1: Đánh dấu cache dirty
             _tableCardCacheDirty = true;
             // P2: Cache version cho card mới
-            _tableVersionCache[tid] = table._version || table.updatedAt || 0;
+            _tableVersionCache[tid] = _tableRevision(table);
         }
     }
     if (fragment) grid.appendChild(fragment);
@@ -899,12 +907,12 @@ function initRealtime() {
                 grid.appendChild(createTableCard(item));
                 _tableCardCacheDirty = true;
                 // P2: Cache version cho card mới
-                _tableVersionCache[evId] = item._version || item.updatedAt || 0;
+                _tableVersionCache[evId] = _tableRevision(item);
             }
         } else if (event.type === 'changed') {
             // P2: Kiểm tra version trước khi update
             var oldVersion = _tableVersionCache[evId];
-            var newVersion = item._version || item.updatedAt || 0;
+            var newVersion = _tableRevision(item);
             if (oldVersion === newVersion) return;
             var existingCard = grid.querySelector('.table-card[data-id="' + evId + '"]');
             if (existingCard) {
@@ -1341,20 +1349,63 @@ function initRealtime() {
     // Subscribe cũ: cập nhật bonus_fund
     DB.subscribe('bonus_fund', function() {
         _debounceRealtime('bonus_fund', function() {
-            if (typeof refreshBonusFund === 'function') {
-                refreshBonusFund();
-            }
+            // bonus_fund.js KHÔNG được nạp trong bản POS này (xem ghi chú trong
+            // fund-reconciliation.js). Gọi refreshBonusFund() là gọi hàm không
+            // tồn tại. Phát sự kiện để module đang mở tự làm mới nếu có.
+            try {
+                var evt = document.createEvent('CustomEvent');
+                evt.initCustomEvent('bonus_fund:changed', true, true, {});
+                document.dispatchEvent(evt);
+            } catch (e) {}
         }, 300);
     });
     // NÂNG CẤP: Event Bus handler cho bonus_fund
     DB.on('bonus_fund:*', function(event) {
         if (!event || !event.data) return;
         _debounceRealtime('bonus_fund_ui', function() {
-            if (typeof refreshBonusFund === 'function') {
-                refreshBonusFund();
-            }
+            try {
+                var evt = document.createEvent('CustomEvent');
+                evt.initCustomEvent('bonus_fund:changed', true, true, {});
+                document.dispatchEvent(evt);
+            } catch (e) {}
         }, 200);
     });
+
+    // ============================================================
+    // STAFFS (nhân viên) - cập nhật ngay khi đổi lương/quyền ở tab khác
+    // ============================================================
+    function _refreshStaffsRealtime() {
+        _debounceRealtime('staffs_ui', function() {
+            if (typeof empLoadStaffList === 'function') {
+                empLoadStaffList();
+            } else {
+                DB.getStaffs().then(function(list) { window.staffs = list || []; });
+            }
+        }, 100);
+    }
+    DB.subscribe('staffs', _refreshStaffsRealtime);
+    DB.on('staffs:*', function(event) {
+        if (!event || !event.data) return;
+        _refreshStaffsRealtime();
+    });
+
+    // ============================================================
+    // INGREDIENT TRANSACTIONS (nhập/xuất kho) - cập nhật tồn kho ngay
+    // ============================================================
+    function _refreshIngredientTxRealtime() {
+        _debounceRealtime('ingredient_tx_ui', function() {
+            if (currentTab === 'inventory') {
+                if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
+                if (typeof _invalidateLookups === 'function') _invalidateLookups();
+            }
+        }, 150);
+    }
+    DB.subscribe('ingredient_transactions', _refreshIngredientTxRealtime);
+    DB.on('ingredient_transactions:*', function(event) {
+        if (!event || !event.data) return;
+        _refreshIngredientTxRealtime();
+    });
+    DB.on('ingredient_transactions:synced', _refreshIngredientTxRealtime);
 
     // ============================================================
     // INFO (shop config)
@@ -1665,9 +1716,9 @@ function initRealtime() {
 
     // NÂNG CẤP: Khi staffs được reconcile
     DB.on('staffs:reconciled', function() {
-        if (typeof getStaffs === 'function') {
-            getStaffs();
-        }
+        // getStaffs() không tồn tại ở scope này; dùng API của DB và làm mới
+        // đúng danh sách đang hiển thị trong modal nhân viên.
+        _refreshStaffsRealtime();
     });
 
     // NÂNG CẤP: Khi info được reconcile

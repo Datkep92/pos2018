@@ -2801,7 +2801,11 @@ window.closeSalaryHistoryModal = function() {};
 
 // Đăng ký event listener cho pos_cash_update (gọi sau khi thanh toán thành công)
 // để cập nhật daily_revenue lên Firebase realtime
-document.addEventListener('pos_cash_update', function() {
+// Sự kiện được dispatch trên `window` (tables.js, expense.js, realtime-pos.js).
+// window là nút cao nhất: event dispatch ở window KHÔNG chạy xuống document,
+// nên listener ở document trước đây không bao giờ chạy -> doanh thu nhân viên
+// không cập nhật realtime. Gắn ở window để nhận đúng mọi nơi gửi.
+window.addEventListener('pos_cash_update', function() {
     var today = new Date();
     var dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
     empUpdateDailyRevenue(dateStr);

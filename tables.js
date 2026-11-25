@@ -8,6 +8,9 @@ function _dispatchPosCashUpdate() {
         var evt = document.createEvent('CustomEvent');
         evt.initCustomEvent('pos_cash_update', true, true, {});
         window.dispatchEvent(evt);
+        // Một số module đăng ký listener trên document; dispatch cả hai để
+        // không bên nào bị sót (window là nút cao nhất, event không lan xuống).
+        document.dispatchEvent(evt);
     } catch (e) {
     }
 }
