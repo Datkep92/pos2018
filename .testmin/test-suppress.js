@@ -7,7 +7,7 @@ var fs = require('fs');
 var path = require('path');
 var vm = require('vm');
 
-var src = fs.readFileSync(path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'db.min.js'), 'utf8');
+var src = fs.readFileSync(path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'db.min.js'), 'utf8');
 function ex(n) {
     var m = new RegExp('function\\s+' + n + '\\s*\\(').exec(src);
     if (!m) throw new Error('khong tim thay ' + n);

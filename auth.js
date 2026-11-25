@@ -355,6 +355,7 @@ function reloadAppData() {
             // chỉ an toàn nhờ guard typeof; nếu sau này bật tab Báo cáo thì nổ.
             // Guard thêm vì auth.js load TRƯỚC pos-app.js (nơi định nghĩa helper).
             if (typeof refreshReportIfAvailable === 'function') refreshReportIfAvailable();
+            if (typeof EMP !== 'undefined' && EMP) EMP._periodUserSelected = false; // Đổi quán: kỳ quản lý trở về kỳ hiện tại.
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
             // Load staff list nếu là admin
             if (DB.isAdmin && DB.isAdmin() && typeof DB.getStaffs === 'function') {

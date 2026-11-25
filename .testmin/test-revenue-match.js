@@ -7,7 +7,7 @@ var fs = require('fs');
 var path = require('path');
 var vm = require('vm');
 
-var empSrc = fs.readFileSync(path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'employees.min.js'), 'utf8');
+var empSrc = fs.readFileSync(path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'employees.min.js'), 'utf8');
 
 function ex(src, n) {
     var m = new RegExp('function\\s+' + n + '\\s*\\(').exec(src);

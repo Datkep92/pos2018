@@ -1955,6 +1955,7 @@ function empChangePeriod(delta) {
 
     var newPeriod = year + '-' + String(month).padStart(2, '0');
     EMP.currentPeriod = newPeriod;
+    EMP._periodUserSelected = true; // Kỳ này do người dùng chọn trong modal lương; managerApplyFilter() không được đè.
     labelEl.textContent = empGetPeriodLabel(newPeriod);
 
     // Tính lại daily_revenue cho kỳ mới để loại bỏ dữ liệu cũ chứa debt

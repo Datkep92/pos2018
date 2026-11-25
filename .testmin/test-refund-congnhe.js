@@ -6,7 +6,7 @@
 var fs = require('fs');
 var path = require('path');
 
-var SRC = path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'history.min.js');
+var SRC = path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'history.min.js');
 var src = fs.readFileSync(SRC, 'utf8');
 
 function extractFunc(name) {
@@ -54,7 +54,7 @@ global.DB = {
     getAll: function (col) { return col === 'customers' ? Promise.resolve(customers) : Promise.resolve([]); }
 };
 // nap _calcOutstandingDebt tu customers.js de ham refund goi duoc
-var csrc = fs.readFileSync(path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'customers.min.js'), 'utf8');
+var csrc = fs.readFileSync(path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'customers.min.js'), 'utf8');
 var cfn = new RegExp('function\\s+_calcOutstandingDebt\\s*\\(');
 var cm = cfn.exec(csrc);
 (function () {

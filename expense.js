@@ -106,9 +106,10 @@ function initExpense() {
         renderMonthExpenseTotal();
         expenseInitialized = true;
         console.log('Expense module initialized');
-        // Cập nhật lại big-value trên manager tab sau khi expense data đã load
-        if (typeof managerApplyFilter === 'function') {
-            managerApplyFilter();
+        // Cập nhật lại kết quả tab quản lý sau khi expense data đã load (không đổi kỳ)
+        // Chỉ vẽ lại đúng kỳ/đúng tab hiện tại; không gọi managerApplyFilter() vì hàm đó đổi kỳ và reload toàn tab.
+        if (typeof refreshManagerCurrentView === 'function') {
+            refreshManagerCurrentView();
         }
     }).catch(function(err) {
         console.error('Init expense error:', err);
@@ -971,6 +972,7 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
         renderIngredientList();
         renderTodayExpenses();
         renderMonthExpenseTotal();
+        if (typeof refreshManagerCurrentView === 'function') refreshManagerCurrentView();
     }).catch(function(err) {
         console.error('Save ingredient expense error:', err);
         _endSave();

@@ -6,7 +6,7 @@
 var fs = require('fs');
 var path = require('path');
 
-var SRC_PATH = path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018", '.', 'js.min', 'customers.min.js');
+var SRC_PATH = path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'customers.min.js');
 var src = fs.readFileSync(SRC_PATH, 'utf8');
 
 // ---------- Trich xuat 1 ham tu file nguon theo dau ngoac ----------

@@ -487,16 +487,8 @@ function showManagerRevenueDetail() {
         '\uD83D\uDCB0 Doanh thu - ' + range.label,
         function(filter) {
             return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
-                // Chỉ tính doanh thu cho cash, transfer, grab (giống settings.js)
-                // - Ghi nợ (mua chịu): paymentMethod='debt' -> loại bỏ
-                // - Thanh toán nợ (trả nợ): type='debt_payment', paymentMethod='cash'|'transfer'|'grab' -> giữ lại
-                // - Các phương thức khác (credit, v.v.) -> bỏ qua
-                var filteredTx = transactions.filter(function(tx) {
-                    if (tx.refunded) return false;
-                    if (tx.paymentMethod === 'debt') return false;
-                    if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab') return false;
-                    return true;
-                });
+                // Dùng bộ lọc doanh thu dùng chung (cash|transfer|grab|debt_payment|prepayment)
+                var filteredTx = transactions.filter(_managerRevenueTxFilter);
                 var days = _groupTransactionsByDay(filteredTx, filter, function(tx) {
                     // Nhóm thanh toán nợ riêng (chỉ khi là debt_payment NHƯNG không phải ghi nợ)
                     if (tx.type === 'debt_payment' && tx.paymentMethod !== 'debt') return 'debt_payment';
@@ -518,13 +510,8 @@ function showManagerRevenueDetail() {
             if (!el) return;
             var fn = function(f) {
                 return _getManagerTransactions(range.startStr, range.endStr).then(function(transactions) {
-                    // Chỉ tính doanh thu cho cash, transfer, grab (giống settings.js)
-                    var filteredTx = transactions.filter(function(tx) {
-                        if (tx.refunded) return false;
-                        if (tx.paymentMethod === 'debt') return false;
-                        if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab') return false;
-                        return true;
-                    });
+                    // Dùng bộ lọc doanh thu dùng chung
+                    var filteredTx = transactions.filter(_managerRevenueTxFilter);
                     var days = _groupTransactionsByDay(filteredTx, f, function(tx) {
                         // Nhóm thanh toán nợ riêng (chỉ khi là debt_payment NHƯNG không phải ghi nợ)
                         if (tx.type === 'debt_payment' && tx.paymentMethod !== 'debt') return 'debt_payment';
@@ -839,22 +826,22 @@ function showManagerDebtOccurDetail() {
                     if (cust.debtHistory && cust.debtHistory.length > 0) {
                         for (var hi = 0; hi < cust.debtHistory.length; hi++) {
                             var dh = cust.debtHistory[hi];
-                            var dhDate = dh.date ? dh.date.slice(0, 10) : '';
+                            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
                             if (dhDate >= range.startStr && dhDate <= range.endStr) {
                                 if (!dayMap[dhDate]) {
                                     dayMap[dhDate] = { dateKey: dhDate, methods: {}, items: [], total: 0 };
                                 }
-                                dayMap[dhDate].total += dh.amount || 0;
+                                dayMap[dhDate].total += Math.abs(dh.amount || 0);
                                 var methodKey = 'debt';
                                 if (!dayMap[dhDate].methods[methodKey]) dayMap[dhDate].methods[methodKey] = 0;
-                                dayMap[dhDate].methods[methodKey] += dh.amount || 0;
+                                dayMap[dhDate].methods[methodKey] += Math.abs(dh.amount || 0);
                                 dayMap[dhDate].items.push({
                                     icon: '\uD83D\uDC64',
                                     label: cust.name || 'Kh\u00E1ch ' + cust.id,
                                     sub: cust.phone || '',
-                                    amount: dh.amount || 0
+                                    amount: Math.abs(dh.amount || 0)
                                 });
-                                grandTotal += dh.amount || 0;
+                                grandTotal += Math.abs(dh.amount || 0);
                             }
                         }
                     }
@@ -896,9 +883,9 @@ function showManagerDebtOccurDetail() {
                     if (cust.debtHistory && cust.debtHistory.length > 0) {
                         for (var hi = 0; hi < cust.debtHistory.length; hi++) {
                             var dh = cust.debtHistory[hi];
-                            var dhDate = dh.date ? dh.date.slice(0, 10) : '';
+                            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
                             if (dhDate >= range.startStr && dhDate <= range.endStr) {
-                                total += dh.amount || 0;
+                                total += Math.abs(dh.amount || 0);
                             }
                         }
                     }
@@ -983,7 +970,7 @@ function showManagerTotalDebtDetail() {
         function(filter) {
             return _getManagerMasterData().then(function(masterData) {
                 var allCustomers = masterData.customers || [];
-                var debtCustomers = allCustomers.filter(function(c) { return (c.totalDebt || 0) > 0; });
+                var debtCustomers = allCustomers.filter(function(c) { return _managerCustomerDebt(c) > 0; });
                 var items = [];
                 var total = 0;
                 for (var i = 0; i < debtCustomers.length; i++) {
@@ -992,9 +979,9 @@ function showManagerTotalDebtDetail() {
                         icon: '\uD83D\uDC64',
                         label: c.name || 'Kh\u00E1ch ' + c.id,
                         sub: c.phone || '',
-                        amount: c.totalDebt || 0
+                        amount: _managerCustomerDebt(c)
                     });
-                    total += c.totalDebt || 0;
+                    total += _managerCustomerDebt(c);
                 }
                 var days = [{
                     label: 'Danh s\u00E1ch kh\u00E1ch n\u1EE3',
@@ -1017,7 +1004,7 @@ function showManagerTotalDebtDetail() {
                 var allCustomers = masterData.customers || [];
                 var total = 0;
                 for (var i = 0; i < allCustomers.length; i++) {
-                    total += allCustomers[i].totalDebt || 0;
+                    total += _managerCustomerDebt(allCustomers[i]);
                 }
                 el.textContent = formatMoney(total);
             });
@@ -1288,8 +1275,7 @@ function updateManagerBigValues(startStr, endStr) {
 
         for (var i = 0; i < validTx.length; i++) {
             var tx = validTx[i];
-            if (tx.paymentMethod === 'debt') continue;
-            if (tx.paymentMethod !== 'cash' && tx.paymentMethod !== 'transfer' && tx.paymentMethod !== 'grab' && tx.paymentMethod !== 'debt_payment' && tx.paymentMethod !== 'prepayment') continue;
+            if (!_managerRevenueTxFilter(tx)) continue;
             totalRevenue += tx.amount || 0;
             if (tx.paymentMethod === 'grab') totalGrab += tx.amount || 0;
             else if (tx.paymentMethod === 'transfer') totalBank += tx.amount || 0;
@@ -1305,25 +1291,12 @@ function updateManagerBigValues(startStr, endStr) {
         }
 
         // Tính công nợ phát sinh trong kỳ (debtHistory trong date range)
-        var totalDebtOccur = 0;
-        for (var c = 0; c < allCustomers.length; c++) {
-            var cust = allCustomers[c];
-            if (cust.debtHistory && cust.debtHistory.length) {
-                for (var d = 0; d < cust.debtHistory.length; d++) {
-                    var dh = cust.debtHistory[d];
-                    // debtHistory lưu date (ISO string), không có dateKey
-                    var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
-                    if (dhDate >= startStr && dhDate <= endStr) {
-                        totalDebtOccur += Math.abs(dh.amount || 0);
-                    }
-                }
-            }
-        }
+        var totalDebtOccur = _managerDebtOccurTotal(allCustomers, startStr, endStr);
 
         // Tính tổng công nợ còn lại (tất cả customers)
         var totalDebt = 0;
         for (var c2 = 0; c2 < allCustomers.length; c2++) {
-            totalDebt += allCustomers[c2].totalDebt || 0;
+            totalDebt += _managerCustomerDebt(allCustomers[c2]);
         }
 
         // Đếm nhân viên
@@ -1396,6 +1369,52 @@ window.updateManagerBigValues = updateManagerBigValues;
 // Biến offset để điều hướng prev/next
 window.managerPeriodOffset = 0;
 
+// ========== HÀM DÙNG CHUNG CHO TAB QUẢN LÝ ==========
+// Lọc giao dịch tính doanh thu: bỏ null, đã hoàn tiền, ghi nợ; chỉ giữ cash|transfer|grab|debt_payment|prepayment
+function _managerRevenueTxFilter(tx) {
+    if (!tx || tx.refunded || tx.paymentMethod === 'debt') return false;
+    return tx.paymentMethod === 'cash' || tx.paymentMethod === 'transfer' ||
+        tx.paymentMethod === 'grab' || tx.paymentMethod === 'debt_payment' ||
+        tx.paymentMethod === 'prepayment';
+}
+
+// Công nợ còn lại của một khách hàng: ưu tiên hàm tính chung nếu có
+function _managerCustomerDebt(c) {
+    if (typeof _calcOutstandingDebt === 'function') {
+        var outstanding = _calcOutstandingDebt(c);
+        return outstanding > 0 ? outstanding : 0;
+    }
+    return (c && c.totalDebt) || 0;
+}
+
+// Tổng nợ phát sinh trong kỳ từ debtHistory của tất cả khách hàng
+function _managerDebtOccurTotal(customers, startStr, endStr) {
+    var total = 0;
+    var list = customers || [];
+    for (var i = 0; i < list.length; i++) {
+        var history = (list[i] && list[i].debtHistory) || [];
+        for (var j = 0; j < history.length; j++) {
+            var dh = history[j] || {};
+            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
+            if (dhDate >= startStr && dhDate <= endStr) {
+                total += Math.abs(dh.amount || 0);
+            }
+        }
+    }
+    return total;
+}
+
+// Render lại đúng nội dung đang hiện trong tab quản lý
+function refreshManagerCurrentView() {
+    if (typeof currentTab === 'undefined' || currentTab !== 'manager') return;
+    var container = document.getElementById('managerExpenseList');
+    if (!container) return;
+    if (typeof _doRenderManagerFilter === 'function') {
+        var range = window._managerCurrentRange || _getManagerDateRange();
+        _doRenderManagerFilter(range.startStr, range.endStr, container);
+    }
+}
+window.refreshManagerCurrentView = refreshManagerCurrentView;
 function _initManagerFilters() {
     var prevBtn = document.getElementById('managerPeriodPrevBtn');
     var nextBtn = document.getElementById('managerPeriodNextBtn');
@@ -1404,18 +1423,21 @@ function _initManagerFilters() {
     if (prevBtn) {
         prevBtn.onclick = function() {
             window.managerPeriodOffset = (window.managerPeriodOffset || 0) - 1;
+            if (typeof EMP !== 'undefined' && EMP) EMP._periodUserSelected = false;
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
         };
     }
     if (nextBtn) {
         nextBtn.onclick = function() {
             window.managerPeriodOffset = (window.managerPeriodOffset || 0) + 1;
+            if (typeof EMP !== 'undefined' && EMP) EMP._periodUserSelected = false;
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
         };
     }
     if (modeSelect) {
         modeSelect.onchange = function() {
             window.managerPeriodOffset = 0; // Reset offset khi đổi mode
+            if (typeof EMP !== 'undefined' && EMP) EMP._periodUserSelected = false;
             if (typeof managerApplyFilter === 'function') managerApplyFilter();
         };
     }
@@ -1440,7 +1462,7 @@ function _onDOMReady() {
     _initManagerFilters();
     // Gọi managerApplyFilter() ngay để đồng bộ _managerCurrentRange với filter mặc định
     // Đảm bảo các box dùng chung range ngay từ đầu, tránh hiển thị sai lệch
-    if (typeof managerApplyFilter === 'function') {
+    if (typeof currentTab !== 'undefined' && currentTab === 'manager' && typeof managerApplyFilter === 'function') {
         managerApplyFilter();
     }
 }
@@ -1516,7 +1538,9 @@ function managerApplyFilter() {
                 if (periodMonth < 1) { periodMonth = 12; periodYear--; }
             }
         }
-        EMP.currentPeriod = periodYear + '-' + String(periodMonth).padStart(2, '0');
+        if (!EMP._periodUserSelected) {
+            EMP.currentPeriod = periodYear + '-' + String(periodMonth).padStart(2, '0');
+        }
     }
 
     // Tạo dateKey YYYY-MM-DD từ local date, không dùng toISOString (bị lệch múi giờ)
@@ -1541,7 +1565,8 @@ function managerApplyFilter() {
     // Cập nhật label cho tất cả option
     if (modeSelect) {
         var labelPeriod = 'Kỳ ' + formatDateDisplay(startStr) + ' → ' + formatDateDisplay(endStr);
-        var labelMonth = 'Tháng ' + (now.getMonth() + 1) + '/' + now.getFullYear();
+        var monthLabelDate = mode === 'day' ? startDate : new Date(now.getFullYear(), now.getMonth() + offset, 1);
+        var labelMonth = 'Tháng ' + (monthLabelDate.getMonth() + 1) + '/' + monthLabelDate.getFullYear();
         var labelDay = 'Ngày ' + formatDateDisplay(startStr);
         modeSelect.options[0].innerText = labelPeriod;
         modeSelect.options[1].innerText = labelMonth;
@@ -2061,10 +2086,7 @@ function renderIngredientStats(startStr, endStr) {
         }
 
         // Gán đơn giá và tính thành tiền
-        // LƯU Ý: ingredientUnitPrice trong cost_transactions là đơn giá theo đơn vị nhập kho
-        // (VD: nhập 1 Thùng = 12.000ml giá 120.000đ → unitPrice = 120.000đ/Thùng)
-        // totalQty là số lượng đã dùng theo baseUnit (VD: 5840 ml)
-        // Cần quy đổi totalQty về đơn vị nhập kho trước khi nhân
+        // Đơn giá đã theo baseUnit: nhân trực tiếp, không chia conversionRate.
         var grandCost = 0;
         var hasCost = false;
         for (var si = 0; si < sorted.length; si++) {
@@ -2072,16 +2094,7 @@ function renderIngredientStats(startStr, endStr) {
             var priceInfo = costIngMap[ing.id];
             if (priceInfo && priceInfo.unitPrice) {
                 ing.unitPrice = priceInfo.unitPrice;
-                // Lấy thông tin ingredient để biết conversion rate
-                var ingInfo = getIngredient(ing.id);
-                var convRate = parseFloat(ingInfo && ingInfo.conversionRate) || 0;
-                var convTo = (ingInfo && ingInfo.conversionTo) || '';
-                var hasConv = convRate > 0 && convTo;
-                
-                // Nếu có conversion, unitPrice là giá theo đơn vị convTo (VD: Thùng)
-                // totalQty là theo baseUnit (VD: ml), cần chia cho convRate
-                var qtyForCost = hasConv ? (ing.totalQty / convRate) : ing.totalQty;
-                ing.estimatedCost = Math.round(qtyForCost * priceInfo.unitPrice);
+                ing.estimatedCost = Math.round(ing.totalQty * priceInfo.unitPrice);
                 grandCost += ing.estimatedCost;
                 hasCost = true;
             } else {
@@ -2194,7 +2207,8 @@ function toggleIngredientStatsExpand() {
     if (!container) return;
     var showAll = container.getAttribute('data-show-all') === 'true';
     container.setAttribute('data-show-all', showAll ? 'false' : 'true');
-    if (typeof managerApplyFilter === 'function') managerApplyFilter();
+    var range = _managerCurrentRange || _getManagerDateRange();
+    if (typeof renderIngredientStats === 'function') renderIngredientStats(range.startStr, range.endStr);
 }
 
 function toggleDrinkStatsExpand() {
@@ -2202,8 +2216,8 @@ function toggleDrinkStatsExpand() {
     if (!container) return;
     var showAll = container.getAttribute('data-show-all') === 'true';
     container.setAttribute('data-show-all', showAll ? 'false' : 'true');
-    // Gọi lại managerApplyFilter để re-render với cùng date range
-    if (typeof managerApplyFilter === 'function') managerApplyFilter();
+    var range = _managerCurrentRange || _getManagerDateRange();
+    if (typeof renderDrinkStats === 'function') renderDrinkStats(range.startStr, range.endStr);
 }
 
 // ========== MANAGER TAB: CẢNH BÁO TỒN KHO THẤP ==========
@@ -2332,7 +2346,7 @@ function renderDebtList(startStr, endStr) {
 
     DB.getAll('customers').then(function(allCustomers) {
         // Lọc khách có nợ > 0
-        var debtCustomers = allCustomers.filter(function(c) { return (c.totalDebt || 0) > 0; });
+        var debtCustomers = allCustomers.filter(function(c) { return _managerCustomerDebt(c) > 0; });
 
         if (debtCustomers.length === 0) {
             container.innerHTML = '<div class="empty-state">✅ Không có khách nợ</div>';
@@ -2340,12 +2354,12 @@ function renderDebtList(startStr, endStr) {
         }
 
         // Sắp xếp theo tổng nợ giảm dần
-        debtCustomers.sort(function(a, b) { return (b.totalDebt || 0) - (a.totalDebt || 0); });
+        debtCustomers.sort(function(a, b) { return _managerCustomerDebt(b) - _managerCustomerDebt(a); });
 
         var html = '';
         for (var i = 0; i < debtCustomers.length; i++) {
             var c = debtCustomers[i];
-            var debt = c.totalDebt || 0;
+            var debt = _managerCustomerDebt(c);
 
             // Đếm số lần thanh toán nợ trong kỳ
             var paymentCount = 0;

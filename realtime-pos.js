@@ -194,6 +194,12 @@ function _debounceRealtime(key, fn, delay) {
     }, delay);
 }
 
+function _refreshManagerAfterRealtime() {
+    _debounceRealtime('managerRealtime', function() {
+        if (typeof window.refreshManagerCurrentView === 'function') window.refreshManagerCurrentView();
+    }, 250);
+}
+
 function _renderNow(key, fn) {
     if (_realtimeTimers[key]) clearTimeout(_realtimeTimers[key]);
     _realtimeTimers[key] = null;
@@ -1014,9 +1020,11 @@ function initRealtime() {
                         showCustomerDetail(detailId);
                     }
                 }
-                // Tab Quản lý: danh sách công nợ do managerApplyFilter() dựng,
-                // không gọi renderManagerDebtList ở đây để tránh tính lại
-                // hai lần. onManagerDBUpdate (db_update) sẽ lo phần cập nhật.
+                // Tab Quản lý dùng chung _refreshManagerAfterRealtime() để cập nhật
+                // danh sách nợ / kết quả lọc mà không đổi kỳ (không gọi managerApplyFilter).
+                if (currentTab === 'manager') {
+                    _refreshManagerAfterRealtime();
+                }
                 if (currentTab === 'manager' && typeof _invalidateCustomerCalcCache === 'function') {
                     _invalidateCustomerCalcCache();
                 }
@@ -1050,10 +1058,11 @@ function initRealtime() {
                     showCustomerDetail(detailId);
                 }
             }
-            // Tab Quản lý: không gọi renderManagerDebtList ở đây.
-            // Hàm đó cần danh sách {id, name, totalDebt} do managerComputeStats
-            // dựng, truyền danh sách khách thô sẽ vẽ sai (thiếu totalDebt).
-            // Việc cập nhật tab Quản lý do onManagerDBUpdate (db_update) đảm nhiệm.
+            // Tab Quản lý dùng chung _refreshManagerAfterRealtime() để cập nhật
+            // danh sách nợ / kết quả lọc mà không đổi kỳ (không gọi managerApplyFilter).
+            if (currentTab === 'manager') {
+                _refreshManagerAfterRealtime();
+            }
             if (currentTab === 'manager' && typeof _invalidateCustomerCalcCache === 'function') {
                 _invalidateCustomerCalcCache();
             }
@@ -1159,8 +1168,8 @@ function initRealtime() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                        managerApplyFilter();
+                    } else if (currentTab === 'manager') {
+                        _refreshManagerAfterRealtime();
                     }
                 });
             }
@@ -1175,8 +1184,8 @@ function initRealtime() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                        managerApplyFilter();
+                    } else if (currentTab === 'manager') {
+                        _refreshManagerAfterRealtime();
                     }
                 });
             }
@@ -1197,8 +1206,8 @@ function initRealtime() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                        managerApplyFilter();
+                    } else if (currentTab === 'manager') {
+                        _refreshManagerAfterRealtime();
                     }
                     // FIX: Cập nhật Két POS realtime - dispatch event để settings.js load lại pos-cash data
                     try {
@@ -1226,8 +1235,8 @@ function initRealtime() {
                     if (currentTab === 'cost') {
                         if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                         if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                    } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                        managerApplyFilter();
+                    } else if (currentTab === 'manager') {
+                        _refreshManagerAfterRealtime();
                     }
                     // FIX: Cập nhật Két POS realtime - dispatch event để settings.js load lại pos-cash data
                     try {
@@ -1533,8 +1542,8 @@ function initRealtime() {
                 if (currentTab === 'cost') {
                     if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                     if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                    managerApplyFilter();
+                } else if (currentTab === 'manager') {
+                    _refreshManagerAfterRealtime();
                 }
             });
         }
@@ -1547,8 +1556,8 @@ function initRealtime() {
                 if (currentTab === 'cost') {
                     if (typeof renderTodayExpenses === 'function') renderTodayExpenses();
                     if (typeof renderMonthExpenseTotal === 'function') renderMonthExpenseTotal();
-                } else if (currentTab === 'manager' && typeof managerApplyFilter === 'function') {
-                    managerApplyFilter();
+                } else if (currentTab === 'manager') {
+                    _refreshManagerAfterRealtime();
                 }
             });
         }
@@ -1669,17 +1678,19 @@ function initRealtime() {
 
     // NÂNG CẤP: Khi customers được reconcile
     DB.on('customers:reconciled', function() {
-        if (currentTab !== 'customers') return;
+        if (currentTab !== 'customers' && currentTab !== 'manager') return;
         var cached = DB.getMemoryCache('customers');
         if (cached && cached.length > 0) {
             customers = cached;
             window.customers = customers;
-            renderCustomerList();
+            if (currentTab === 'manager') _refreshManagerAfterRealtime();
+            else renderCustomerList();
         } else {
             DB.getAll('customers').then(function(list) {
                 customers = list;
                 window.customers = customers;
-                renderCustomerList();
+                if (currentTab === 'manager') _refreshManagerAfterRealtime();
+                else renderCustomerList();
             });
         }
     });

@@ -7,7 +7,7 @@ var fs = require('fs');
 var path = require('path');
 var vm = require('vm');
 
-var posDir = path.join("C:\\\\Users\\\\cana2\\\\OneDrive\\\\Documents\\\\Default Project\\\\pos2018");
+var posDir = path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018");
 var dbSrc = fs.readFileSync(path.join(posDir, 'js.min', 'db.min.js'), 'utf8');
 var rtSrc = fs.readFileSync(path.join(posDir, 'js.min', 'realtime-pos.min.js'), 'utf8');
 var cSrc = fs.readFileSync(path.join(posDir, 'js.min', 'customers.min.js'), 'utf8');
