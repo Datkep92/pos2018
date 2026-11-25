@@ -181,6 +181,49 @@ chain = chain.then(function () {
     ok('js.min/db da chua dedup moi', minSrc.indexOf('!recStamp || stamp > recStamp') >= 0);
 });
 
+// ---------- 5. FULLSYNC KHONG MAT BAN GHI CHUA GUI ----------
+chain = chain.then(function () {
+    group('5. FullSync: giu ban ghi pending khi server co du lieu');
+    var saved = [];
+    var s = baseSandbox({
+        localDB: {
+            transaction: function () {
+                return { objectStore: function () {
+                    return { clear: function () {
+                        var req = {};
+                        Promise.resolve().then(function () { if (req.onsuccess) req.onsuccess(); });
+                        return req;
+                    } };
+                } };
+            }
+        },
+        _getDb: function () {
+            return { ref: function () { return { once: function (ev, cb) {
+                cb({ exists: function () { return true; },
+                     val: function () { return { r1: { _version: 1 } }; } });
+            } }; } };
+        }
+    });
+    vm.runInContext([
+        'var isOnline = true; var CURRENT_SHOP_ID = "shopA"; var THIRTY_DAYS_MS = 1;',
+        'var DATE_BASED_COLLECTIONS = {}; var MASTER_COLLECTIONS = { tables: true };',
+        'var memoryCache = { tables: {} }; var _syncingCollections = {};',
+        'var syncQueue = [{ collection: "tables", status: "pending", targetId: "dirty1", shopId: "shopA" }];',
+        'var saved = [];',
+        'function _setSuppressRealtime(){} function saveSyncMeta(){} function updateMetaOnFirebase(){} function _emit(){}',
+        'function loadFromLocal(){ return Promise.resolve([{ id: "dirty1", _version: 1 }]); }',
+        'function saveToLocal(c, it){ saved.push(it.id); return Promise.resolve(); }',
+        ex(dbSrc, '_queueBelongsToCurrentShop'),
+        ex(dbSrc, '_getUnsyncedKeys'),
+        ex(dbSrc, 'fullSync')
+    ].join('\n'), s);
+    s.saved = saved;
+    return vm.runInContext('fullSync("tables")', s).then(function () {
+        eq('du lieu server duoc luu', saved.indexOf('r1') >= 0, true);
+        eq('ban ghi pending duoc khoi phuc', saved.indexOf('dirty1') >= 0, true);
+    });
+});
+
 chain.catch(function (e) {
     fail++;
     console.log('  FAIL  loi khong mong mo: ' + (e && e.stack || e));

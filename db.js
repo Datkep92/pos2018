@@ -766,7 +766,11 @@
             if (!q || q.collection !== collection) continue;
             if (q.status === 'synced') continue;
             if (!_queueBelongsToCurrentShop(q)) continue;
-            set[q.targetId] = true;
+            // Mục hàng đợi cũ có thể chỉ có id trong data. Lấy cả hai để không bỏ sót
+            // bản ghi chưa gửi khi dọn local hay fullSync.
+            var qid = q.targetId !== undefined ? q.targetId : (q.data && q.data.id);
+            if (qid === undefined || qid === null) continue;
+            set[String(qid)] = true;
         }
         return set;
     }
@@ -3471,7 +3475,7 @@
                     memoryCache[collection] = {};
                 }
                 
-                var preClear = Promise.resolve();
+                var preClear = Promise.resolve(); var itemsToRestore = [];
                 if (isMaster) {
                     // Lưu lại các bản CHƯA lên server (pending/failed) trước khi
                     // clear store. fullSync từng xoá chúng -> mất đơn/món vừa tạo.
@@ -3484,7 +3488,7 @@
                             var qid = q.targetId !== undefined ? q.targetId : (q.data && q.data.id);
                             if (qid !== undefined && qid !== null) keep[String(qid)] = true;
                         }
-                        var protectedItems = [];
+                        var protectedItems = []; itemsToRestore = protectedItems;
                         for (var li = 0; li < localItems.length; li++) {
                             if (keep[String(localItems[li].id)]) protectedItems.push(localItems[li]);
                         }
@@ -3557,14 +3561,14 @@
                     }
                 }
                 
-                return saveChain.then(function(protectedItems) {
+                return saveChain.then(function() {
                     // Ghi lại các bản chưa đồng bộ sau khi đã ghi bản server.
                     var restore = Promise.resolve();
-                    if (protectedItems && protectedItems.length) {
-                        for (var ri = 0; ri < protectedItems.length; ri++) {
+                    if (itemsToRestore && itemsToRestore.length) {
+                        for (var ri = 0; ri < itemsToRestore.length; ri++) {
                             (function(protectedItem) {
                                 restore = restore.then(function() { return saveToLocal(collection, protectedItem); });
-                            })(protectedItems[ri]);
+                            })(itemsToRestore[ri]);
                         }
                     }
                     return restore;
