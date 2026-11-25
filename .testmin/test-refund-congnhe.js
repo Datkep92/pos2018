@@ -55,15 +55,20 @@ global.DB = {
 };
 // nap _calcOutstandingDebt tu customers.js de ham refund goi duoc
 var csrc = fs.readFileSync(path.join("/private/var/mobile/Documents/wiki.qaq.apelin/Projects/Pos2018", '.', 'js.min', 'customers.min.js'), 'utf8');
-var cfn = new RegExp('function\\s+_calcOutstandingDebt\\s*\\(');
-var cm = cfn.exec(csrc);
-(function () {
-    var i = csrc.indexOf('{', cm.index), depth = 0, started = false;
+function extractCustomerFunc(name) {
+    var re = new RegExp('function\\s+' + name + '\\s*\\(');
+    var m = re.exec(csrc);
+    if (!m) throw new Error('Khong tim thay function trong customers.js: ' + name);
+    var i = csrc.indexOf('{', m.index), depth = 0, started = false;
     for (; i < csrc.length; i++) {
         if (csrc[i] === '{') { depth++; started = true; }
-        else if (csrc[i] === '}') { depth--; if (started && depth === 0) { new Function(csrc.slice(cm.index, i + 1) + '; global._calcOutstandingDebt = _calcOutstandingDebt;')(); break; } }
+        else if (csrc[i] === '}') { depth--; if (started && depth === 0) return csrc.slice(m.index, i + 1); }
     }
-})();
+    throw new Error('Khong dong duoc: ' + name);
+}
+var refundCheckSrc = extractCustomerFunc('_isRefundedCustomerEntry');
+var debtCalcSrc = extractCustomerFunc('_calcOutstandingDebt');
+new Function(refundCheckSrc + '\n' + debtCalcSrc + '\n; global._calcOutstandingDebt = _calcOutstandingDebt; global._isRefundedCustomerEntry = _isRefundedCustomerEntry;')();
 
 // nap ham refund
 var f1 = extractFunc('_isNearTransTime');

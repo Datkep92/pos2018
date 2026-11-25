@@ -114,6 +114,7 @@ global._toLocalDateStr = function (d) { return d.toISOString().slice(0, 10); };
 // Gom TAT CA vao mot scope de cac ham goi lan nhau va dung bien cache dung duoc.
 var FUNCS = [
     '_calcOutstandingDebt',
+    '_isRefundedCustomerEntry',
     '_removeAccents',
     '_invalidateCustomerCalcCache',
     '_isCustomerCacheValid',

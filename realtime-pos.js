@@ -4,6 +4,8 @@
 // ES5, tương thích Android 6, iOS 12
 
 var _realtimeTimers = {};
+// FIX: mốc bắt đầu của mỗi debounce để áp maxWait (tránh trì hoãn vô hạn)
+var _realtimeDebounceStart = {};
 var _tableTimerId = null;
 // P0: Cache DOM references cho timer - tránh querySelectorAll mỗi giây
 var _tableCardCache = {};
@@ -185,24 +187,55 @@ function _relTimeText(ts) {
     return days + ' ngày trước';
 }
 
-function _debounceRealtime(key, fn, delay) {
+function _debounceRealtime(key, fn, delay, maxWait) {
     delay = delay || 100;
+    maxWait = maxWait || 1000;
+    var now = Date.now();
+    if (!_realtimeDebounceStart[key]) _realtimeDebounceStart[key] = now;
+    var waited = now - _realtimeDebounceStart[key];
+    if (waited >= maxWait) {
+        if (_realtimeTimers[key]) clearTimeout(_realtimeTimers[key]);
+        _realtimeTimers[key] = null;
+        _realtimeDebounceStart[key] = null;
+        fn();
+        return;
+    }
     if (_realtimeTimers[key]) clearTimeout(_realtimeTimers[key]);
     _realtimeTimers[key] = setTimeout(function() {
         _realtimeTimers[key] = null;
+        _realtimeDebounceStart[key] = null;
         fn();
-    }, delay);
+    }, Math.min(delay, maxWait - waited));
+}
+
+function _markManagerViewDirty() {
+    if (typeof window.markManagerViewDirty === 'function') window.markManagerViewDirty();
 }
 
 function _refreshManagerAfterRealtime() {
+    // Không ở tab quản lý (hoặc hàm render chưa sẵn): đánh dấu để lần vào tab
+    // sau tự nạp lại, thay vì bỏ qua thay đổi từ máy khác.
+    if (typeof currentTab !== 'undefined' && currentTab !== 'manager') {
+        _markManagerViewDirty();
+        return;
+    }
+    if (typeof window.refreshManagerCurrentView !== 'function') {
+        _markManagerViewDirty();
+        return;
+    }
     _debounceRealtime('managerRealtime', function() {
-        if (typeof window.refreshManagerCurrentView === 'function') window.refreshManagerCurrentView();
-    }, 250);
+        if (typeof window.refreshManagerCurrentView === 'function') {
+            window.refreshManagerCurrentView();
+        } else {
+            _markManagerViewDirty();
+        }
+    }, 250, 1000);
 }
 
 function _renderNow(key, fn) {
     if (_realtimeTimers[key]) clearTimeout(_realtimeTimers[key]);
     _realtimeTimers[key] = null;
+    _realtimeDebounceStart[key] = null;
     fn();
 }
 
@@ -894,16 +927,16 @@ function initRealtime() {
     
     // NÂNG CẤP: Event Bus handler cho tables - xử lý targeted updates
     DB.on('tables:*', function(event) {
-        if (!event || !event.data) return;
+        if (!event || !event.data) { _markManagerViewDirty(); return; }
         var item = event.data.item;
-        if (!item) return;
+        if (!item) { _markManagerViewDirty(); return; }
         // FIX ĐỒNG BỘ: ghi nhận bàn bị xóa ở thiết bị khác TRƯỚC khi lọc theo tab.
         // Trước đây thoát sớm khi không ở tab Bàn -> thẻ bàn cũ nằm lại trên màn hình.
         if (event.type === 'removed') _tablesRemovedIds[String(item.id)] = true;
         else delete _tablesRemovedIds[String(item.id)];
-        if (currentTab !== 'tables') return;
+        if (currentTab !== 'tables') { _markManagerViewDirty(); return; }
         var grid = document.getElementById('tablesGrid');
-        if (!grid) return;
+        if (!grid) { _markManagerViewDirty(); return; }
         // Chuẩn hoá id một lần: key của cache và selector DOM phải dùng cùng dạng
         // với data-id trên thẻ bàn (luôn là chuỗi).
         var evId = String(item.id);
@@ -919,7 +952,7 @@ function initRealtime() {
             // P2: Kiểm tra version trước khi update
             var oldVersion = _tableVersionCache[evId];
             var newVersion = _tableRevision(item);
-            if (oldVersion === newVersion) return;
+            if (oldVersion === newVersion) { _markManagerViewDirty(); return; }
             var existingCard = grid.querySelector('.table-card[data-id="' + evId + '"]');
             if (existingCard) {
                 updateTableCard(existingCard, item);
@@ -948,7 +981,7 @@ function initRealtime() {
     
     // NÂNG CẤP: Khi fullSync hoàn thành, re-render toàn bộ tables
     DB.on('tables:synced', function() {
-        if (currentTab !== 'tables') return;
+        if (currentTab !== 'tables') { _markManagerViewDirty(); return; }
         DB.getAll('tables').then(function(allTables) {
             cachedTables = allTables;
             tablesCacheTime = Date.now();
@@ -1228,7 +1261,7 @@ function initRealtime() {
     });
     // NÂNG CẤP: Event Bus handler cho cost_transactions
     DB.on('cost_transactions:*', function(event) {
-        if (!event || !event.data) return;
+        if (!event || !event.data) { _markManagerViewDirty(); return; }
         _debounceRealtime('cost_transactions_ui', function() {
             if (typeof loadExpenseData === 'function') {
                 loadExpenseData().then(function() {
@@ -1328,6 +1361,7 @@ function initRealtime() {
     // ============================================================
     // Subscribe cũ: cập nhật transactions cache
     DB.subscribe('transactions', function() {
+        _refreshManagerAfterRealtime();
         _debounceRealtime('transactions', function() {
             updateRecentToast();
             if (typeof loadPosCashData === 'function') {
@@ -1340,7 +1374,8 @@ function initRealtime() {
     });
     // NÂNG CẤP: Event Bus handler cho transactions
     DB.on('transactions:*', function(event) {
-        if (!event || !event.data) return;
+        if (!event || !event.data) { _markManagerViewDirty(); return; }
+        _refreshManagerAfterRealtime();
         _debounceRealtime('transactions_ui', function() {
             updateRecentToast();
             if (typeof loadPosCashData === 'function') {
@@ -1384,6 +1419,7 @@ function initRealtime() {
     // STAFFS (nhân viên) - cập nhật ngay khi đổi lương/quyền ở tab khác
     // ============================================================
     function _refreshStaffsRealtime() {
+        _refreshManagerAfterRealtime();
         _debounceRealtime('staffs_ui', function() {
             if (typeof empLoadStaffList === 'function') {
                 empLoadStaffList();
@@ -1394,7 +1430,7 @@ function initRealtime() {
     }
     DB.subscribe('staffs', _refreshStaffsRealtime);
     DB.on('staffs:*', function(event) {
-        if (!event || !event.data) return;
+        if (!event || !event.data) { _markManagerViewDirty(); return; }
         _refreshStaffsRealtime();
     });
 
@@ -1402,6 +1438,7 @@ function initRealtime() {
     // INGREDIENT TRANSACTIONS (nhập/xuất kho) - cập nhật tồn kho ngay
     // ============================================================
     function _refreshIngredientTxRealtime() {
+        _refreshManagerAfterRealtime();
         _debounceRealtime('ingredient_tx_ui', function() {
             if (currentTab === 'inventory') {
                 if (typeof renderInventoryIngredients === 'function') renderInventoryIngredients();
@@ -1411,7 +1448,7 @@ function initRealtime() {
     }
     DB.subscribe('ingredient_transactions', _refreshIngredientTxRealtime);
     DB.on('ingredient_transactions:*', function(event) {
-        if (!event || !event.data) return;
+        if (!event || !event.data) { _markManagerViewDirty(); return; }
         _refreshIngredientTxRealtime();
     });
     DB.on('ingredient_transactions:synced', _refreshIngredientTxRealtime);
@@ -1579,6 +1616,7 @@ function initRealtime() {
 
     // NÂNG CẤP: Khi fullSync ingredients hoàn thành
     DB.on('ingredients:synced', function() {
+        _refreshManagerAfterRealtime();
         DB.getAll('ingredients').then(function(list) {
             window.ingredients = list;
             if (typeof ingredients !== 'undefined') {
@@ -1596,6 +1634,7 @@ function initRealtime() {
 
     // NÂNG CẤP: Khi fullSync transactions hoàn thành
     DB.on('transactions:synced', function() {
+        _refreshManagerAfterRealtime();
         updateRecentToast();
         if (typeof loadPosCashData === 'function') {
             loadPosCashData();
@@ -1667,7 +1706,7 @@ function initRealtime() {
     // NÂNG CẤP: Khi tables được reconcile (có thể có thêm hoặc xóa bàn)
     DB.on('tables:reconciled', function(data) {
         console.log('[Realtime] Tables reconciled:', data);
-        if (currentTab !== 'tables') return;
+        if (currentTab !== 'tables') { _markManagerViewDirty(); return; }
         DB.getAll('tables').then(function(allTables) {
             cachedTables = allTables;
             tablesCacheTime = Date.now();
@@ -1678,7 +1717,7 @@ function initRealtime() {
 
     // NÂNG CẤP: Khi customers được reconcile
     DB.on('customers:reconciled', function() {
-        if (currentTab !== 'customers' && currentTab !== 'manager') return;
+        if (currentTab !== 'customers' && currentTab !== 'manager') { _markManagerViewDirty(); return; }
         var cached = DB.getMemoryCache('customers');
         if (cached && cached.length > 0) {
             customers = cached;

@@ -3,12 +3,33 @@
 
 // ========== MANAGER CACHE LAYER ==========
 // Cache dữ liệu manager để tránh IndexedDB reads lặp lại nhiều lần
-// _managerTxCache: cache transactions theo range (startStr|endStr)
+// _managerTxCache: cache transactions theo shopId + range (shopId|startStr|endStr)
 // _managerMasterCache: cache customers, staffs, pickups từ memory cache
-// _managerCacheRange: range hiện tại đã cache
-var _managerTxCache = null;       // { transactions: [], range: 'start|end', timestamp: 0 }
+var _managerTxCache = null;       // { transactions: [], range: 'shopId|start|end', timestamp: 0 }
 var _managerMasterCache = null;   // { customers: [], staffs: [], pickups: [], timestamp: 0 }
 var _MANAGER_CACHE_TTL = 60000;   // 60 giây - đủ cho các thao tác click qua lại
+
+// Cờ dirty: các nơi khác chỉ đánh dấu, không tự render
+var _managerViewDirty = false;
+
+function _managerToDateKey(d) {
+    var dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    var m = ('0' + (dt.getMonth() + 1)).slice(-2);
+    var day = ('0' + dt.getDate()).slice(-2);
+    return dt.getFullYear() + '-' + m + '-' + day;
+}
+// Nhãn kỳ dùng chung cho mọi chỗ hiển thị (range mặc định, select, modal)
+function _getManagerPeriodLabel(mode, startInput, endInput) {
+    var startStr = (startInput instanceof Date) ? _managerToDateKey(startInput) : String(startInput || '');
+    var endStr = (endInput instanceof Date) ? _managerToDateKey(endInput) : String(endInput || '');
+    function _fmt(s) {
+        return (typeof formatDateDisplay === 'function') ? formatDateDisplay(s) : s;
+    }
+    if (mode === 'period') return 'Kỳ ' + _fmt(startStr) + ' → ' + _fmt(endStr);
+    if (mode === 'month') return 'Tháng ' + Number(startStr.slice(5, 7)) + '/' + startStr.slice(0, 4);
+    return 'Ngày ' + _fmt(startStr);
+}
 
 // Biến lưu range hiện tại của manager filter - dùng chung cho tất cả box
 // Được cập nhật bởi managerApplyFilter(), dùng bởi showManagerXxxDetail()
@@ -35,14 +56,86 @@ var _managerCurrentRange = (function() {
         startStr: _toDateKey(startDate),
         endStr: _toDateKey(endDate),
         mode: 'period',
-        label: 'Kỳ ' + _toDateKey(startDate) + ' → ' + _toDateKey(endDate)
+        label: _getManagerPeriodLabel('period', startDate, endDate)
     };
 })();
 window._managerCurrentRange = _managerCurrentRange; // Export global để các file khác dùng chung
 
+// Dùng chung các helper lọc/union cho mọi nơi đọc transactions
+function _managerCacheShopId() {
+    try { return (typeof DB !== 'undefined' && DB.getShopId) ? String(DB.getShopId() || '') : ''; }
+    catch (e) { return ''; }
+}
+function _managerHistoryDateKey(entry) {
+    if (!entry) return '';
+    if (entry.dateKey) return String(entry.dateKey).slice(0, 10);
+    if (entry.date) return String(entry.date).slice(0, 10);
+    if (entry.createdAt) return _managerToDateKey(entry.createdAt);
+    return '';
+}
+function _managerAbsAmount(v) {
+    var n = Number(v);
+    return isFinite(n) ? Math.abs(n) : 0;
+}
+function _managerUnionById(first, second) {
+    if (typeof unionBy === 'function') {
+        try {
+            var merged = unionBy(first || [], second || [], 'id');
+            if (merged && merged.length !== undefined) return merged;
+        } catch (e) { }
+    }
+    var out = [], seen = {}, lists = [first || [], second || []];
+    for (var i = 0; i < lists.length; i++) {
+        for (var j = 0; j < lists[i].length; j++) {
+            var item = lists[i][j];
+            if (!item) continue;
+            var key = (item.id !== undefined && item.id !== null) ? ('id:' + item.id) : ('raw:' + JSON.stringify(item));
+            if (seen[key]) continue;
+            seen[key] = true;
+            out.push(item);
+        }
+    }
+    return out;
+}
+function _managerAsArray(list) {
+    if (Array.isArray(list)) return list;
+    if (list && typeof list === 'object') {
+        var out = [];
+        for (var k in list) { if (list.hasOwnProperty(k)) out.push(list[k]); }
+        return out;
+    }
+    return [];
+}
+function _managerFilterPOSDate(list, startStr, endStr) {
+    var arr = _managerAsArray(list);
+    if (typeof filterPOSDataByDateRange === 'function') {
+        try {
+            var out = filterPOSDataByDateRange(arr, startStr, endStr);
+            if (out && out.length !== undefined) return out;
+        } catch (e) { }
+    }
+    return arr.filter(function (t) {
+        var dk = _managerHistoryDateKey(t);
+        return dk >= startStr && dk <= endStr;
+    });
+}
+function _managerFilterPOSShop(list, shopId) {
+    var arr = _managerAsArray(list);
+    var sid = shopId || _managerCacheShopId();
+    if (typeof filterPOSDataByShop === 'function') {
+        try {
+            var out = filterPOSDataByShop(arr, sid);
+            if (out && out.length !== undefined) return out;
+        } catch (e) { }
+    }
+    if (!sid) return arr;
+    return arr.filter(function (t) { return !t.shopId || String(t.shopId) === String(sid); });
+}
+
 // Lấy transactions từ cache hoặc DB
 function _getManagerTransactions(startStr, endStr) {
-    var cacheKey = startStr + '|' + endStr;
+    var shopId = _managerCacheShopId();
+    var cacheKey = shopId + '|' + startStr + '|' + endStr;
     var now = Date.now();
     
     // Nếu cache còn hạn và cùng range, trả về từ cache
@@ -52,37 +145,21 @@ function _getManagerTransactions(startStr, endStr) {
     
     // Ưu tiên memory cache (nhanh, không block UI)
     // memoryCache.transactions là object {id: tx} - đọc từ DB.getMemoryCache('transactions')
-    var memTxs = (typeof DB.getMemoryCache === 'function') ? DB.getMemoryCache('transactions') : null;
-    if (memTxs && memTxs.length > 0) {
-        // Lọc transactions theo date range từ memory cache
-        var filtered = [];
-        for (var i = 0; i < memTxs.length; i++) {
-            var tx = memTxs[i];
-            var dk = tx.dateKey || (tx.date ? tx.date.slice(0, 10) : '');
-            if (dk >= startStr && dk <= endStr) {
-                filtered.push(tx);
-            }
-        }
-        // Nếu memory cache có đủ dữ liệu (có ít nhất 1 transaction trong range), dùng luôn
-        if (filtered.length > 0) {
-            _managerTxCache = {
-                transactions: filtered,
-                range: cacheKey,
-                timestamp: Date.now()
-            };
-            return Promise.resolve(filtered);
-        }
-    }
-    
-    // Fetch từ DB (IndexedDB + auto-fetch Firebase nếu cần)
-    return DB.getTransactionsByDateRange(startStr, endStr).then(function(transactions) {
-        _managerTxCache = {
-            transactions: transactions,
-            range: cacheKey,
-            timestamp: Date.now()
-        };
-        return transactions;
+    var memTxs = (typeof DB.getMemoryCache === 'function') ? (DB.getMemoryCache('transactions') || []) : [];
+    var memFiltered = _managerFilterPOSShop(_managerFilterPOSDate(memTxs, startStr, endStr), shopId);
+    var dbPromise = (typeof DB.getTransactionsByDateRange === 'function')
+        ? DB.getTransactionsByDateRange(startStr, endStr)
+        : Promise.resolve([]);
+
+    return Promise.resolve(dbPromise).then(function (dbTxs) {
+        // Luôn gọi DB.getTransactionsByDateRange: memory cache không thay thế được DB
+        var dbFiltered = _managerFilterPOSShop(_managerFilterPOSDate(dbTxs || [], startStr, endStr), shopId);
+        var merged = _managerUnionById(memFiltered, dbFiltered);
+        _managerTxCache = { transactions: merged, range: cacheKey, timestamp: Date.now() };
+        return merged;
     });
+
+    // DB.getTransactionsByDateRange đã được gọi ở trên (không cache riêng memory)
 }
 
 // Lấy master data (customers, staffs, pickups) từ memory cache hoặc IndexedDB
@@ -132,8 +209,23 @@ function _getManagerMasterData() {
 function _invalidateManagerCache() {
     _managerTxCache = null;
     _managerMasterCache = null;
+    _lastLowStockSignature = null;
+    _lowStockContainerRendered = false;
 }
 window._invalidateManagerCache = _invalidateManagerCache;
+window.managerState = {
+    mode: _managerCurrentRange.mode,
+    start: _managerCurrentRange.startStr,
+    end: _managerCurrentRange.endStr,
+    startStr: _managerCurrentRange.startStr,
+    endStr: _managerCurrentRange.endStr
+};
+window.invalidateManagerCache = function () { _invalidateManagerCache(); };
+window.markManagerViewDirty = function () { _managerViewDirty = true; };
+window.refreshManagerCurrentView = function () {
+    if (typeof managerApplyFilter !== 'function') return;
+    managerApplyFilter();
+};
 
 // ========== HÀM TIỆN ÍCH ==========
 // Hàm chuyển Date -> YYYY-MM-DD dùng local time, tránh lỗi timezone UTC
@@ -152,7 +244,7 @@ function _getManagerDateRange() {
     }
 
     var modeSelect = document.getElementById('managerViewModeSelect');
-    var mode = modeSelect ? modeSelect.value : 'period';
+    var mode = (modeSelect ? modeSelect.value : (window.managerState && window.managerState.mode) || 'period');
     var offset = window.managerPeriodOffset || 0;
     var now = new Date();
     var startDate, endDate;
@@ -191,15 +283,7 @@ function _getManagerDateRange() {
     return range;
 }
 
-function _getManagerPeriodLabel(mode, startDate, endDate) {
-    if (mode === 'period') {
-        return 'Kỳ ' + formatDateDisplay(_toDateKey(startDate)) + ' \u2192 ' + formatDateDisplay(_toDateKey(endDate));
-    } else if (mode === 'month') {
-        return 'Tháng ' + (startDate.getMonth() + 1) + '/' + startDate.getFullYear();
-    } else {
-        return 'Ngày ' + formatDateDisplay(_toDateKey(startDate));
-    }
-}
+// _getManagerPeriodLabel được định nghĩa ở đầu tệp để dùng chung cho mọi nhãn kỳ
 
 function _formatTime(ts) {
     if (!ts) return '';
@@ -217,7 +301,20 @@ function _getPaymentMethodIcon(method) {
     if (method === 'grab') return '\uD83D\uDE95';
     if (method === 'debt') return '\uD83D\uDCA2';
     if (method === 'debt_payment') return '\uD83D\uDCB8';
+    if (method === 'prepayment') return '\uD83E\uDDFE';
     return '\uD83D\uDCB5';
+}
+
+// Nhãn phương thức thanh toán dùng chung (kể cả prepayment)
+function _managerPaymentMethodLabel(method) {
+    if (method === 'cash') return 'Tiền mặt';
+    if (method === 'transfer') return 'Chuyển khoản';
+    if (method === 'grab') return 'Grab';
+    if (method === 'credit') return 'Tiền dư';
+    if (method === 'debt_payment') return 'Thanh toán nợ';
+    if (method === 'prepayment') return 'Thanh toán trước';
+    if (method === 'debt') return 'Ghi nợ';
+    return '';
 }
 
 // ========== HÀM HELPER: NHÓM GIAO DỊCH THEO NGÀY ==========
@@ -253,14 +350,14 @@ function _groupTransactionsByDay(transactions, filter, getMethodFromTx) {
         var methodList = [];
         var methodMap = dm.methods;
         var methodKeys = Object.keys(methodMap);
-        var methodOrder = { cash: 0, transfer: 1, grab: 2, credit: 3, debt_payment: 4 };
+        var methodOrder = { cash: 0, transfer: 1, grab: 2, credit: 3, debt_payment: 4, prepayment: 5 };
         methodKeys.sort(function(a, b) {
             return (methodOrder[a] || 99) - (methodOrder[b] || 99);
         });
         for (var mk = 0; mk < methodKeys.length; mk++) {
             var mn = methodKeys[mk];
             // Chỉ hiển thị các method đã biết, bỏ qua method lạ
-            var label = mn === 'cash' ? 'Ti\u1EC1n m\u1EB7t' : mn === 'transfer' ? 'Chuy\u1EC3n kho\u1EA3n' : mn === 'grab' ? 'Grab' : mn === 'credit' ? 'Ti\u1EC1n d\u01B0' : mn === 'debt_payment' ? 'Thanh to\u00E1n n\u1EE3' : null;
+            var label = _managerPaymentMethodLabel(mn);
             if (!label) continue;
             var icon = _getPaymentMethodIcon(mn);
             methodList.push({ icon: icon, label: label, amount: methodMap[mn].amount, count: methodMap[mn].count });
@@ -444,7 +541,7 @@ function _renderMDData(body, summary, data, summaryFn) {
                     icon = _getPaymentMethodIcon(tx.paymentMethod || 'cash');
                     label = tx.note || tx.tableName || (tx.type === 'takeaway' ? 'Mang \u0111i' : (tx.type === 'grab' ? 'Grab' : 'T\u1EA1i ch\u1ED7'));
                     if (tx.customer && tx.customer.name) label = tx.customer.name;
-                    sub = _formatTime(tx.createdAt || tx.date) + ' - ' + (tx.paymentMethod === 'cash' ? 'Ti\u1EC1n m\u1EB7t' : tx.paymentMethod === 'transfer' ? 'CK' : tx.paymentMethod === 'grab' ? 'Grab' : 'N\u1EE3');
+                    sub = _formatTime(tx.createdAt || tx.date) + ' - ' + (_managerPaymentMethodLabel(tx.paymentMethod) || 'Khác');
                 }
                 html += '<div class="manager-detail-item">' +
                     '<div class="item-left">' +
@@ -826,22 +923,22 @@ function showManagerDebtOccurDetail() {
                     if (cust.debtHistory && cust.debtHistory.length > 0) {
                         for (var hi = 0; hi < cust.debtHistory.length; hi++) {
                             var dh = cust.debtHistory[hi];
-                            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
+                            var dhDate = _managerHistoryDateKey(dh);
                             if (dhDate >= range.startStr && dhDate <= range.endStr) {
                                 if (!dayMap[dhDate]) {
                                     dayMap[dhDate] = { dateKey: dhDate, methods: {}, items: [], total: 0 };
                                 }
-                                dayMap[dhDate].total += Math.abs(dh.amount || 0);
+                                dayMap[dhDate].total += _managerAbsAmount(dh.amount);
                                 var methodKey = 'debt';
                                 if (!dayMap[dhDate].methods[methodKey]) dayMap[dhDate].methods[methodKey] = 0;
-                                dayMap[dhDate].methods[methodKey] += Math.abs(dh.amount || 0);
+                                dayMap[dhDate].methods[methodKey] += _managerAbsAmount(dh.amount);
                                 dayMap[dhDate].items.push({
                                     icon: '\uD83D\uDC64',
                                     label: cust.name || 'Kh\u00E1ch ' + cust.id,
                                     sub: cust.phone || '',
-                                    amount: Math.abs(dh.amount || 0)
+                                    amount: _managerAbsAmount(dh.amount)
                                 });
-                                grandTotal += Math.abs(dh.amount || 0);
+                                grandTotal += _managerAbsAmount(dh.amount);
                             }
                         }
                     }
@@ -883,9 +980,9 @@ function showManagerDebtOccurDetail() {
                     if (cust.debtHistory && cust.debtHistory.length > 0) {
                         for (var hi = 0; hi < cust.debtHistory.length; hi++) {
                             var dh = cust.debtHistory[hi];
-                            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
+                            var dhDate = _managerHistoryDateKey(dh);
                             if (dhDate >= range.startStr && dhDate <= range.endStr) {
-                                total += Math.abs(dh.amount || 0);
+                                total += _managerAbsAmount(dh.amount);
                             }
                         }
                     }
@@ -1264,7 +1361,7 @@ function updateManagerBigValues(startStr, endStr) {
         var allPickups = masterData.pickups || [];
 
         // Lọc transactions không bị refund
-        var validTx = transactions.filter(function(t) { return !t.refunded; });
+        var validTx = _managerFilterPOSShop(_managerFilterPOSDate(transactions, startStr, endStr)).filter(function(t) { return !t.refunded; });
 
         // Tính tổng doanh thu = cash + transfer + grab + debtPayment + prepayment (không gồm debt)
         // - paymentMethod === 'debt': ghi nợ (mua chịu) -> loại bỏ
@@ -1384,7 +1481,8 @@ function _managerCustomerDebt(c) {
         var outstanding = _calcOutstandingDebt(c);
         return outstanding > 0 ? outstanding : 0;
     }
-    return (c && c.totalDebt) || 0;
+    var fallback = (c && c.totalDebt) || 0;
+    return fallback > 0 ? fallback : 0;
 }
 
 // Tổng nợ phát sinh trong kỳ từ debtHistory của tất cả khách hàng
@@ -1395,9 +1493,9 @@ function _managerDebtOccurTotal(customers, startStr, endStr) {
         var history = (list[i] && list[i].debtHistory) || [];
         for (var j = 0; j < history.length; j++) {
             var dh = history[j] || {};
-            var dhDate = dh.dateKey || (dh.date ? dh.date.slice(0, 10) : '');
+            var dhDate = _managerHistoryDateKey(dh);
             if (dhDate >= startStr && dhDate <= endStr) {
-                total += Math.abs(dh.amount || 0);
+                total += _managerAbsAmount(dh.amount);
             }
         }
     }
@@ -1412,6 +1510,7 @@ function refreshManagerCurrentView() {
     if (typeof _doRenderManagerFilter === 'function') {
         var range = window._managerCurrentRange || _getManagerDateRange();
         _doRenderManagerFilter(range.startStr, range.endStr, container);
+        _managerViewDirty = false;
     }
 }
 window.refreshManagerCurrentView = refreshManagerCurrentView;
@@ -1476,11 +1575,11 @@ if (document.readyState === 'loading') {
 // Hàm này được gọi từ app.js switchTab và realtime.js khi có data thay đổi
 function managerApplyFilter() {
     var container = document.getElementById('managerExpenseList');
-    if (!container) return;
+    // Không return sớm: vẫn tính range cho mọi box dù container chưa có
 
     // Lấy period từ select
     var modeSelect = document.getElementById('managerViewModeSelect');
-    var mode = modeSelect ? modeSelect.value : 'period';
+    var mode = (modeSelect ? modeSelect.value : (window.managerState && window.managerState.mode) || 'period');
 
     // Tính date range với offset (prev/next)
     var offset = window.managerPeriodOffset || 0;
@@ -1562,24 +1661,36 @@ function managerApplyFilter() {
     };
     window._managerCurrentRange = _managerCurrentRange; // Đồng bộ global
 
-    // Cập nhật label cho tất cả option
+    window.managerState = {
+        mode: mode,
+        start: startStr,
+        end: endStr,
+        startStr: startStr,
+        endStr: endStr
+    };
+
+    // Cập nhật label cho tất cả option bằng helper dùng chung
     if (modeSelect) {
-        var labelPeriod = 'Kỳ ' + formatDateDisplay(startStr) + ' → ' + formatDateDisplay(endStr);
+        var labelPeriod = _getManagerPeriodLabel('period', startStr, endStr);
         var monthLabelDate = mode === 'day' ? startDate : new Date(now.getFullYear(), now.getMonth() + offset, 1);
-        var labelMonth = 'Tháng ' + (monthLabelDate.getMonth() + 1) + '/' + monthLabelDate.getFullYear();
-        var labelDay = 'Ngày ' + formatDateDisplay(startStr);
+        var labelMonth = _getManagerPeriodLabel('month', monthLabelDate, monthLabelDate);
+        var labelDay = _getManagerPeriodLabel('day', startDate, startDate);
         modeSelect.options[0].innerText = labelPeriod;
         modeSelect.options[1].innerText = labelMonth;
         modeSelect.options[2].innerText = labelDay;
     }
 
+    if (!container) return; // chỉ bỏ render, range đã được cập nhật
+
     // Luôn load dữ liệu mới nhất từ DB trước khi render
     if (typeof loadExpenseData === 'function') {
         loadExpenseData().then(function() {
             _doRenderManagerFilter(startStr, endStr, container);
+            _managerViewDirty = false;
         });
     } else {
         _doRenderManagerFilter(startStr, endStr, container);
+        _managerViewDirty = false;
     }
 }
 
@@ -1660,7 +1771,7 @@ function _doRenderManagerFilter(startStr, endStr, container) {
             for (var pj = 0; pj < posArr.length; pj++) {
                 var g = posArr[pj];
                 var typeIcon = g.costType === 'ingredient' ? '🧂' : '📦';
-                html += '<div class="cost-item" style="cursor:pointer;" onclick="_showCostHistory(\'' + encodeURIComponent(g.name) + '\',\'' + startStr + '\',\'' + endStr + '\')">' +
+                html += '<div class="cost-item" style="cursor:pointer;" onclick="_showCostHistory(\'' + encodeURIComponent(g.name) + '\',\'' + startStr + '\',\'' + endStr + '\',\'pos_cash\')">' +
                     '<div style="flex:1;">' +
                         '<div>' + typeIcon + ' <strong>' + escapeHtml(g.name) + '</strong> <span style="font-size:11px;color:#94a3b8;">(' + g.count + ' giao dịch)</span></div>' +
                     '</div>' +
@@ -1682,7 +1793,7 @@ function _doRenderManagerFilter(startStr, endStr, container) {
             for (var qj = 0; qj < qlArr.length; qj++) {
                 var g2 = qlArr[qj];
                 var typeIcon2 = g2.costType === 'ingredient' ? '🧂' : '📦';
-                html += '<div class="cost-item" style="cursor:pointer;" onclick="_showCostHistory(\'' + encodeURIComponent(g2.name) + '\',\'' + startStr + '\',\'' + endStr + '\')">' +
+                html += '<div class="cost-item" style="cursor:pointer;" onclick="_showCostHistory(\'' + encodeURIComponent(g2.name) + '\',\'' + startStr + '\',\'' + endStr + '\',\'management\')">' +
                     '<div style="flex:1;">' +
                         '<div>' + typeIcon2 + ' <strong>' + escapeHtml(g2.name) + '</strong> <span style="font-size:11px;color:#94a3b8;">(' + g2.count + ' giao dịch)</span></div>' +
                     '</div>' +
@@ -1725,14 +1836,15 @@ function _doRenderManagerFilter(startStr, endStr, container) {
 
 // ========== MANAGER TAB: LỊCH SỬ MUA SẮM CHI PHÍ ==========
 // Hiển thị modal lịch sử mua sắm của một nguyên liệu/hao phí
-function _showCostHistory(encodedName, startStr, endStr) {
+function _showCostHistory(encodedName, startStr, endStr, fundSource) {
     var categoryName = decodeURIComponent(encodedName);
     // Load dữ liệu mới nhất từ DB để đảm bảo đầy đủ
     loadExpenseData().then(function() {
         var allCosts = expenseData.transactions || [];
         // Lọc giao dịch của categoryName này trong khoảng thời gian
         var items = allCosts.filter(function(c) {
-            return c.categoryName === categoryName && c.dateKey >= startStr && c.dateKey <= endStr && !c.deleted;
+            return c.categoryName === categoryName && c.dateKey >= startStr && c.dateKey <= endStr && !c.deleted &&
+                c.fundSource === fundSource;
         });
         if (items.length === 0) return;
 
@@ -1783,20 +1895,20 @@ function _showCostHistory(encodedName, startStr, endStr) {
         }
         html += '</div>';
 
-        // Hiển thị trong modal bottom sheet
-        var modal = document.getElementById('managerDetailModal');
+        // Hiển thị trong modal bottom sheet (id riêng, không đè modal chi tiết)
+        var modal = document.getElementById('managerCostHistoryModal');
         if (!modal) {
             // Tạo modal nếu chưa có
             modal = document.createElement('div');
-            modal.id = 'managerDetailModal';
+            modal.id = 'managerCostHistoryModal';
             modal.className = 'modal';
             modal.innerHTML = '<div class="modal-content" style="max-width:500px;">' +
-                '<div class="modal-header"><h3>📋 Lịch sử mua sắm</h3><span class="modal-close" onclick="closeModal(\'managerDetailModal\')">&times;</span></div>' +
-                '<div class="modal-body" id="managerDetailModalBody"></div></div>';
+                '<div class="modal-header"><h3>📋 Lịch sử mua sắm</h3><span class="modal-close" onclick="closeModal(\'managerCostHistoryModal\')">&times;</span></div>' +
+                '<div class="modal-body" id="managerCostHistoryModalBody"></div></div>';
             document.body.appendChild(modal);
         }
-        document.getElementById('managerDetailModalBody').innerHTML = html;
-        openBottomSheet('managerDetailModal');
+        document.getElementById('managerCostHistoryModalBody').innerHTML = html;
+        openBottomSheet('managerCostHistoryModal');
     });
 }
 
@@ -1805,8 +1917,8 @@ function renderDrinkStats(startStr, endStr) {
     var container = document.getElementById('managerDrinkStats');
     if (!container) return;
 
-    DB.getTransactionsByDateRange(startStr, endStr).then(function(transactions) {
-        var validTx = transactions.filter(function(t) { return !t.refunded; });
+    _getManagerTransactions(startStr, endStr).then(function(transactions) {
+        var validTx = _managerFilterPOSShop(_managerFilterPOSDate(transactions, startStr, endStr)).filter(function(t) { return !t.refunded; });
 
         // Đếm đồ uống theo tên
         var drinkMap = {};
@@ -2074,11 +2186,15 @@ function renderIngredientStats(startStr, endStr) {
             for (var ci = 0; ci < allCosts.length; ci++) {
                 var ct = allCosts[ci];
                 if (ct.costType === 'ingredient' && ct.ingredientId && ct.ingredientUnitPrice && !ct.deleted) {
+                    var ctKey = ct.dateKey || _managerToDateKey(ct.createdAt || ct.date);
+                    // Chỉ dùng đơn giá có hiệu lực trước/tại kỳ đang xem, không lấy giá tương lai
+                    if (ctKey && ctKey > endStr) continue;
                     var cid = String(ct.ingredientId);
-                    if (!costIngMap[cid] || ct.createdAt > costIngMap[cid].createdAt) {
+                    var ctOrder = ctKey || String(ct.createdAt || '');
+                    if (!costIngMap[cid] || ctOrder > costIngMap[cid].order) {
                         costIngMap[cid] = {
                             unitPrice: ct.ingredientUnitPrice,
-                            createdAt: ct.createdAt
+                            order: ctOrder
                         };
                     }
                 }
@@ -2228,8 +2344,9 @@ function renderLowStockAlert() {
     // Luôn load ingredients từ DB để đảm bảo tồn kho mới nhất
     if (typeof DB !== 'undefined' && DB.getAll) {
         DB.getAll('ingredients').then(function(dbList) {
-            window.ingredients = dbList;
-            _doRenderLowStock(dbList, container);
+            // Không ghi đè window.ingredients đang dùng bởi các tab khác
+            var freshList = dbList || [];
+            _doRenderLowStock(freshList, container);
         }).catch(function() {
             container.innerHTML = '<div class="empty-state">📭 Không có nguyên liệu</div>';
         });
@@ -2247,6 +2364,8 @@ function renderLowStockAlert() {
 // Biến tracking để tránh gửi Telegram trùng lặp
 var _lastLowStockAlert = 0; // timestamp lần gửi gần nhất
 var _lastLowStockItems = ''; // JSON string của danh sách để so sánh
+var _lastLowStockSignature = ''; // chữ ký dữ liệu low-stock đã render
+var _lowStockContainerRendered = false;
 
 function _doRenderLowStock(ingredients, container) {
     // Lọc nguyên liệu tồn kho thấp (dùng minStock, giống inventory-manager.js)
@@ -2261,6 +2380,17 @@ function _doRenderLowStock(ingredients, container) {
             lowItems.push(ing);
         }
     }
+
+    // Chỉ render lại khi dữ liệu tồn kho thực sự đổi; vẫn cho phép kiểm tra Telegram
+    var lowSignature = lowItems.map(function(ing) {
+        return ing.id + ':' + (parseFloat(ing.stock) || 0) + '/' + (parseFloat(ing.minStock) || 0);
+    }).join(';');
+    if (_lowStockContainerRendered && lowSignature === _lastLowStockSignature) {
+        _sendLowStockTelegram(lowItems);
+        return;
+    }
+    _lastLowStockSignature = lowSignature;
+    _lowStockContainerRendered = true;
 
     if (lowItems.length === 0) {
         container.innerHTML = '<div class="empty-state" style="color:#16a34a;">✅ Tất cả nguyên liệu đều đủ tồn kho</div>';
@@ -2479,19 +2609,19 @@ function _showDebtPaymentHistory(encodedId, encodedName, startStr, endStr) {
         }
         html += '</div>';
 
-        // Hiển thị trong modal bottom sheet
-        var modal = document.getElementById('managerDetailModal');
+        // Hiển thị trong modal bottom sheet (id riêng, không đè modal lịch sử chi phí)
+        var modal = document.getElementById('managerDebtHistoryModal');
         if (!modal) {
             modal = document.createElement('div');
-            modal.id = 'managerDetailModal';
+            modal.id = 'managerDebtHistoryModal';
             modal.className = 'modal';
             modal.innerHTML = '<div class="modal-content" style="max-width:500px;">' +
-                '<div class="modal-header"><h3>🧾 Lịch sử công nợ</h3><span class="modal-close" onclick="closeModal(\'managerDetailModal\')">&times;</span></div>' +
-                '<div class="modal-body" id="managerDetailModalBody"></div></div>';
+                '<div class="modal-header"><h3>🧾 Lịch sử công nợ</h3><span class="modal-close" onclick="closeModal(\'managerDebtHistoryModal\')">&times;</span></div>' +
+                '<div class="modal-body" id="managerDebtHistoryModalBody"></div></div>';
             document.body.appendChild(modal);
         }
-        document.getElementById('managerDetailModalBody').innerHTML = html;
-        openBottomSheet('managerDetailModal');
+        document.getElementById('managerDebtHistoryModalBody').innerHTML = html;
+        openBottomSheet('managerDebtHistoryModal');
     });
 }
 

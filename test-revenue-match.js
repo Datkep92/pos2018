@@ -197,6 +197,100 @@ var tests = [
         });
     });
 
+    // ---- manager-detail.js: test hồi quy cho cache/nợ/nhãn/prepayment ----
+    chain = chain.then(function () {
+        group('MANAGER-DETAIL: CACHE THEO QUAN');
+        var mdSrc = fs.readFileSync(path.join(__dirname, '.', 'manager-detail.js'), 'utf8');
+        var MD_SHOP = 'shop1';
+        var MD_DB = [];
+        var MD_RANGE = [];
+        var MD_DATE_CALLS = 0;
+        var sbM = {
+            console: { log: function () { }, warn: function () { }, error: function () { } },
+            Date: Date, Math: Math, JSON: JSON, String: String, Array: Array, Number: Number,
+            Object: Object, parseInt: parseInt, parseFloat: parseFloat, isNaN: isNaN, isFinite: isFinite,
+            Promise: Promise, RegExp: RegExp,
+            formatDateDisplay: function (s) { return s; },
+            filterPOSDataByDateRange: function (arr, a, b) {
+                MD_DATE_CALLS++;
+                return arr.filter(function (t) { var dk = String(t.dateKey || ''); return dk >= a && dk <= b; });
+            },
+            DB: {
+                getShopId: function () { return MD_SHOP; },
+                getMemoryCache: function () { return []; },
+                getTransactionsByDateRange: function (a, b) {
+                    MD_RANGE.push([a, b, MD_SHOP]);
+                    return Promise.resolve(MD_DB.slice());
+                }
+            },
+            document: { getElementById: function () { return null; } }
+        };
+        sbM.window = sbM;
+        var ctxM = vm.createContext(sbM);
+        vm.runInContext('var _managerTxCache = null; var _managerMasterCache = null; var _MANAGER_CACHE_TTL = 60000; var _managerViewDirty = false;', ctxM);
+        var NEED_M = ['_managerToDateKey', '_managerHistoryDateKey', '_managerAbsAmount', '_managerAsArray',
+            '_managerUnionById', '_managerFilterPOSDate', '_managerFilterPOSShop', '_managerCacheShopId',
+            '_getManagerTransactions', '_managerDebtOccurTotal', '_managerCustomerDebt',
+            '_getManagerPeriodLabel', '_managerPaymentMethodLabel'];
+        vm.runInContext(NEED_M.map(function (f) { return ex(mdSrc, f); }).join('\n\n'), ctxM);
+        NEED_M.forEach(function (f) { sbM[f] = vm.runInContext(f, ctxM); });
+
+        MD_DB = [
+            { id: 'a1', shopId: 'shop1', dateKey: '2026-08-15', amount: 100 },
+            { id: 'b1', shopId: 'shop2', dateKey: '2026-08-15', amount: 200 }
+        ];
+        return sbM._getManagerTransactions('2026-08-01', '2026-08-31').then(function (r1) {
+            eq('cache shop1: chi lay giao dich shop1', r1.length, 1);
+            eq('cache shop1: id dung', r1[0] && r1[0].id, 'a1');
+            eq('DB.getTransactionsByDateRange duoc goi', MD_RANGE.length, 1);
+            MD_SHOP = 'shop2';
+            return sbM._getManagerTransactions('2026-08-01', '2026-08-31').then(function (r2) {
+                eq('cache shop2: khong dung cache shop1', r2[0] && r2[0].id, 'b1');
+                eq('DB duoc goi lai khi doi quan', MD_RANGE.length, 2);
+                MD_SHOP = 'shop1';
+                return sbM._getManagerTransactions('2026-08-01', '2026-08-31').then(function (r3) {
+                    eq('quay lai shop1: khong lay du lieu shop2', r3.length === 1 && r3[0].id, 'a1');
+                    eq('doi quan quay lai: goi DB lay du lieu shop moi', MD_RANGE.length, 3);
+                    ok('loc ngay dung helper dung chung', MD_DATE_CALLS >= 4, 'so lan goi = ' + MD_DATE_CALLS);
+                });
+            });
+        });
+    });
+
+    chain = chain.then(function () {
+        group('MANAGER-DETAIL: NO AM/DUONG VA NHAN KY');
+        var mdSrc = fs.readFileSync(path.join(__dirname, '.', 'manager-detail.js'), 'utf8');
+        var sbM = {
+            console: { log: function () { }, warn: function () { }, error: function () { } },
+            Date: Date, Math: Math, JSON: JSON, String: String, Array: Array, Number: Number,
+            Object: Object, parseInt: parseInt, parseFloat: parseFloat, isNaN: isNaN, isFinite: isFinite,
+            Promise: Promise, RegExp: RegExp,
+            formatDateDisplay: function (s) { return s; },
+            _calcOutstandingDebt: function () { return -500; }
+        };
+        sbM.window = sbM;
+        var ctxM = vm.createContext(sbM);
+        var NEED_M = ['_managerToDateKey', '_managerHistoryDateKey', '_managerAbsAmount',
+            '_managerDebtOccurTotal', '_managerCustomerDebt', '_getManagerPeriodLabel',
+            '_managerPaymentMethodLabel'];
+        vm.runInContext(NEED_M.map(function (f) { return ex(mdSrc, f); }).join('\n\n'), ctxM);
+        NEED_M.forEach(function (f) { sbM[f] = vm.runInContext(f, ctxM); });
+
+        var khach = [{ debtHistory: [
+            { dateKey: '2026-08-10', amount: -120000 },
+            { dateKey: '2026-08-11', amount: 50000 },
+            { dateKey: '2026-09-21', amount: 999999 }
+        ] }];
+        eq('no phat sinh: lay gia tri tuyet doi, dung ky', sbM._managerDebtOccurTotal(khach, '2026-08-01', '2026-08-31'), 170000);
+        eq('no tong fallback am -> 0', sbM._managerCustomerDebt({ totalDebt: 300 }), 0);
+        eq('nhan ky', sbM._getManagerPeriodLabel('period', '2026-08-20', '2026-09-19'), 'Kỳ 2026-08-20 → 2026-09-19');
+        eq('nhan thang', sbM._getManagerPeriodLabel('month', '2026-08-01', '2026-08-31'), 'Tháng 8/2026');
+        eq('nhan ngay', sbM._getManagerPeriodLabel('day', '2026-08-20', '2026-08-20'), 'Ngày 2026-08-20');
+        eq('nhan prepayment', sbM._managerPaymentMethodLabel('prepayment'), 'Thanh toán trước');
+        ok('prepayment co trong thu tu nhom chi tiet', /methodOrder\s*=\s*\{[^}]*prepayment\s*:\s*5/.test(mdSrc));
+        ok('chi tiet dung helper nhan thanh toan', /_managerPaymentMethodLabel\(tx\.paymentMethod\)/.test(mdSrc));
+    });
+
     chain.then(function () {
         console.log('\n=========================================');
         console.log('  TONG: ' + (pass + fail) + ' assertions');

@@ -26,6 +26,13 @@ var _expenseViewDateKey = '';
 
 // ========== TIỆN ÍCH DÙNG CHUNG ==========
 
+// Chỉ làm mới tab quản lý khi tab đó đang mở, để không đổi kỳ/điều hướng
+// người dùng trong lúc họ đang ở tab Chi phí hoặc tab khác.
+function _isManagerViewActive() {
+    // currentTab là biến toàn cục của pos-app.js (window.currentTab trên trình duyệt)
+    return typeof window !== 'undefined' && window.currentTab === 'manager';
+}
+
 // Thêm số 0 phía trước cho giá trị 1 chữ số.
 // KHÔNG dùng padStart (ES2017) vì WebView Android 6 stock (Chrome 44) không có,
 // sẽ làm hỏng toàn bộ tab Chi phí trên máy cũ.
@@ -108,7 +115,7 @@ function initExpense() {
         console.log('Expense module initialized');
         // Cập nhật lại kết quả tab quản lý sau khi expense data đã load (không đổi kỳ)
         // Chỉ vẽ lại đúng kỳ/đúng tab hiện tại; không gọi managerApplyFilter() vì hàm đó đổi kỳ và reload toàn tab.
-        if (typeof refreshManagerCurrentView === 'function') {
+        if (_isManagerViewActive() && typeof refreshManagerCurrentView === 'function') {
             refreshManagerCurrentView();
         }
     }).catch(function(err) {
@@ -972,7 +979,7 @@ function saveIngredientExpense(ingredientId, ingredientName, qty, amount, fundSo
         renderIngredientList();
         renderTodayExpenses();
         renderMonthExpenseTotal();
-        if (typeof refreshManagerCurrentView === 'function') refreshManagerCurrentView();
+        if (_isManagerViewActive() && typeof refreshManagerCurrentView === 'function') refreshManagerCurrentView();
     }).catch(function(err) {
         console.error('Save ingredient expense error:', err);
         _endSave();

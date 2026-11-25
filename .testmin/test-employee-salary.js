@@ -34,7 +34,13 @@ sandbox.empFormatCurrency = function (n) { return String(Math.round(n || 0)); };
 
 var NEED = ['empGetDaysInMonth', 'empGetDaysInPeriod', 'empGetCurrentPeriod',
     'empCalculateRevenueBonus', 'empCalculateStaffSalary', '_updateRevenueCacheEntry',
-    '_empSanitizeAttendance', '_empTxDateKey'];
+    '_empSanitizeAttendance', '_empTxDateKey', 'empGetShopId', 'empChangePeriod',
+    '_getEmpManagerTotalSalary', '_setEmpManagerTotalSalary', '_invalidateEmpManagerCache',
+    '_empHasRevenueForPeriod', '_empApplySavedSalary', 'empResetSalaryInputs',
+    'empReloadSavedSalary'];
+sandbox._empManagerCache = { totalSalary: null, period: null, shopId: null, timestamp: 0, TTL: 30000 };
+sandbox._empLastRecalculateTime = {};
+sandbox.DB = { getShopId: function () { return 'shop_default'; } };
 var ctx = vm.createContext(sandbox);
 vm.runInContext(NEED.map(ex).join('\n\n'), ctx);
 NEED.forEach(function (f) { sandbox[f] = vm.runInContext(f, ctx); });
@@ -42,7 +48,7 @@ sandbox.EMP = vm.runInContext('EMP', ctx);
 
 console.log('TEST LUONG + THUONG NHAN VIEN (nap ham that tu employees.js)');
 
-(function () {
+(async function () {
     var EMP = sandbox.EMP;
 
     // -----------------------------------------------------------------
@@ -294,6 +300,97 @@ console.log('TEST LUONG + THUONG NHAN VIEN (nap ham that tu employees.js)');
     eq('khong co gi -> rong', sandbox._empTxDateKey({}), '');
     eq('null -> rong', sandbox._empTxDateKey(null), '');
     eq('timestamp 0 -> rong', sandbox._empTxDateKey({ createdAt: 0 }), '');
+
+    // -----------------------------------------------------------------
+    group('L14: LUONG SAVE XONG NAP LAI TU FIREBASE');
+    sandbox.DB.getShopId = function () { return 'shop_A'; };
+    var savedRow = { dailySalary: 950000, manualBonus: 120000, manualPenalty: 30000, revenueBonusEnabled: true };
+    ok('ap dung ban ghi da luu vao cache', sandbox._empApplySavedSalary('s1', '2026-08', savedRow));
+    eq('doc lai dailySalary tu cache', EMP.salaryCache.s1['2026-08'].dailySalary, 950000);
+    eq('khong ghi ban ghi rong', sandbox._empApplySavedSalary('s1', '2026-08', null), false);
+
+    var onceVal = { dailySalary: 1200000, manualBonus: 50000, manualPenalty: 0, revenueBonusEnabled: false };
+    sandbox.firebase = {
+        database: function () {
+            return { ref: function () {
+                return { once: function () { return Promise.resolve({ val: function () { return onceVal; } }); } };
+            } };
+        }
+    };
+    var managerCalledWith = null;
+    var renderCount = 0;
+    sandbox.empUpdateManagerButton = function (p) { managerCalledWith = p; };
+    sandbox.empRenderStaffDetail = function () { renderCount++; };
+    EMP.currentStaffId = 's1';
+    EMP.currentPeriod = '2026-08';
+    EMP.staffs = [{ id: 's1', dailySalary: 900000 }];
+    var reloadDone = false;
+    await new Promise(function (resolve) {
+        sandbox.empReloadSavedSalary('s1', '2026-08', function () { reloadDone = true; resolve(); });
+    });
+    ok('callback chay sau khi nap lai', reloadDone);
+    eq('cache lay gia tri Firebase moi', EMP.salaryCache.s1['2026-08'].dailySalary, 1200000);
+    eq('da render lai chi tiet', renderCount, 1);
+    eq('cap nhat lai nut tong luong', managerCalledWith, '2026-08');
+
+    // -----------------------------------------------------------------
+    group('L15: CACHE TONG LUONG THEO QUAN');
+    sandbox._setEmpManagerTotalSalary('2026-08', 'shop_A', 12345);
+    eq('cache hit cung quán', sandbox._getEmpManagerTotalSalary('2026-08', 'shop_A'), 12345);
+    eq('cache miss doi quán', sandbox._getEmpManagerTotalSalary('2026-08', 'shop_B'), null);
+    sandbox._invalidateEmpManagerCache();
+    eq('xoa cache', sandbox._getEmpManagerTotalSalary('2026-08', 'shop_A'), null);
+    eq('empGetShopId doc tu DB', sandbox.empGetShopId(), 'shop_A');
+
+    // -----------------------------------------------------------------
+    group('L16: PREV/NEXT KY NAP DOANH THU MOI');
+    EMP._revenueCache = { '2026-08-01': 500, '2026-08-02': 600 };
+    ok('co doanh thu thang 8', sandbox._empHasRevenueForPeriod('2026-08'));
+    ok('khong co doanh thu thang 9', !sandbox._empHasRevenueForPeriod('2026-09'));
+
+    var labelEl = { textContent: '' };
+    var origGet = sandbox.document.getElementById;
+    sandbox.document.getElementById = function (id) {
+        if (id === 'empPeriodLabel') return labelEl;
+        return origGet(id);
+    };
+    var calledRevenue = null, calledButton = null, calledRecalc = null;
+    sandbox.empGetPeriodLabel = function (p) { return p; };
+    sandbox.empRecalculateDailyRevenueForPeriod = function (y, m) { calledRecalc = [y, m]; };
+    sandbox.empLoadRevenueData = function (y, m) { calledRevenue = [y, m]; };
+    sandbox.empUpdateManagerButton = function (p) { calledButton = p; };
+    sandbox._setEmpManagerTotalSalary('2026-08', 'shop_A', 999);
+    EMP.currentPeriod = '2026-08';
+    EMP.currentStaffId = null;
+    EMP._periodUserSelected = false;
+    sandbox.empChangePeriod(1);
+    eq('ky moi la thang 9', EMP.currentPeriod, '2026-09');
+    eq('nap doanh thu ky moi (thang)', calledRevenue[1], 9);
+    eq('tinh lai daily revenue ky moi (thang)', calledRecalc[1], 9);
+    eq('nut tong luong dung ky moi', calledButton, '2026-09');
+    eq('danh dau ky do nguoi chon', EMP._periodUserSelected, true);
+    eq('cache cu bi xoa khi doi ky', sandbox._empManagerCache.timestamp, 0);
+    sandbox.document.getElementById = origGet;
+
+    // -----------------------------------------------------------------
+    group('L17: RESET INPUT MODAL LUONG');
+    var inputs = {
+        empDetailDailySalary: { value: '111' },
+        empDetailBonus: { value: '222' },
+        empDetailPenalty: { value: '333' },
+        empDetailRevenueBonus: { checked: true }
+    };
+    var origGet2 = sandbox.document.getElementById;
+    sandbox.document.getElementById = function (id) { return inputs[id] || origGet2(id); };
+    sandbox.empResetSalaryInputs({ dailySalary: 800000, manualBonus: 10000, manualPenalty: 2000, revenueBonusEnabled: false });
+    eq('luong ngay duoc cap nhat', inputs.empDetailDailySalary.value, 800000);
+    eq('thuong duoc cap nhat', inputs.empDetailBonus.value, 10000);
+    eq('phat duoc cap nhat', inputs.empDetailPenalty.value, 2000);
+    eq('checkbox tat theo du lieu luu', inputs.empDetailRevenueBonus.checked, false);
+    sandbox.empResetSalaryInputs({});
+    eq('du lieu rong -> luong ngay ve 0', inputs.empDetailDailySalary.value, 0);
+    eq('du lieu rong -> checkbox ve false', inputs.empDetailRevenueBonus.checked, false);
+    sandbox.document.getElementById = origGet2;
 
     console.log('\n=========================================');
     console.log('  TONG: ' + (pass + fail) + ' assertions');

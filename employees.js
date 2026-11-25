@@ -65,6 +65,7 @@ var EMP = {
 var _empManagerCache = {
     totalSalary: null,   // Giá trị tổng lương đã cache
     period: null,        // Kỳ lương tương ứng
+    shopId: null,        // Quán hiện tại - thiếu field này thì đổi quán vẫn lấy nhầm lương quán cũ
     timestamp: 0,        // Thời điểm cache
     TTL: 30000           // 30 giây
 };
@@ -74,10 +75,11 @@ var _empManagerCache = {
  * @param {string} period - Kỳ lương YYYY-MM
  * @returns {number|null} - Giá trị cached hoặc null nếu miss
  */
-function _getEmpManagerTotalSalary(period) {
+function _getEmpManagerTotalSalary(period, shopId) {
     var now = Date.now();
     if (_empManagerCache.totalSalary !== null &&
         _empManagerCache.period === period &&
+        _empManagerCache.shopId === shopId &&
         (now - _empManagerCache.timestamp) < _empManagerCache.TTL) {
         return _empManagerCache.totalSalary;
     }
@@ -87,9 +89,10 @@ function _getEmpManagerTotalSalary(period) {
 /**
  * Lưu tổng lương vào cache.
  */
-function _setEmpManagerTotalSalary(period, value) {
+function _setEmpManagerTotalSalary(period, shopId, value) {
     _empManagerCache.totalSalary = value;
     _empManagerCache.period = period;
+    _empManagerCache.shopId = shopId;
     _empManagerCache.timestamp = Date.now();
 }
 
@@ -98,10 +101,99 @@ function _setEmpManagerTotalSalary(period, value) {
  */
 function _invalidateEmpManagerCache() {
     _empManagerCache.totalSalary = null;
+    _empManagerCache.period = null;
+    _empManagerCache.shopId = null;
     _empManagerCache.timestamp = 0;
 }
 
 // ============================================================
+/**
+ * Xóa toàn bộ cache lương/doanh thu khi đổi quán hoặc đổi dữ liệu lớn.
+ * Không gọi lại window.invalidateManagerCache() ở đây: hàm đó thuộc file khác.
+ */
+function _empInvalidateShopCache() {
+    _invalidateEmpManagerCache();
+    _empLastRecalculateTime = {};
+    EMP._revenueCache = {};
+    EMP._revenueLoading = {};
+    EMP._revenueCacheShopId = null;
+    EMP.salaryCache = {};
+    EMP.attendanceCache = {};
+    EMP._periodUserSelected = false;
+    EMP.currentPeriod = empGetCurrentPeriod();
+    if (EMP._salaryListener && typeof EMP._salaryListener.off === 'function') {
+        EMP._salaryListener.off();
+    }
+}
+
+/** Cache doanh thu phải có ít nhất một ngày của đúng tháng đang tính lương. */
+function _empHasRevenueForPeriod(period) {
+    var cache = EMP._revenueCache || {};
+    if (!period || typeof cache !== 'object') return false;
+    var prefix = String(period).slice(0, 7) + '-';
+    for (var k in cache) {
+        if (Object.prototype.hasOwnProperty.call(cache, k) && k.indexOf(prefix) === 0) return true;
+    }
+    return false;
+}
+
+/** Ghi bảng lương đọc được từ Firebase vào cache (dùng sau khi lưu / xem lại). */
+function _empApplySavedSalary(staffId, period, saved) {
+    if (!staffId || !period || !saved || typeof saved !== 'object') return false;
+    if (!EMP.salaryCache) EMP.salaryCache = {};
+    if (!EMP.salaryCache[staffId]) EMP.salaryCache[staffId] = {};
+    EMP.salaryCache[staffId][period] = saved;
+    return true;
+}
+
+/** Đồng bộ 4 input của modal chi tiết lương với dữ liệu đã lưu. */
+function empResetSalaryInputs(salaryData) {
+    var d = salaryData || {};
+    var values = {
+        dailySalary: d.dailySalary || 0,
+        manualBonus: d.manualBonus || 0,
+        manualPenalty: d.manualPenalty || 0,
+        revenueBonusEnabled: !!d.revenueBonusEnabled
+    };
+    var dailyEl = document.getElementById('empDetailDailySalary');
+    if (dailyEl) dailyEl.value = values.dailySalary;
+    var bonusEl = document.getElementById('empDetailBonus');
+    if (bonusEl) bonusEl.value = values.manualBonus;
+    var penaltyEl = document.getElementById('empDetailPenalty');
+    if (penaltyEl) penaltyEl.value = values.manualPenalty;
+    var revEl = document.getElementById('empDetailRevenueBonus');
+    if (revEl) revEl.checked = values.revenueBonusEnabled;
+    return values;
+}
+
+/** Nạp lại bản ghi vừa lưu từ Firebase rồi render lại chi tiết đang mở. */
+function empReloadSavedSalary(staffId, period, optCallback) {
+    function done() { if (typeof optCallback === 'function') optCallback(); }
+    if (!staffId || !period || typeof firebase === 'undefined' || !firebase.database) { done(); return; }
+    var shopId = empGetShopId();
+    firebase.database().ref(shopId + '/employee_salaries/' + staffId + '/' + period)
+        .once('value').then(function(snapshot) {
+            var saved = snapshot ? snapshot.val() : null;
+            if (!_empApplySavedSalary(staffId, period, saved)) return;
+            if (EMP.currentStaffId === staffId && EMP.currentPeriod === period &&
+                typeof empRenderStaffDetail === 'function') {
+                var found = null;
+                var all = EMP.staffs || [];
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] && all[i].id === staffId) { found = all[i]; break; }
+                }
+                if (found) {
+                    empRenderStaffDetail(found);
+                    empResetSalaryInputs(((EMP.salaryCache || {})[staffId] || {})[period]);
+                }
+            }
+            _invalidateEmpManagerCache();
+            if (typeof empUpdateManagerButton === 'function') empUpdateManagerButton(period);
+        }).catch(function(err) {
+            console.error('empReloadSavedSalary error:', err);
+        }).then(done);
+}
+
 // 3. HÀM TIỆN ÍCH
 // ============================================================
 
@@ -244,6 +336,9 @@ function openStaffManager() {
         return;
     }
 
+    // Vào tab là kỳ phải theo quán đang đăng nhập; cờ chọn kỳ trong modal chỉ có giá trị lần mở đó.
+    EMP._periodUserSelected = false;
+
     // Giữ nguyên EMP.currentPeriod nếu đã được đồng bộ từ managerApplyFilter(),
     // nếu chưa thì lấy period mặc định
     if (!EMP.currentPeriod) {
@@ -252,10 +347,11 @@ function openStaffManager() {
 
     // Chỉ tính lại daily_revenue nếu chưa tính trong vòng 5 phút
     var periodKey = EMP.currentPeriod;
+    var recalcKey = empGetShopId() + '|' + periodKey;
     var now = Date.now();
-    var lastCalc = _empLastRecalculateTime[periodKey] || 0;
+    var lastCalc = _empLastRecalculateTime[recalcKey] || 0;
     if ((now - lastCalc) > 300000) { // 5 phút
-        _empLastRecalculateTime[periodKey] = now;
+        _empLastRecalculateTime[recalcKey] = now;
 
         // Tính lại daily_revenue cho kỳ hiện tại để loại bỏ dữ liệu cũ chứa debt
         var periodParts = EMP.currentPeriod.split('-');
@@ -1302,6 +1398,15 @@ function empLoadRevenueData(year, month) {
     }
 
     var cacheKey = year + '-' + String(month).padStart(2, '0');
+    // Cache doanh thu/lương phải thuộc quán hiện tại. Đổi quán mà không xóa
+    // thì lương sẽ tính từ doanh thu của quán cũ.
+    var shopIdNow = empGetShopId();
+    if (EMP._revenueCacheShopId && EMP._revenueCacheShopId !== shopIdNow) {
+        EMP._revenueCache = {};
+        EMP._revenueLoading = {};
+        _invalidateEmpManagerCache();
+    }
+    EMP._revenueCacheShopId = shopIdNow;
     if (!EMP._revenueLoading) EMP._revenueLoading = {};
     // Chống gọi chồng nhau trong lúc đang tải. Cờ được XOÁ khi tải xong
     // (xem .finally ở cuối) để lần sau vào lại kỳ đó vẫn nạp lại được từ
@@ -1459,6 +1564,13 @@ function empOpenStaffDetail(staffId) {
             EMP.salaryCache[staffId][period].revenueBonusEnabled = staff.revenueBonusEnabled || false;
         }
         empRenderStaffDetail(staff);
+        var sdCur = (((EMP.salaryCache||{})[staffId])||{})[period] || {};
+        empResetSalaryInputs({
+            dailySalary: sdCur.dailySalary !== undefined ? sdCur.dailySalary : (staff.dailySalary || 0),
+            manualBonus: sdCur.manualBonus || 0,
+            manualPenalty: sdCur.manualPenalty || 0,
+            revenueBonusEnabled: sdCur.revenueBonusEnabled !== undefined ? sdCur.revenueBonusEnabled : !!staff.revenueBonusEnabled
+        });
     }).catch(function(err) {
         showToast('Lỗi tải thông tin nhân viên', 'error');
     });
@@ -1675,8 +1787,10 @@ function empBuildCalendar(period, staffId) {
     if (!attendance.offDays && !attendance.otDays) {
         attendance = (((EMP.attendanceCache||{})[staffId])||{})[monthKey] || attendance;
     }
-    var offDays = (attendance.offDays && Array.isArray(attendance.offDays)) ? attendance.offDays : [];
-    var otDays = (attendance.otDays && Array.isArray(attendance.otDays)) ? attendance.otDays : [];
+    // Lịch chỉ được đánh dấu ngày hợp lệ của đúng tháng đang xem.
+    var cleanAtt = _empSanitizeAttendance(attendance, year, month);
+    var offDays = cleanAtt.offDays;
+    var otDays = cleanAtt.otDays;
 
     var html = '';
 
@@ -1956,6 +2070,7 @@ function empChangePeriod(delta) {
     var newPeriod = year + '-' + String(month).padStart(2, '0');
     EMP.currentPeriod = newPeriod;
     EMP._periodUserSelected = true; // Kỳ này do người dùng chọn trong modal lương; managerApplyFilter() không được đè.
+    _invalidateEmpManagerCache(); // Kỳ mới: không dùng lại tổng lương đã cache của kỳ cũ.
     labelEl.textContent = empGetPeriodLabel(newPeriod);
 
     // Tính lại daily_revenue cho kỳ mới để loại bỏ dữ liệu cũ chứa debt
@@ -1963,6 +2078,7 @@ function empChangePeriod(delta) {
 
     // Load doanh thu cho kỳ mới
     empLoadRevenueData(year, month);
+    // Kỳ mới phải tự nạp doanh thu; cache tháng cũ không được dùng lại.
 
     // Refresh calendar và salary
     if (EMP.currentStaffId) {
@@ -1979,8 +2095,8 @@ function empChangePeriod(delta) {
         empRecalculateSalary();
     }
 
-    // Cập nhật nút tổng lương trên manager grid
-    empUpdateManagerButton();
+    // Cập nhật nút tổng lương trên manager grid cho đúng kỳ mới
+    empUpdateManagerButton(newPeriod);
 }
 
 // ============================================================
@@ -2134,6 +2250,8 @@ function empSaveStaffSalary(staffId) {
         EMP.salaryCache[staffId][period] = salaryData;
 
         if (statusEl) statusEl.textContent = '✅ Đã lưu bảng lương kỳ ' + period;
+        // Đọc lại bản ghi vừa ghi từ Firebase để cache không giữ giá trị cũ trong RAM.
+        empReloadSavedSalary(staffId, period);
         showToast('✅ Đã lưu bảng lương', 'success');
 
         // Refresh danh sách và cập nhật nút tổng lương
@@ -2249,6 +2367,12 @@ function empHandleAddStaff() {
         if (displayName) displayName.value = '';
         if (dailySalary) dailySalary.value = '0';
         if (revenueCheckbox) revenueCheckbox.checked = false;
+
+        // Thêm xong thì quay về kỳ hiện tại của quán, không giữ kỳ đã chọn trong modal.
+        EMP._periodUserSelected = false;
+        EMP.currentPeriod = empGetCurrentPeriod();
+        _invalidateEmpManagerCache();
+        if (typeof empUpdateManagerButton === 'function') empUpdateManagerButton(EMP.currentPeriod);
 
         // Reload danh sách
         empLoadStaffList();
@@ -2526,7 +2650,7 @@ function empUpdateManagerButton(optPeriod) {
     }
 
     // Kiểm tra cache trước - nếu còn hiệu lực thì dùng luôn, không tính toán
-    var cachedValue = _getEmpManagerTotalSalary(period);
+    var cachedValue = _getEmpManagerTotalSalary(period, shopId);
     if (cachedValue !== null) {
         el.textContent = empFormatCurrency(cachedValue);
         return;
@@ -2582,7 +2706,7 @@ function empUpdateManagerButton(optPeriod) {
                                 }
                             }
                             // Load revenue data nếu chưa có
-                            if (!EMP._revenueCache || Object.keys(EMP._revenueCache).length === 0) {
+                            if (!_empHasRevenueForPeriod(p)) {
                                 var pp = p.split('-');
                                 empLoadRevenueData(parseInt(pp[0]), parseInt(pp[1]));
                             }
@@ -2604,7 +2728,7 @@ function empUpdateManagerButton(optPeriod) {
         var daysInMonth = empGetDaysInMonth(year, month);
         // Đảm bảo _revenueCache có dữ liệu - nếu chưa có thì load
         var revenueCache = EMP._revenueCache || {};
-        var hasRevenueData = Object.keys(revenueCache).length > 0;
+        var hasRevenueData = _empHasRevenueForPeriod(period);
         if (!hasRevenueData) {
             empLoadRevenueData(year, month);
             // Nếu chưa có revenue data, giữ nguyên giá trị cũ trên UI, đợi load xong
@@ -2671,7 +2795,7 @@ function empUpdateManagerButton(optPeriod) {
         }
 
         // Lưu vào cache trước khi cập nhật UI
-        _setEmpManagerTotalSalary(period, totalSalary);
+        _setEmpManagerTotalSalary(period, shopId, totalSalary);
         el.textContent = empFormatCurrency(totalSalary);
     }
 
@@ -2722,6 +2846,9 @@ window.refreshAllStaffViews = refreshAllStaffViews;
 
 // Export cache invalidation cho db.js gọi khi transaction thay đổi
 window._invalidateEmpManagerCache = _invalidateEmpManagerCache;
+window._empInvalidateShopCache = _empInvalidateShopCache;
+window._empHasRevenueForPeriod = _empHasRevenueForPeriod;
+window.empResetSalaryInputs = empResetSalaryInputs;
 
 // Export cho settings.js (phân quyền)
 window.empLoadStaffPermissionList = empLoadStaffPermissionList;

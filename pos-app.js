@@ -226,7 +226,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Realtime + listener nền: chạy sau khi UI đã hiện
         setTimeout(function() {
             _updateLoadingText('Đang khởi tạo kết nối thời gian thực...');
-            initRealtime();
+            if (typeof initRealtime === 'function') initRealtime();
+            else console.warn('Realtime chưa sẵn sàng, bỏ qua khởi tạo');
         }, 0);
         
         initEventListeners();

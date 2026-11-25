@@ -41,16 +41,24 @@ function _getLatestActivityTime(c) {
 // ========== NGUỒN TÍNH NỢ DUY NHẤT ==========
 // Toàn bộ module dùng hàm này để suy ra nợ còn lại từ lịch sử,
 // thay vì tin vào field totalDebt (field này có thể lệch với lịch sử).
+// FIX: khoản đã hoàn tiền không được tính vào nợ, dù nằm ở lịch sử nợ
+// hay lịch sử trả nợ. Mọi vòng lặp trong renderCustomerList dùng chung quy tắc này.
+function _isRefundedCustomerEntry(entry) {
+    if (!entry) return true;
+    return entry.refunded === true || entry.refunded === 1 || entry.status === 'refunded';
+}
 function _calcOutstandingDebt(c) {
     if (!c) return 0;
     var total = 0;
     if (c.debtHistory) {
         for (var i = 0; i < c.debtHistory.length; i++) {
+            if (_isRefundedCustomerEntry(c.debtHistory[i])) continue;
             total += c.debtHistory[i].amount || 0;
         }
     }
     if (c.paymentHistory) {
         for (var j = 0; j < c.paymentHistory.length; j++) {
+            if (_isRefundedCustomerEntry(c.paymentHistory[j])) continue;
             total -= c.paymentHistory[j].amount || 0;
         }
     }
@@ -108,6 +116,25 @@ function _isCustomerCacheValid() {
     return (Date.now() - _customerCalcCache.lastRender) < _CUSTOMER_CACHE_TTL;
 }
 
+// FIX A: cache công nợ phải tự vô hiệu khi dữ liệu nguồn đổi, không chờ hết TTL 5 phút.
+var _customerCacheUnsubscribers = [];
+var _customerCacheWatching = false;
+function _watchCustomerCacheSources() {
+    if (_customerCacheWatching) return;
+    if (typeof window === 'undefined' || !window.DB || typeof window.DB.on !== 'function') return;
+    _customerCacheWatching = true;
+    var sources = ['customers:*', 'transactions:*', 'cost_transactions:*'];
+    for (var i = 0; i < sources.length; i++) {
+        (function(evt) {
+            var off = window.DB.on(evt, function() { _invalidateCustomerCalcCache(); });
+            if (typeof off === 'function') _customerCacheUnsubscribers.push(off);
+        })(sources[i]);
+    }
+}
+_watchCustomerCacheSources();
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('DOMContentLoaded', _watchCustomerCacheSources);
+}
 function renderCustomerList() {
     // FIX: Nếu đang trong quá trình render (gọi liên tiếp < 50ms), bỏ qua
     var now = Date.now();
@@ -115,6 +142,7 @@ function renderCustomerList() {
         return;
     }
     _customerRenderGuard = now;
+    _watchCustomerCacheSources();
     // Dùng memory cache, không query DB
     var keywordRaw = document.getElementById('customerSearchInput') ? document.getElementById('customerSearchInput').value : '';
     var keyword = _removeAccents(keywordRaw);
@@ -173,12 +201,14 @@ function renderCustomerList() {
             var totalFromHistory = 0;
             if (c.debtHistory) {
                 for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                    if (_isRefundedCustomerEntry(c.debtHistory[hi])) continue;
                     totalFromHistory += c.debtHistory[hi].amount || 0;
                 }
             }
             var totalPayment = 0;
             if (c.paymentHistory) {
                 for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                    if (_isRefundedCustomerEntry(c.paymentHistory[pi])) continue;
                     totalPayment += c.paymentHistory[pi].amount || 0;
                 }
             }
@@ -190,6 +220,7 @@ function renderCustomerList() {
             var paymentToday = 0;
             if (c.debtHistory) {
                 for (var hi = 0; hi < c.debtHistory.length; hi++) {
+                    if (_isRefundedCustomerEntry(c.debtHistory[hi])) continue;
                     if (_isTodayEntry(c.debtHistory[hi])) {
                         debtToday += c.debtHistory[hi].amount || 0;
                     }
@@ -197,6 +228,7 @@ function renderCustomerList() {
             }
             if (c.paymentHistory) {
                 for (var pi = 0; pi < c.paymentHistory.length; pi++) {
+                    if (_isRefundedCustomerEntry(c.paymentHistory[pi])) continue;
                     if (_isTodayEntry(c.paymentHistory[pi])) {
                         paymentToday += c.paymentHistory[pi].amount || 0;
                     }
